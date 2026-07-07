@@ -38,8 +38,8 @@ sh setup-links.sh
 
 ## 3. リポジトリ外ツールへ貼付（2件）
 
-- [roles/chatgpt.md](roles/chatgpt.md) の内容 → ChatGPTの **Project instructions**（カスタム指示）
-- [roles/codex.md](roles/codex.md) の内容 → Codexの **カスタム指示**
+- [docs/harness/roles/chatgpt.md](roles/chatgpt.md) の内容 → ChatGPTの **Project instructions**（カスタム指示）
+- [docs/harness/roles/codex.md](roles/codex.md) の内容 → Codexの **カスタム指示**
 
 > なぜ: ChatGPT/Codexはリポジトリのファイルを自動で読めない。**貼付元（`docs/harness/roles/`）が正本**で、
 > ツール側はその写し（既知の負債＝手動同期）。

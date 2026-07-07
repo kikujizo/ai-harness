@@ -1,71 +1,67 @@
-# セットアップ（新規リポジトリへの導入）
+# セットアップ（テンプレートからの導入）
 
-このハーネスを任意のGitHubリポジトリに入れる手順。コピー作業は10〜15分で終わる。
-基準とリスクダイヤルはここで作り込まず、初回運用で育てる。
+**リポジトリの形＝導入後の形**。丸ごと持ってきてリンクを張り、リポジトリ外ツール（ChatGPT/Codex）に
+2件貼るだけで動く。コピー＋リンクは5分。貼付・記入は初回運用のなかで埋める。
 各ステップの末尾に「なぜ」を1行添えた。パスは導入先リポジトリのルートを基準とする。
 
 ## 前提
 
 - 4AI体制（ChatGPT=仕様化 / Codex=PM / Cursor=実装 / Claude Code=レビュー・技術スーパーバイザ）
-- ChatGPTだけはリポジトリ外で動く（後述）。他の3AIはリポジトリ内のファイルを読む
-- このキット（配布フォルダ）をローカルに展開済みで、導入先リポジトリのルートで作業する
+- ChatGPTとCodexはリポジトリ外ツール。設定への貼付で持たせる。Cursor・Claude Codeはリポジトリ内を読む
+- 実効ファイルはこのリポジトリに実在する（別途コピー配置する作業はない）
 
-## 1. キットを丸ごと `docs/harness/` へコピー
+## 1. テンプレートを取得する
 
-このキット全体を導入先の `docs/harness/` にミラーする。以降の実効ファイルはこのミラーから配置する。
+GitHubの **Use this template** で自分のリポジトリを作る（またはclone / 丸コピー）。
 
-```bash
+> なぜ: 配布物と実運用の二重構造を持たないため。リポジトリの形がそのまま導入後の形になる。
+
+## 2. リンクを生成する（`setup-links`）
+
+リポジトリルートで実行する:
+
+```bat
+rem Windows
+setup-links.bat
+```
+
+```sh
 # macOS / Linux
-mkdir -p docs/harness && cp -R /path/to/kit/. docs/harness/
+sh setup-links.sh
 ```
 
-```powershell
-# Windows
-robocopy "C:\path\to\kit" ".\docs\harness" /E
-```
+`.agents/skills`（Skillの正本）への `.claude/skills` ジャンクション（macOS/Linuxはシンボリックリンク）が張られる。
+このリンクは `.gitignore` 済みでコミットしない。
 
-> なぜ: 実効ファイル内が参照する `docs/harness/loops/`・`docs/harness/knowledge/`・`docs/harness/ops/` を
-> 導入先に必ず実在させ、静的リファレンスの導入・更新を1コマンドで済ませるため。
+> なぜ: SkillのSSOTは業界規約の `.agents/skills/`。Claude Codeは `.claude/skills` を読むため、
+> 実体を二重に持たずリンクで解決する。`--check` 引数で検証のみ実行できる。
 
-## 2. 実効ファイルを配置
+## 3. リポジトリ外ツールへ貼付（2件）
 
-`docs/harness/` から、各AIが実際に読む位置へコピーする（コピー元 → コピー先）:
+- [roles/chatgpt.md](roles/chatgpt.md) の内容 → ChatGPTの **Project instructions**（カスタム指示）
+- [roles/codex.md](roles/codex.md) の内容 → Codexの **カスタム指示**
 
-- `docs/harness/core/AGENTS.md` → ルート `AGENTS.md`
-- `docs/harness/roles/claude-code.md` 本文 → ルート `CLAUDE.md`
-- `docs/harness/roles/claude-code.md` 内の settings 例 → `.claude/settings.json`
-- `docs/harness/roles/cursor.md` 内の `.mdc` ルール → `.cursor/rules/ai-workflow.mdc`
-- `docs/harness/skills/` の7本 → `.claude/skills/<name>/SKILL.md`
-  （pm-review, recursive-review, design-check, handoff-report, recursive-writing, loop-design, knowledge-reflux）
-- `docs/harness/skills/pm-review/SKILL.md` → `.agents/skills/pm-review/SKILL.md`（Codex用。PM評価手順をCodexから読ませる）
-- `docs/harness/roles/codex.md` 本体 → Codexのプロジェクト設定・カスタム指示に貼付
-- `docs/harness/roles/chatgpt.md` → ChatGPTの Project instructions（カスタム指示）に貼付
+> なぜ: ChatGPT/Codexはリポジトリのファイルを自動で読めない。**貼付元（`docs/harness/roles/`）が正本**で、
+> ツール側はその写し（既知の負債＝手動同期）。
 
-> なぜ: 各AIは規定の位置しか自動で読まない。AGENTS.mdは全AIの起点、CLAUDE.md/settings.jsonはClaude Code、
-> `.cursor/rules/` はCursor、`.claude/skills/` はClaude Codeのskill、`.agents/skills/` はCodexのskill。
-> ChatGPTはリポジトリを読めないためツール側設定に持たせる。
+## 4. リスクダイヤルを記入する
 
-## 3. 運用正本を初期化
+[docs/risk-dial.md](../risk-dial.md) の記入欄（自動マージ条件・高リスクパス・各種上限）を自分の環境で埋める。
 
-日々更新する「育てる正本」を導入先に置く:
+> なぜ: 不可逆4カテゴリの境界は固定だが、その外側のダイヤルは環境ごとに初期値が違う。運用正本として育てる。
 
-- `docs/harness/core/templates.md` → `docs/templates.md`
-- `docs/criteria/` に **空の `README.md` だけ** を置く（基準は先回りで書かず、初回運用の×から起こす＝実績主義）
-- `docs/harness/ops/risk-dial.md` → `docs/risk-dial.md` にコピーし、記入欄を埋める
-- `docs/harness/loops/ledger-template.md` → `docs/loop-ledger.md`
+## 5. 導入後チェック
 
-> なぜ: テンプレ・基準・リスクダイヤル・ループ台帳は導入先で育つ運用正本。`docs/harness/` のミラーは
-> 静的リファレンスとして触らず、更新はこちらで行う。
-
-## 4. 導入後チェック
-
+- リンク確認: Windowsは `dir .claude` で `skills` が `<JUNCTION>` 表示、または `setup-links.bat --check` が `[OK]`。
+  macOS/Linuxは `setup-links.sh --check` が `[OK]`
 - ルートに `AGENTS.md` / `CLAUDE.md` がある
-- `.claude/settings.json` と `.claude/skills/*/SKILL.md`（7つ）がある
-- `.cursor/rules/ai-workflow.mdc` と `.agents/skills/pm-review/SKILL.md` がある
-- `docs/harness/` にキット全体がミラーされている
+- `.claude/settings.json` があり、`.claude/skills/*/SKILL.md`（7つ）がリンク経由で読める
+- `.cursor/rules/ai-workflow.mdc` と `.agents/skills/`（7本）がある
 - `docs/templates.md`・`docs/risk-dial.md`・`docs/loop-ledger.md` がある
-- `docs/criteria/` に `README.md` がある（基準は初回運用で追加していく）
-- ChatGPT の Project instructions に仕様化ルールが入っている
+- `docs/criteria/` に `README.md` と `writing-criteria.md` がある
+- ChatGPT / Codex の設定に貼付2件が入っている
+
+criteriaは同梱の `writing-criteria.md` 1枚と `README.md` から育てる。基準は先回りで量産せず、初回運用の×から起こす（実績主義）。
 
 ### シナリオ試験（3件）
 

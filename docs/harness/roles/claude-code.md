@@ -21,7 +21,9 @@ Claude Codeの実効ファイルはリポジトリに実在する。このファ
 - `Edit/Write(./.github/workflows/**)`・`./.codex/**`・`./.cursor/**`・`./.claude/**`・`./.agents/**`・
   `AGENTS.md`・`CLAUDE.md` のdenyは**高リスクカテゴリ③（権限・パイプライン自己変更）の機械的な裏付け**
   （ルートの `AGENTS.md` のリスク分類参照）。`./.agents/**` はSkillの正本置き場でありAI設定ディレクトリに含まれる。
-  AIはこれらのパスを変更できず、変更が必要なタスクでは停止して報告する（人間実装の特則）
+  AIは通常フローでこれらのパスを変更できず、変更が必要なタスクでは停止して人間の承認を求める。
+  承認後は人間が用意した専用ブランチ・環境で実装できる（実装AIと独立したレビュー＋人間merge＋
+  Decision Log記録を必須）。denyの機械壁は常設のまま外さない
 - `Bash(gh pr merge:*)` のdenyはAGENTS.md「mergeは人間」の、`Bash(gh repo edit:*)` は「リポジトリ設定変更禁止」
   （カテゴリ③）の機械的な裏付け。`Read(./**/.env)`・`Read(./**/.env.*)` はサブディレクトリの `.env` も塞ぐ
 - `deny` の `Read(./.env)` はCLAUDE.mdの禁止ルールの**機械的な裏付け**。

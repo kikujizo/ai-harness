@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run lint:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(**/secrets/**)",
+      "Edit(./.github/workflows/**)",
+      "Write(./.github/workflows/**)",
+      "Edit(./.codex/**)",
+      "Write(./.codex/**)",
+      "Edit(./.cursor/**)",
+      "Write(./.cursor/**)",
+      "Edit(./.claude/**)",
+      "Write(./.claude/**)",
+      "Edit(./.agents/**)",
+      "Write(./.agents/**)",
+      "Edit(./AGENTS.md)",
+      "Write(./AGENTS.md)",
+      "Edit(./CLAUDE.md)",
+      "Write(./CLAUDE.md)",
+      "Bash(git push --force:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push origin HEAD:main)",
+      "Bash(git push origin HEAD:main:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}

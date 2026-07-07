@@ -1,0 +1,4 @@
+# Claude Code 向けの Skill ジャンクション（setup-links が生成する）。
+# .agents/skills が正本。これを追跡すると junction を実フォルダとして辿り二重コミットになる。
+# この1行がテンプレート構造（Skill SSOT + セットアップ時リンク生成）の成立条件。
+/.claude/skills

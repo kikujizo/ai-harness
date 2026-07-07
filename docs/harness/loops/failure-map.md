@@ -27,7 +27,7 @@ UC Berkeley の [MAST（Multi-Agent System Failure Taxonomy）](https://arxiv.or
 |---|---|---|
 | 情報の隠蔽・伝達失敗 | 出力契約（未解決事項・リスク欄の強制。埋まらない欄は「なし」と書く）（ルートの`AGENTS.md` 出力契約） | 防御あり |
 | 他エージェントの成果の無視 | 状態外部化 + 引き継ぎテンプレ（既存作業の途中成果を破棄せず続きから）（`docs/templates.md`） | 防御あり |
-| 曖昧な指示の増幅 | レビュー指摘を「実行可能な指示（ファイル+箇所+変更内容）」形式に強制（[../skills/recursive-review/SKILL.md](../skills/recursive-review/SKILL.md)） | 防御あり |
+| 曖昧な指示の増幅 | レビュー指摘を「実行可能な指示（ファイル+箇所+変更内容）」形式に強制（`.agents/skills/recursive-review/SKILL.md`） | 防御あり |
 | 検証なしの合意（安易な同意） | レビュアー独立 + 「approve=無人反映の責任水準」の明示（ルートの`AGENTS.md` レビュー独立） | 防御あり |
 
 **含意**: AI間の伝達を自由会話ではなく**構造化された成果物（verdict・テンプレ・指示形式）**に限定する設計が、
@@ -37,7 +37,7 @@ UC Berkeley の [MAST（Multi-Agent System Failure Taxonomy）](https://arxiv.or
 
 | MAST失敗様式（代表） | このハーネスでの防御手段（該当ルールへのリンク） | 状態 |
 |---|---|---|
-| 不完全な検証 | 外部信号必須 + 受け入れ条件を1項目ずつ照合（[principles.md](principles.md) §4 / [../skills/recursive-review/SKILL.md](../skills/recursive-review/SKILL.md)） | 防御あり |
+| 不完全な検証 | 外部信号必須 + 受け入れ条件を1項目ずつ照合（[principles.md](principles.md) §4 / `.agents/skills/recursive-review/SKILL.md`） | 防御あり |
 | 誤った検証（甘い自己採点） | Maker-Checker分離（実装者≠レビュアー）（ルートの`AGENTS.md` レビュー独立） | 防御あり |
 | 早すぎる終了 | 指名した検証を全通過することを終了条件にする（無関係な常時greenによる空虚な真を排除）（[principles.md](principles.md) §2） | 防御あり |
 

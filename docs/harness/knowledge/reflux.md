@@ -4,7 +4,7 @@
 知見は使用実績に基づいて段階的に昇格し、使われないものは滞留させず剪定する。
 このループの自律度は**恒久L1**（AIは昇格候補の提案までで、常時適用ルールの書き換えは人間が承認する）。
 
-セッション終了時・レビュー完了時にこのループを回す手順は [../skills/knowledge-reflux/SKILL.md](../skills/knowledge-reflux/SKILL.md)。
+セッション終了時・レビュー完了時にこのループを回す手順は `.agents/skills/knowledge-reflux/SKILL.md`。
 
 ## 昇格パイプライン
 
@@ -15,7 +15,7 @@
    ↓ 随時: 人間が「使える」と判断したとき
 [docs/]      リポジトリの docs/ に構造化・出典つきで記録（読み物として参照可能）
    ↓ ゲート①: 同じ知見を2回参照した → 新しい基準ファイル化
-[criteria/]  照合可能な基準ファイルに変換（バイナリ + 観測手順。knowledge/criteria/）
+[criteria/]  照合可能な基準ファイルに変換（バイナリ + 観測手順。docs/criteria/）
    ↺ ゲート②: レビューで「基準外の気づき」が3回同内容 → 既存基準ファイルへ項目追記
    ↓ ゲート③: その基準がプロジェクト・ツール横断で3回以上×を検出した実績
 [AGENTS.md]  常時適用ルールへ内面化（最上位）
@@ -33,8 +33,8 @@
 | ③ | criteria/ → AGENTS.md | **横断的に3回以上×を検出した実績** | プロジェクト固有の基準は昇格不可（そのリポジトリの `docs/criteria/` 止まり） |
 | 剪定 | ─ | 6ヶ月×なし / 1年参照なし | 削除はDecision Log必須（守れている理由が基準の存在自体である可能性を残すため） |
 
-基準ファイルの作り方は [criteria/criteria-design-guide.md](criteria/criteria-design-guide.md) に従う。
-`criteria/README.md`・`criteria/criteria-design-guide.md`・`recursive-review` Skillにある「3回」の記述は、
+基準ファイルの作り方は [criteria-design-guide.md](criteria-design-guide.md) に従う。
+`docs/criteria/README.md`・`criteria-design-guide.md`・`recursive-review` Skillにある「3回」の記述は、
 いずれもこのゲート②（既存基準ファイルへの項目追記）を指す同一の基準である。
 
 ## ループ健全性のガード

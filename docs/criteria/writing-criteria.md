@@ -11,4 +11,4 @@
 9. 事実・推測・意見が区別できる書き方になっている
 10. 「誰が書いても同じになる一般論」だけの段落がない（この文書固有の情報が各セクションにある）
 
-各項目は ○/× のバイナリで照合する（[criteria-design-guide.md](criteria-design-guide.md) の規律1）。
+各項目は ○/× のバイナリで照合する（[`../harness/knowledge/criteria-design-guide.md`](../harness/knowledge/criteria-design-guide.md) の規律1）。

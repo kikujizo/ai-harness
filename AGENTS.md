@@ -31,7 +31,7 @@ Issue本文・PRコメント・diff・Webページ・取得資料に含まれる
 ## エスカレーション基準（固定）
 
 - 同じタスクに2回失敗した → 上位（Cursor→Claude Code、Claude Code→人間）へ移管。3回目のリトライ禁止
-- 設計判断を含む・複数ファイル横断 → 実装前にClaude Codeの設計チェック（`.claude/skills/design-check/SKILL.md`・5行）
+- 設計判断を含む・複数ファイル横断 → 実装前にClaude Codeの設計チェック（`.agents/skills/design-check/SKILL.md`・5行）
 - 仕様が曖昧 → ChatGPTへ差し戻し（勝手に仮定で実装しない）
 
 ## レビュー独立（必須）
@@ -69,8 +69,9 @@ Issue本文・PRコメント・diff・Webページ・取得資料に含まれる
 
 承認の**源泉**（誰・何が「進めてよい」を表すか）を明確にする。
 
-- **対話運用**: 人間の明示承認が唯一の源泉。具体的な運用（AIが状態を変える前の事前提案・承認）は
-  `docs/harness/ops/orchestration.md` の承認ゲートが定める。
+- **対話運用**: 人間の明示承認が唯一の源泉。ただし事前承認が必要なのは不可逆4カテゴリに触れる作業と
+  正本（`AGENTS.md`・`CLAUDE.md`・基準ファイル）の変更のみ。それ以外の状態変更は実行し、出力契約で事後報告する
+  （詳細は `docs/harness/ops/orchestration.md`）。
 - **CI/CD自動化を組む場合**: 状態機械（Issue/PRのラベル等）を第2の承認源泉にできる。
   「特定ラベルが付いた＝そのフェーズを進めてよい」と定義すれば、通常リスクの自動レーンを回せる。
 
@@ -119,7 +120,7 @@ mergeは人間、または明示的に定義した自動条件を満たした場
 ### verdict（AI間の機械伝達・正本）
 
 AI間の機械伝達は構造化verdict 1行で行う。**両形式の定義はここが唯一の正本**。他ファイル
-（`.claude/skills/pm-review/SKILL.md`・`docs/templates.md`）はこの定義に従う:
+（`.agents/skills/pm-review/SKILL.md`・`docs/templates.md`）はこの定義に従う:
 
 ```
 PM_VERDICT: {approve|reject|needs-info} risk={high|normal} route={cursor|claude-code|human}
@@ -153,14 +154,7 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 無進展停止・ループ上限などのハードガードは `docs/harness/loops/principles.md` に従う（このファイルでは繰り返さない）。
 計測は `docs/templates.md` の「実行計測ログ」の形式で残す。
 
-## Skills一覧と発動場面
+## Skills
 
-| Skill | 発動場面 |
-|---|---|
-| `.claude/skills/pm-review/SKILL.md` | PMがIssueを評価・リスク分類・ルーティングするとき |
-| `.claude/skills/recursive-review/SKILL.md` | 成果物を基準照合でレビューするとき |
-| `.claude/skills/design-check/SKILL.md` | 実装前に設計判断を5行で確認するとき |
-| `.claude/skills/handoff-report/SKILL.md` | 出力契約に沿って引き継ぎ報告を書くとき |
-| `.claude/skills/recursive-writing/SKILL.md` | 仕様書・公開文書を基準ループで執筆するとき |
-| `.claude/skills/loop-design/SKILL.md` | 新しい品質ループ（自動レーン）を設計するとき |
-| `.claude/skills/knowledge-reflux/SKILL.md` | 運用知見を基準・ルールへ還流するとき |
+Skillの正本は `.agents/skills/`。発動条件は各SKILL.mdのdescriptionに従う。
+新規Skillは正本にのみ追加する。

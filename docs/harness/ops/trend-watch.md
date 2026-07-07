@@ -22,7 +22,7 @@
 
 ## 台帳エントリ例
 
-台帳の正式書式は [../loops/ledger-template.md](../loops/ledger-template.md) を正本とする。
+台帳の正式書式は `docs/loop-ledger.md` を正本とする。
 以下はこのループを台帳に登録する場合の記入例（イメージ）:
 
 ```

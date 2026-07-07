@@ -1,25 +1,18 @@
-# Cursor ロール定義（メイン実装担当）
+# Cursor ロール定義の解説（メイン実装担当）
 
-Cursorはメイン実装担当。以下のルールを `.cursor/rules/ai-workflow.mdc` として配置する
-（`.mdc` 形式のまま、下のコードブロックの内容をファイルにする）。
+Cursorの実効ルールはリポジトリに実在する。このファイルは**解説**であり、実物（`.mdc`）を複製しない
+（SSOT: 実物が正本、ここは解説）。
 
-```mdc
----
-description: "Multi-AI workflow: Cursor is the main implementer. Core rules live in AGENTS.md."
-alwaysApply: true
----
+## 実効ファイルの場所
 
-You are the main implementation worker in a multi-AI workflow.
-AGENTS.md at repo root is the single source of truth for safety rules,
-reviewer independence, high-risk procedure, and output contracts. Follow it.
+- 実効ルール → `.cursor/rules/ai-workflow.mdc`（`alwaysApply: true` でCursorが常時読む）
+- 全AI共通の正本 → ルートの `AGENTS.md`（安全ルール・レビュー独立・高リスク手順・出力契約）
 
-Cursor-specific rules only:
+## 設計解説
 
-- Before editing: restate the task in one sentence, list files to modify and files not to touch.
-- Keep diffs small. Do not broaden scope beyond the Issue. Do not refactor unless asked.
-- Escalate instead of retrying: if you fail the same task twice, stop and output
-  a handoff summary for Claude Code (use the handoff-report skill).
-- After completing work, always report via the handoff-report skill format.
-- For document/article writing tasks, use the recursive-writing skill.
-- Never read, print, or commit `.env` or any secret. Never push to main.
-```
+- `.mdc` にはCursor固有の差分だけを置く。安全・独立・出力契約の正本はAGENTS.mdにあり、複製しない
+  （重複すると毎ターン多重に読み込みトークンを浪費する）。
+- 実装前にタスクを1文で言い直し、変更ファイルと触らない範囲を宣言させるのは、差分を小さく保つための型。
+- 「2敗で自走を止めhandoff-reportで上位へ引き継ぐ」はリトライ浪費を止めるエスカレーション規律の実装。
+- 文書生成タスクではrecursive-writingを使う。`.env`・secretの秘匿とmain直push禁止は、
+  指示だけでなくブランチ保護を最終防衛に置く。

@@ -1,0 +1,4 @@
+# シェルスクリプトは常にLF（CRLFだと #!/bin/sh が壊れる）
+*.sh text eol=lf
+# バッチはCRLF
+*.bat text eol=crlf

@@ -20,7 +20,7 @@
 ### For Humans
 
 1. GitHubの **Use this template** で自分のリポジトリを作る（またはclone/丸コピー）
-2. リポジトリルートで `setup-links.bat`（Windows）/ `setup-links.sh`（macOS/Linux）を実行
+2. リポジトリルートで `setup-links.bat`（Windows）/ `sh setup-links.sh`（macOS/Linux）を実行
    → `.agents/skills` への `.claude/skills` ジャンクション（リンク）が張られる
 3. 貼付2件（ツール制約による手動同期）:
    [docs/harness/roles/chatgpt.md](docs/harness/roles/chatgpt.md) → ChatGPTの Project instructions、
@@ -45,7 +45,7 @@
 | `.claude/settings.json` | Claude Codeの権限（読み取り許可・破壊/秘匿deny）の実JSON |
 | `.cursor/rules/ai-workflow.mdc` | Cursorの実効ルール（`alwaysApply`） |
 | `.agents/skills/<7本>/SKILL.md` | **Skillの正本（SSOT）**。Codexは直接読む。Claude Codeは `setup-links` のリンク経由 |
-| `.claude/skills` | `setup-links` が張るジャンクション（`.gitignore` 済み・コミットしない） |
+| `.claude/skills` | `setup-links` が張るジャンクション（macOS/Linuxはシンボリックリンク。`.gitignore` 済み・コミットしない） |
 | `setup-links.bat`・`setup-links.sh` | リンク生成・検証（`--check`） |
 | `docs/templates.md`・`docs/criteria/`・`docs/risk-dial.md`・`docs/loop-ledger.md` | **運用正本**（導入先で記入して育てる） |
 | `docs/harness/` | 静的リファレンス（setup / roles解説 / loops / knowledge / ops） |

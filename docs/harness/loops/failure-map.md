@@ -40,6 +40,7 @@ UC Berkeley の [MAST（Multi-Agent System Failure Taxonomy）](https://arxiv.or
 | 不完全な検証 | 外部信号必須 + 受け入れ条件を1項目ずつ照合（[principles.md](principles.md) §4 / `.agents/skills/recursive-review/SKILL.md`） | 防御あり |
 | 誤った検証（甘い自己採点） | Maker-Checker分離（実装者≠レビュアー）（ルートの`AGENTS.md` レビュー独立） | 防御あり |
 | 早すぎる終了 | 指名した検証を全通過することを終了条件にする（無関係な常時greenによる空虚な真を排除）（[principles.md](principles.md) §2） | 防御あり |
+| 幻の完了報告（未実施の作業を完了・push済みと報告） | 完了報告は成果物の実在（コミットSHA・PR番号・ファイル）を一次資料で検証してから信用する（ルートの`CLAUDE.md` オーケストレーション規律） | 防御あり |
 
 ## 照合から出た結論（3点）
 

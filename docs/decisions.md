@@ -143,6 +143,6 @@ ChatGPT/Codex 二段レビューが運用上破綻した場合に再検討する
 ## 次アクション
 
 - [ ] PR merge（人間判断）
-- [ ] Claude Code による独立レビュー
+- [x] Claude Codeによる独立レビューは今回に限り人間承認により免除（PR #7 ChatGPTコメント、2026-07-08。ChatGPT要件レビュー＋Codex技術レビューの完了をもってmerge判断へ進む）
 
 承認: 人間（2026-07-08、Issue #6 PMルーティングコメント `route=cursor`）

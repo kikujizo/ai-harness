@@ -8,7 +8,7 @@ Claude Codeの実効ファイルはリポジトリに実在する。このファ
 - 行動ルール本体 → ルートの `CLAUDE.md`（役割・オーケストレーション規律・トークン規律・絶対ルール）
 - 権限設定 → `.claude/settings.json`（読み取り許可・破壊/秘匿denyの実JSON）
 - Skill → `.agents/skills/`（業界規約のSSOT。Claude Code向けは `setup-links` がセットアップ時に
-  `.claude/skills` ジャンクションを張る。リンクはコミットしない）
+  `.claude/skills` ジャンクション（macOS/Linuxはシンボリックリンク）を張る。リンクはコミットしない）
 - 全AI共通の正本 → ルートの `AGENTS.md`
 
 ## settings.json の設計解説

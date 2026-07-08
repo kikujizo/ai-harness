@@ -63,7 +63,7 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 `REVIEW_VERDICT:` はAI間機械伝達用の最終行（保留の理由は本文に明示）。書式の正本はルートの `AGENTS.md`
 「出力契約」の verdict 定義に従う。
 
-## 4. Decision Log（`docs/decisions/YYYY-MM-DD-{title}.md`）
+## 4. Decision Log（既定は `docs/decisions.md` へ追記。導入先に `docs/decisions/` の日付ファイル慣行が既にあればそちらに従う）
 
 抜本変更・ゼロベース変更・高リスク変更・方針転換に使う。
 

@@ -44,13 +44,21 @@ sh setup-links.sh
 > なぜ: ChatGPT/Codexはリポジトリのファイルを自動で読めない。**貼付元（`docs/harness/roles/`）が正本**で、
 > ツール側はその写し（既知の負債＝手動同期）。
 
-## 4. リスクダイヤルを記入する
+## 4. GitHub 連携を有効化する
+
+[docs/harness/ops/github-integration.md](ops/github-integration.md) に従い、Cursor GitHub App と
+（必要なら）GitHub MCP を設定する。診断は `sh scripts/check-github-access.sh`。
+
+> なぜ: 本ハーネスは GitHub 上の Issue/PR へ判断を残す（GitHubドリヴン記録）。git push だけ成功して
+> Issue API が 403 になる構成があり、MCP 用 PAT の追加が必要な場合がある。
+
+## 5. リスクダイヤルを記入する
 
 [docs/risk-dial.md](../risk-dial.md) の記入欄（自動マージ条件・高リスクパス・各種上限）を自分の環境で埋める。
 
 > なぜ: 不可逆4カテゴリの境界は固定だが、その外側のダイヤルは環境ごとに初期値が違う。運用正本として育てる。
 
-## 5. 導入後チェック
+## 6. 導入後チェック
 
 - リンク確認: Windowsは `dir .claude` で `skills` が `<JUNCTION>` 表示、または `setup-links.bat --check` が `[OK]`。
   macOS/Linuxは `sh setup-links.sh --check` が `[OK]`
@@ -60,6 +68,7 @@ sh setup-links.sh
 - `docs/templates.md`・`docs/risk-dial.md`・`docs/loop-ledger.md` がある
 - `docs/criteria/` に `README.md` と `writing-criteria.md` がある
 - ChatGPT / Codex の設定に貼付2件が入っている
+- `sh scripts/check-github-access.sh` が git / Issue 読み取りで `[OK]`（NG 時は [github-integration.md](ops/github-integration.md)）
 
 criteriaは同梱の `writing-criteria.md` 1枚と `README.md` から育てる。基準は先回りで量産せず、初回運用の×から起こす（実績主義）。
 

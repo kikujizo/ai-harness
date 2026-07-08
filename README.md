@@ -14,6 +14,7 @@
 - **AI別の設定** → [docs/harness/roles/](docs/harness/roles/)（chatgpt / codex / claude-code / cursor）
 - **ループを作る・直す** → [docs/harness/loops/principles.md](docs/harness/loops/principles.md)＋[.agents/skills/loop-design/](.agents/skills/loop-design/SKILL.md)
 - **知見をルールに育てる** → [docs/harness/knowledge/reflux.md](docs/harness/knowledge/reflux.md)＋[.agents/skills/knowledge-reflux/](.agents/skills/knowledge-reflux/SKILL.md)
+- **GitHub 連携（Issue/PR 読み書き）** → [docs/harness/ops/github-integration.md](docs/harness/ops/github-integration.md)＋`sh scripts/check-github-access.sh`
 
 ## 導入
 
@@ -26,6 +27,7 @@
    [docs/harness/roles/chatgpt.md](docs/harness/roles/chatgpt.md) → ChatGPTの Project instructions、
    [docs/harness/roles/codex.md](docs/harness/roles/codex.md) → Codexのカスタム指示
 4. [docs/risk-dial.md](docs/risk-dial.md) の記入欄を埋める
+5. [docs/harness/ops/github-integration.md](docs/harness/ops/github-integration.md) に従い GitHub 連携を有効化し、`sh scripts/check-github-access.sh` で確認
 
 詳細手順・導入後チェックは [docs/harness/setup.md](docs/harness/setup.md)。
 

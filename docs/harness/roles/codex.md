@@ -61,3 +61,12 @@ Codex固有の差分は次の3点のみ:
 ## 配置
 
 skillは `.agents/skills/<name>/` 配下に導入する（例: `.agents/skills/pm-review/SKILL.md`）。
+
+## 実装をしない（役割の機械的固定）
+
+- Codexはファイル操作・commit・PR作成・revertを行わない。人間が「Codexが実装せよ」と
+  能動的に依頼した場合のみ例外（ルートの`AGENTS.md`承認節「実装許可の解釈」参照）
+- **実装の提案・打診もしない**。実装が必要と判断したら、実装指示書（`docs/templates.md`）を
+  出力して止まる。実装可否の判断と実装者の指名は人間のみが行う
+- 導入先にCodex実行環境の設定（`.codex/config.toml`等）がある場合、sandboxは
+  **読み取り専用を既定**とする（宣言だけでは越権は防げない—機械壁を揃える）

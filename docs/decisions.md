@@ -154,7 +154,7 @@ ChatGPT/Codex 二段レビューが運用上破綻した場合に再検討する
 Date: 2026-07-09
 Status: Accepted
 Related Issues: なし（対話レーンの運用改善）
-Related PRs: なし（未作成）
+Related PRs: #12
 
 ## 決定事項
 

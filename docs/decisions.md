@@ -229,3 +229,111 @@ Issue #8 の当初案である独自 `sync-harness.sh` / manifest / push fan-out
 - [ ] 人間がmerge判断する
 
 承認: 人間（2026-07-09）— カテゴリ③、実装者 Cursor、Step 3以降 / PAT / Secrets / dispatch / fan-out / schedule / 自動merge は実装しない
+
+---
+
+# Decision: ai-harnessをpublic化してharness-syncのsource読み取りをtoken不要にする
+
+Date: 2026-07-09
+Status: Proposed
+Related Issues: #14
+Related PRs: なし（本PR）
+
+## 決定事項
+
+Issue #14 について、`READ_STRATEGY=public` を採用する。
+`ai-harness` を public repo に変更し、`ai-dev-workflow` の `harness-sync` dry-run が token / credential を追加せずに `source_sha=<resolved_sha>` まで到達できるようにする。
+
+本Decisionは、public化前の確認結果と、public化に伴うリスク・取り消し手順を記録する。Step 3 / dispatch / fan-out / schedule / 自動merge は本Decisionの対象外である。
+
+## 背景・課題
+
+Issue #10 では、`ai-dev-workflow` の `harness-sync` を `mode=dry-run`, `source_ref=main` で実行し、`stop_reason=source_ref_unresolved` で安全停止することを確認した。
+これは、`GITHUB_TOKEN` だけでは private source repo である `kikujizo/ai-harness` を読めない場合に、PAT / Secrets を追加せず停止できることの実証だった。
+
+Issue #14 では次段階として、source SHA 解決まで到達するための読み取り方針を決める。人間は `READ_STRATEGY=public` を選択し、カテゴリ③ high risk として public化を承認した。
+
+## 採用する方針
+
+- `ai-harness` を public repo にする
+- `ai-dev-workflow` の `harness-sync` は token / credential を追加せず、public repo として `ai-harness` を読む
+- public化前に、tracked files に secret / token / `.env` / credential / 秘密鍵 / 実在個人情報 / 秘匿情報の実値が含まれないことを機械確認する
+- public化後に、`ai-dev-workflow` の `harness-sync` を `mode=dry-run`, `source_ref=main` で再実行し、`source_sha=<resolved_sha>` まで到達するか確認する
+- Step 3 / dispatch / fan-out / schedule / 自動merge は後続Issueで扱う
+
+## 採用しない方針 / 却下した代替案
+
+- private維持 + read-only PAT: secret / token / credential の扱い変更としてカテゴリ①に該当し、保管・revoke・漏洩時対応が必要になるため、現段階では採用しない
+- private維持 + GitHub App: 権限設計と運用が重く、Issue #14 の「1 repoでsource SHA解決を確認する」粒度を超えるため採用しない
+- private維持 + deploy key: key管理が必要でカテゴリ①に該当するため、現段階では採用しない
+
+## 判断理由
+
+- `ai-harness` はハーネス正本であり、複数repoから参照される前提の運用基盤である
+- public化により、適用先repo側で読み取りtokenを保管せずに済む
+- token / credential を導入しないため、Issue #14 の範囲ではカテゴリ①のcredential運用を避けられる
+- public化はリポジトリ設定変更としてカテゴリ③ high risk だが、人間が明示承認済みである
+
+## 公開前確認結果
+
+2026-07-09 に tracked files を対象に公開前チェックを行った。
+
+実行内容:
+
+- tracked file名に `.env` / credential / secret / token / 秘密鍵ファイル名が含まれないか確認
+- tracked text に代表的なGitHub token / OpenAI key / AWS key / private key / Slack token / Google API key / email 形式の実値らしき文字列がないか確認
+- `API_KEY` / `SECRET` / `TOKEN` / `PASSWORD` / `PRIVATE_KEY` / `CREDENTIAL` / `.env` などのリテラルを確認
+
+結果:
+
+- secret / token / PII / 秘匿情報の実値らしきものは検出されなかった
+- 検出された tracked file名は `docs/harness/ops/token-discipline.md` のみで、token運用ルール文書であり実値ではない
+- リテラル検出は `.claude/settings.json` の `.env` 読み取りdeny、`AGENTS.md` / `CLAUDE.md` / docs の安全ルールなどであり、実値ではない
+
+注意:
+
+- 機械確認は完全性を保証しない
+- public化後に外部へコピーされた情報を完全に取り消すことはできない
+- public化後に問題が見つかった場合は、privateへ戻すだけでなく、漏洩した内容の無効化・削除・ローテーションを別途判断する
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ①: 現時点の確認では secret / token / PII / 秘匿情報の実値は検出されていないため非該当。将来検出された場合は該当
+- カテゴリ②: なし。追加課金なし
+- カテゴリ③: 該当。リポジトリvisibility変更はリポジトリ設定変更であり high risk
+- カテゴリ④: 原則直接該当ではない。ただし public化後に外部コピーを完全に取り消せない不可逆性があるため、本Decisionで明記し人間承認を必須とする
+
+## 影響範囲
+
+- `kikujizo/ai-harness` の repository visibility
+- `kikujizo/ai-dev-workflow` の `harness-sync` dry-run
+- 今後の harness sync 設計
+- Issue #14 の source SHA 解決確認
+
+## 取り消し手順
+
+1. GitHub上で `kikujizo/ai-harness` を private に戻す
+2. `ai-dev-workflow` の `harness-sync` を再実行し、private化により `stop_reason=source_ref_unresolved` へ戻ることを確認する
+3. 本DecisionのStatusを Superseded に変更し、取り消し理由を追記する
+4. 必要なら private維持 + 読み取りcredential の別Issueを起票する
+5. public化中に秘匿情報が見つかった場合は、該当credentialのrevoke / rotate / 削除を別Issueで扱う
+
+ただし、一度public化された情報が外部にコピーされていない保証はできないため、その点は不可逆として扱う。
+
+## 見直す条件
+
+- public化後の dry-run が `source_sha=<resolved_sha>` まで到達しない場合
+- secret / token / PII / 秘匿情報の可能性が後から見つかった場合
+- public repo として運用することに支障が出た場合
+- private維持 + credential方式へ切り替える必要が出た場合
+- Step 3 の main merge dispatch へ進む判断を行う場合
+
+## 次アクション
+
+- [ ] 本Decision Log PRをレビューする
+- [ ] 人間がmerge判断する
+- [ ] `ai-harness` を public 化する
+- [ ] `ai-dev-workflow` の `harness-sync` を `mode=dry-run`, `source_ref=main` で再実行する
+- [ ] `source_sha=<resolved_sha>` 到達可否を Issue #14 に記録する
+
+承認: 人間（2026-07-09、Issue #14）— `READ_STRATEGY=public`、カテゴリ③ high risk、公開前確認とDecision Log記録を条件に承認。Step 3 / dispatch / fan-out / schedule / 自動merge は実装しない。

@@ -4,7 +4,7 @@
 同期処理は独自エンジンではなく、既存 Action（`actions-template-sync`）と
 `.templatesyncignore` に寄せる。本ファイルは所有権の正本。
 
-関連: Issue #8（方針検討） / Issue #10（手動 dry-run・同期PRの実証）
+関連: Issue #8（方針検討） / Issue #10（手動 dry-run・同期PRの実証） / Issue #16（ownership_violation 分類）
 
 ## 3区分
 
@@ -80,8 +80,36 @@
 | `none` | 続行可 |
 | `source_ref_unresolved` | source ref / SHA を解決できない（private 読み取り不可を含む） |
 | `ignore_missing` | `.templatesyncignore` が無い |
-| `ownership_violation` | repo-owned / init-only が上書き候補に入った |
+| `ownership_violation` | repo-owned / init-only が **最終同期コミット** に残った（post-sync 検証で検出） |
 | `needs_human_review` | 大量削除・意図不明な上書きなど、PR 作成前に人間判断が必要 |
+
+## 保護レイヤの責務分離（Issue #16）
+
+| レイヤ | 場所 | 役割 |
+|---|---|---|
+| 1. 所有権表 | 本ファイル（`docs/harness/sync-ownership.md`） | 期待分類の正本 |
+| 2. Action ignore | 適用先 `.templatesyncignore` | `actions-template-sync` の `handle_templatesyncignore` が `git reset` で除外 |
+| 3. precommit hook | `scripts/harness-sync-precommit.sh` | **所有権停止は行わない**（hook 実行タイミングが ignore より前のため false positive になる） |
+| 4. post-sync 検証 | `scripts/harness-sync-verify-boundaries.sh` + workflow ステップ | ignore 適用後の最終コミットに repo-owned が残っていないか確認 |
+
+`actions-template-sync` は `git pull --squash` で source を取り込んだ後、`precommit` → `git add .` →
+`handle_templatesyncignore` の順で処理する。`.templatesyncignore` に載っていても、precommit 時点では
+repo-owned ファイルが一時的に staged に載る。Issue #14 の dry-run で見えた `ownership_violation` は
+このタイミング差による **誤検知** であり、保護そのものは `.templatesyncignore` + post-sync 検証が担う。
+
+## Issue #16: ownership_violation 対象4ファイルの分類
+
+Issue #14 dry-run（`source_sha=97a2e24314f37a1565115ea0092bb481a937ac19`）で precommit が検出した4ファイル。
+
+| Path | 差分候補になった理由 | 期待分類 | 保護場所 | 判断理由 | 対応 |
+|---|---|---|---|---|---|
+| `.gitignore` | source と target で内容が異なり squash merge が Auto-merging | `repo-owned` | `.templatesyncignore` + post-sync 検証 | 適用先固有の ignore（`settings.local.json` 等）が育つ | 保護継続。ignore 修正不要 |
+| `README.md` | テンプレ正本 README と適用先プロジェクト README が別物 | `repo-owned` | `.templatesyncignore` + post-sync 検証 | 適用先説明・現在地が育つ（init-only ではない） | 保護継続 |
+| `docs/decisions.md` | 各 repo の Decision Log が独立に蓄積 | `repo-owned` | `.templatesyncignore` + post-sync 検証 | 適用先 Decision Log が育つ | 保護継続 |
+| `docs/risk-dial.md` | テンプレは記入欄プレースホルダ、適用先は運用値を記入済み | `repo-owned` | `.templatesyncignore` + post-sync 検証 | 正本は配布テンプレだが、記入後は適用先運用データ。上書きするとダイヤル初期値が消える | 保護継続（harness-owned に変更しない） |
+
+`.templatesyncignore` の記述形式（`.gitignore` 風パス）は `handle_templatesyncignore` の `git reset -- <pathspec>` と整合する。
+Action README の `:!` pathspec は「全同期からの例外指定」用途であり、本パイロットの個別ファイル列挙とは別用途。
 
 ## 適用先での使い方（Step 1〜2）
 

@@ -72,12 +72,89 @@ ChatGPT 2次レビュー（PR #2）が、旧定義「カテゴリ③は実装も
 
 ---
 
+# Decision: 標準フロー・役割分担の実運用整合（Claude Code例外化）
+
+Date: 2026-07-08
+Status: Accepted
+Related Issues: #6
+Related PRs: #7
+
+## 決定事項
+
+ハーネス正本の標準フローを、実運用に合わせて **ChatGPT / Codex / Cursor 中心** に再定義する。
+Claude Codeは「常駐スーパーバイザ」「Cursor実装の既定レビュアー」から外し、
+**例外委譲・フェールセーフ要員**（全役割の代理が可能）として位置づける。
+
+標準フロー:
+
+```
+ChatGPT起票 → Codex PM評価 → Cursor実装 → ChatGPTレビュー（要件）→ Codexレビュー（技術）
+→ Codex PM判断 → 人間merge
+```
+
+## 背景・課題
+
+旧正本は「Claude Code=常駐スーパーバイザでCursorの既定レビュアー」としていたが、
+実運用は ChatGPT/Codex による二段レビュー中心である。正本と運用の乖離が SSOT Rot を生んでいた。
+先行反映: ai-dev-workflow Issue #33 / PR #34。本決定は ai-harness 正本側への同期。
+
+## 採用する方針
+
+- 標準フローを `AGENTS.md` に明記し、役割分担表・レビュー独立表・エスカレーション基準を整合
+- Claude Code参加条件を3パターンに限定（行動不能 / 停滞時のPM例外委譲 / 原因不明・緊急復旧の明示起動）
+- `route=claude-code` は例外委譲ルートである旨を verdict 節に注記（機械契約自体は不変）
+- 実効ルール（`AGENTS.md`/`CLAUDE.md`）と解説（`docs/harness/roles/`）の区分を明記
+
+## 採用しない方針 / 却下した代替案
+
+- Claude Code常駐の維持: 実運用と乖離し、レビュー担当の二重定義が残る
+- Claude Codeの役割完全廃止: 高難易度・行動不能時のフェールセーフが失われる
+
+## 判断理由
+
+- 実運用フローを正本に反映することで、後続AIが `AGENTS.md` だけ読んで正しい役割分担を得られる
+- Claude Codeは「失う」のではなく「標準フローの既定担当から外れる」だけ。例外時の代理能力は維持
+- verdict契約（`PM_VERDICT`/`REVIEW_VERDICT`）は無傷で流用可能
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`AGENTS.md` / `CLAUDE.md` / roles 正本更新）。人間の承認: 2026-07-08 取得済み（Issue #6 コメント）
+
+## 影響範囲
+
+- `AGENTS.md`（標準フロー・役割分担・レビュー独立・エスカレーション・verdict注記・正本区分）
+- `CLAUDE.md`（フェールセーフ化）
+- `docs/harness/roles/chatgpt.md`（要件レビュー追加）
+- `docs/harness/roles/codex.md`（技術レビュー・ルーティング表）
+- `docs/harness/roles/cursor.md`（レビュー担当の注記）
+- `docs/harness/roles/claude-code.md`（例外委譲条件）
+
+## 取り消し手順
+
+1. 本Decision Logエントリを `docs/decisions.md` から削除（または Status を Superseded に変更）
+2. 上記影響範囲のファイルを、変更前（Claude Code常駐・Cursorレビュアー=Claude Code）の内容に `git revert` で戻す
+3. `git revert` で完全に戻せる（可逆）
+
+## 見直す条件
+
+例外委譲なしで Claude Code を常駐レビュアーに戻す必要が生じた場合、または
+ChatGPT/Codex 二段レビューが運用上破綻した場合に再検討する。
+
+## 次アクション
+
+- [ ] PR merge（人間判断）
+- [x] Claude Codeによる独立レビューは今回に限り人間承認により免除（PR #7 ChatGPTコメント、2026-07-08。ChatGPT要件レビュー＋Codex技術レビューの完了をもってmerge判断へ進む）
+
+承認: 人間（2026-07-08、Issue #6 PMルーティングコメント `route=cursor`）
+
+---
+
 # Decision: ハーネス同期方式を独自同期エンジンから所有権区分 + 既存Action + 手動起動へ切り替える
 
 Date: 2026-07-09
 Status: Accepted
 Related Issues: #8, #10
-Related PRs: なし（実装PR追記予定）
+Related PRs: #11（正本） / kikujizo/ai-dev-workflow#36（パイロット）
 
 ## 決定事項
 

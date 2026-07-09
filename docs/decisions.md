@@ -146,3 +146,79 @@ ChatGPT/Codex 二段レビューが運用上破綻した場合に再検討する
 - [x] Claude Codeによる独立レビューは今回に限り人間承認により免除（PR #7 ChatGPTコメント、2026-07-08。ChatGPT要件レビュー＋Codex技術レビューの完了をもってmerge判断へ進む）
 
 承認: 人間（2026-07-08、Issue #6 PMルーティングコメント `route=cursor`）
+
+---
+
+# Decision: Cursor対話レーンへの委譲ラダー薄載荷
+
+Date: 2026-07-09
+Status: Accepted
+Related Issues: なし（対話レーンの運用改善）
+Related PRs: なし（未作成）
+
+## 決定事項
+
+同一ホスト内の委譲ラダー（`docs/harness/ops/orchestration.md`）を Cursor 対話レーンにも適用する。
+載荷は最小に留め、次のみを行う:
+
+1. `orchestration.md` に §7（Cursor 相対マッピング）を追加し、表題をホスト共通に広げる
+2. `.cursor/rules/orchestration.mdc` を新設（正本参照＋判定基準のみ。全文複製しない）
+3. Skill・切替強制Hook・自動委譲ループ・model固定サブエージェントは作らない
+4. 同バッチで `.cursor/rules/multi-repo-shell.mdc` を追加（複数repoの Shell 誤操作防止）
+
+## 背景・課題
+
+Grok を Cursor の既定指揮者候補にするにあたり、composer 等の非最上位セッションでの昇格提案と、
+最上位セッションでの委譲設計が文書化されていなかった。Claude Code 向け正本は既にあり、
+複製や厚化粧の Skill/Hook は再生産になる。また、複数repoを1会話で扱うとき cwd 引き継ぎにより
+誤リポジトリへ push/PR した事例があり、薄い安全規則が必要だった。
+
+## 採用する方針
+
+- 正本1節＋薄い Rule。モデル固有名は書かない（相対階層のみ）
+- 非最上位は切替を1行提案するだけ（製品に自動切替APIはない）
+- ワーカーが上位を advisor 召喚しない（差配は親＝指揮者）
+- 複数repoの状態変更は絶対パス必須・直列・push/PR前の remote 照合
+
+## 採用しない方針 / 却下した代替案
+
+- 切替提案専用 Skill、`beforeSubmitPrompt` ブロック Hook
+- オーケストレーション全文の Skill 複製、stop 連鎖の自動委譲ループ
+- 実績前の `.cursor/agents/` model固定ワーカー量産
+
+## 判断理由
+
+- 足りないのは機能ではなく tier マッピングの薄い載荷
+- Fable5 の価値は既に委譲ラダー＋検証規律に吸収済み。新規 Fable Skill は不要
+- Shell 誤操作は Rule 数行で再発防止でき、共通スクリプト化は過剰
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`.cursor/rules/`＝AIエージェント設定）。人間承認: 2026-07-09
+  （対話「推奨でやってみて」「いっしょにプルリク作って」を本バッチの事前承認とする）
+
+## 影響範囲
+
+- `docs/harness/ops/orchestration.md`
+- `docs/harness/ops/routing.md`（参照文言）
+- `docs/harness/roles/cursor.md`
+- `.cursor/rules/orchestration.mdc`（新規）
+- `.cursor/rules/multi-repo-shell.mdc`（新規）
+
+## 取り消し手順
+
+- `orchestration.mdc` / `multi-repo-shell.mdc` を削除し、§7 と関連解説・routing 文言を revert する
+
+## 見直す条件
+
+- 昇格提案がノイズになる／無視される
+- 指揮者セッションで委譲が自発されない（§5どおり明示強化が必要）
+- 週次で並列物量が常態化し、model固定サブエージェント1個の追加が妥当になったとき
+- multi-repo-shell が単一repo作業で過剰拘束になる場合
+
+## 次アクション
+
+- [ ] 独立レビュー（実装AI以外）
+- [ ] 人間が merge 判断
+
+承認: 人間（2026-07-09）— カテゴリ③、Skill/Hook量産はしない

@@ -1,0 +1,26 @@
+---
+description: "複数リポジトリ作業時の Shell/git/gh 誤操作防止（絶対パス・直列・remote照合）"
+alwaysApply: true
+---
+
+# 複数リポジトリの Shell 安全規則
+
+1つの会話で複数の git リポジトリを扱うとき、次を守る。
+
+## 必須
+
+- git / `gh` の**状態変更**（add・commit・push・`gh pr create`・`gh pr close`・`gh pr merge` 等）は、Shell の `working_directory` に**絶対パス**を必ず付ける。省略禁止。
+- 別リポジトリへの状態変更は**直列**にする。並列は読み取り（status・diff・log・view）までに限る。
+- `gh pr create` / `git push` の直前に、意図したリポジトリか照合する:
+  - `git remote get-url origin`
+  - 必要なら `gh repo view --json nameWithOwner -q .nameWithOwner`
+  - 一致しない場合は実行せず停止する
+
+## やらなくてよいこと
+
+- 単純な読み取りや、単一リポジトリだけの作業で、すべての Shell を絶対パス必須にはしない
+- この規則のためにリポジトリ横断の大規模リファクタや共通スクリプト化はしない
+
+## 背景（再発防止）
+
+cwd の引き継ぎ + 別repo向け push/PR の並列実行により、誤リポジトリへ PR が作られた事例がある。

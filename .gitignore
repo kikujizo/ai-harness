@@ -2,3 +2,6 @@
 # .agents/skills が正本。これを追跡すると junction を実フォルダとして辿り二重コミットになる。
 # この1行がテンプレート構造（Skill SSOT + セットアップ時リンク生成）の成立条件。
 /.claude/skills
+
+# Claude Code 個人設定（共有床は settings.json。所有権は docs/harness/sync-ownership.md）
+.claude/settings.local.json

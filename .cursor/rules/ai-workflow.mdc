@@ -16,3 +16,5 @@ Cursor-specific rules only:
 - After completing work, always report via the handoff-report skill format.
 - For document/article writing tasks, use the recursive-writing skill.
 - Never read, print, or commit `.env` or any secret. Never push to main.
+- GitHubへ書き込む人間向けテキストの冒頭に `> **記録者**: Cursor` 等を置く（共通ルールは
+  `AGENTS.md`「GitHubドリヴン記録」参照。他AIのサービス名を名乗らない）。

@@ -596,3 +596,85 @@ Issue #16 で適用先側の dry-run は `ownership_violations=0` / `stop_reason
 
 承認: 人間（2026-07-10、Issue #18）— `risk=high gate=human_approval`、実装者 Cursor、fan-out / schedule / 自動merge / `mode=create-pr` 自動起動は実装しない。初回 live dispatch は merge 後に別承認。
 
+---
+
+# Decision: AIのGitHub書き込みに記録者のサービス名を明記する
+
+Date: 2026-07-10
+Status: Accepted
+Related Issues: #25
+Related PRs: #28
+
+## 決定事項
+
+全AIが生成してGitHubへ書き込む人間向けテキストの冒頭に、共通テンプレート
+`> **記録者**: {AIサービス名}` を必須とする。必須項目はAIサービス名のみとし、
+ChatGPT / Codex / Cursor / Claude Code は各自のサービス名のみを記録者とする。
+共通原則の正本は `AGENTS.md` とし、各AI固有ルールには具体表記と参照のみを置く。
+
+## 背景・課題
+
+GitHubアカウントがAIサービスごとに分離されていない経路では、author表示だけでは
+実際の生成主体を判別できない。Issue #18 dispatch pilot 等で、複数AIが同一アカウント経由で
+記録した際の追跡性不足が顕在化した。
+
+## 採用する方針
+
+- 共通テンプレート `> **記録者**: {AIサービス名}` を全AIのGitHub書き込みに適用する
+- GitHub authorで判別できる経路も例外にせず、本文に共通テンプレートを置く
+- 役割名・モデル名・バージョンは任意補足とする
+- 代行・代理時は生成主体を記録者とし、代理役割は記録者行の括弧補足とする
+- 人間転記時は生成主体（記録者）と投稿経路（転記者）を別行で明記する
+- 本Checkpointでは5ファイル（`AGENTS.md` / `.cursor/rules/ai-workflow.mdc` / `CLAUDE.md` /
+  `docs/harness/roles/chatgpt.md` / 本Decision Log）に限定し、
+  `docs/harness/roles/codex.md`・`cursor.md`・`claude-code.md` の解説同期は後続Checkpointへ分離する
+  （Codexは `AGENTS.md` を直接参照可能なため本Checkpointでは省略）
+
+## 採用しない方針 / 却下した代替案
+
+- Cursor限定ルール: 全AI共通の出力契約として `AGENTS.md` に置く方針へ改訂済みのため却下
+- author判別可能経路の例外化: 読む側の一貫性と運用漏れ防止のため却下
+- CI/workflowによる自動付与: スコープ外（Issue #25）
+- モデル名・バージョンの必須化: 変更され得るため却下
+
+## 判断理由
+
+- 本文だけで生成主体を追跡できれば、GitHubアカウント分離なしでも監査・レビューが可能
+- 正本1箇所（`AGENTS.md`）＋各AI固有の具体表記のみ、という既存SSOT設計と整合する
+- `git revert` で完全に戻せる（可逆）
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`AGENTS.md` / `CLAUDE.md` / AIエージェント設定配下の変更）。
+  人間の承認: 2026-07-10 取得済み（Issue #25）
+
+## 影響範囲
+
+- `AGENTS.md`（記録者明記ルール・テンプレート・サービス名対応表）
+- `.cursor/rules/ai-workflow.mdc`（Cursor具体表記）
+- `CLAUDE.md`（Claude Code具体表記）
+- `docs/harness/roles/chatgpt.md`（ChatGPT貼付用具体表記）
+- 本 Decision Log
+- 後続Checkpoint: `docs/harness/roles/codex.md`・`cursor.md`・`claude-code.md` の解説同期
+
+## 取り消し手順
+
+1. 本Decision Logエントリを Superseded に変更する
+2. 上記影響範囲のファイルから記録者明記関連の追記を revert する
+3. `git revert` で完全に戻せる（可逆）
+
+## 見直す条件
+
+- 記録者表記の運用漏れが定着しない場合
+- GitHubアカウント分離やbot経路の整備により、本文表記が冗長になった場合
+
+## 次アクション
+
+- [ ] ChatGPT要件レビュー
+- [ ] Codex技術レビュー
+- [ ] Codex PM判断
+- [ ] 人間merge
+- [ ] 後続Checkpointで roles 解説3ファイルを同期する
+
+承認: 人間（2026-07-10、Issue #25）— カテゴリ③ high-risk、実装者 Cursor
+

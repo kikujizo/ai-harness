@@ -2,12 +2,13 @@
 
 `ai-harness` 側から、適用先 1 repo の `harness-sync` workflow を **人間の手動実行・承認つき**で dispatch する最小経路の検証記録。
 
-関連: Issue #10（target 側手動 dry-run） / Issue #14（source 読み取り public 化） / Issue #16（ownership_violation 解消） / Issue #18（本 Checkpoint）
+関連: Issue #10（target 側手動 dry-run） / Issue #14（source 読み取り public 化） / Issue #16（ownership_violation 解消） / Issue #18（本 Checkpoint） / Issue #26（初回 live dispatch 記録反映）
 
 ## 目的
 
 Issue #16 までで `kikujizo/ai-dev-workflow` 側の手動 `harness-sync` dry-run は成功している。
-次の最小単位は「正本側（`kikujizo/ai-harness`）から 1 repo へ dry-run を呼び出せること」の確認である。
+Issue #18 / PR #24 により正本側から 1 repo へ dry-run を dispatch する入口が merge 済みであり、
+**初回 live dispatch は 2026-07-10 に人間承認のうえ実施し、成功を確認した**（詳細は下記「live 検証記録」）。
 
 本パイロットでは次のみを対象とする。
 
@@ -22,9 +23,10 @@ Issue #16 までで `kikujizo/ai-dev-workflow` 側の手動 `harness-sync` dry-r
 | 段階 | 内容 | 状態 |
 |---|---|---|
 | 1. 実装承認 | `.github/workflows/harness-dispatch.yml` 等の追加・変更 | 2026-07-10 取得済み（Cursor 実装担当） |
-| 2. 初回 live dispatch 承認 | merge 後、実際に cross-repo dispatch を実行してよいか | **未実施（人間承認待ち）** |
+| 2. 初回 live dispatch 承認 | merge 後、実際に cross-repo dispatch を実行してよいか | **2026-07-10 実施済み（成功）** |
 
 初回 live dispatch は、PR merge と secret 登録のあと、人間が明示承認してから実行する。
+2回目以降も自動化せず、同様に手動実行・人間承認が必要である。
 
 ## 実行手順
 
@@ -134,18 +136,58 @@ run URL の取得方針:
 
 `HARNESS_DISPATCH_RESULT` に `target_run_url` が無くても、`dispatch_status=accepted` まで到達していれば dispatch 自体は受理されている。
 
-## live 検証記録（merge 後・初回 dispatch 承認後に記入）
+## live 検証記録（初回 live dispatch — 2026-07-10 成功）
+
+初回 live dispatch は人間承認後に実施し、dispatch 側・target 側ともに期待ログを確認した。
 
 | 項目 | 値 |
 |---|---|
-| 実行日時 | （未記入） |
-| 実行者 | （未記入） |
-| ai-harness run URL | （未記入） |
-| target run URL | （未記入） |
-| source_sha | （未記入） |
-| target 側 stop_reason | （未記入） |
-| ownership_violations | （未記入） |
-| 初回 live dispatch 承認者 | （未記入） |
+| 実行日時 | 2026-07-10 |
+| 実行者 | 人間（手動 `workflow_dispatch`） |
+| ai-harness run URL | （Issue #26 記録時点で未提供。`kikujizo/ai-harness` → Actions → Harness dispatch pilot から当該日の run を参照） |
+| target run URL | https://github.com/kikujizo/ai-dev-workflow/actions/runs/29071837799 |
+| source_sha | `a8e099ffe5a15fb6b3f547611a4d442b4fb4d8bd`（PR #24 merge commit） |
+| dispatch_status | `accepted` |
+| target 側 stop_reason | `none` |
+| ownership_violations | `0` |
+| changed_files（target 側 dry-run） | `15` |
+| 初回 live dispatch 承認者 | 人間 |
+
+### dispatch 側ログ（実績）
+
+```text
+HARNESS_DISPATCH_RESULT
+source_repo=kikujizo/ai-harness
+source_ref=main
+source_sha=a8e099ffe5a15fb6b3f547611a4d442b4fb4d8bd
+target_repo=kikujizo/ai-dev-workflow
+target_workflow=harness-sync
+mode=dry-run
+dispatch_status=accepted
+target_run_url=https://github.com/kikujizo/ai-dev-workflow/actions/runs/29071837799
+step3_plus=manual_dispatch_only
+fanout_schedule_automerge=not_implemented
+```
+
+### target 側ログ（実績）
+
+```text
+HARNESS_SYNC_DIAG
+source_repo=kikujizo/ai-harness
+source_ref=main
+source_sha=a8e099ffe5a15fb6b3f547611a4d442b4fb4d8bd
+mode=dry-run
+changed_files=15
+ownership_violations=0
+stop_reason=none
+```
+
+### 既知の後続対応（本 run では成功、別 Issue で対応）
+
+| 項目 | 内容 |
+|---|---|
+| roles 変更警告 | target 側 run で roles 再貼付に関する警告が出た。run 自体は成功。再貼付は別 Issue |
+| Node.js 20 deprecation 警告 | GitHub Actions の Node.js 20 廃止予告警告が出た。run 自体は成功。対応は別 Issue |
 
 ## 取り消し手順
 

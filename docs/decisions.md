@@ -494,9 +494,9 @@ Related PRs: #23
 # Decision: ai-harnessから1 repoへ手動承認つきでharness-syncをdispatchする
 
 Date: 2026-07-10
-Status: Proposed
-Related Issues: #10, #14, #16, #18
-Related PRs: TBD
+Status: Accepted
+Related Issues: #10, #14, #16, #18, #26
+Related PRs: #24
 
 ## 決定事項
 
@@ -565,20 +565,34 @@ Issue #16 で適用先側の dry-run は `ownership_violations=0` / `stop_reason
 - target 側 run URL を追跡できず人間が確認不能になる場合
 - 1 repo dry-run で想定外の同期差分が出た場合
 
-## merge 後の確認結果（初回 live dispatch 承認後に記入）
+## merge 後の確認結果（初回 live dispatch — 2026-07-10 実施済み）
 
-- [ ] `HARNESS_DISPATCH_TOKEN` を人間が GitHub UI で登録した
-- [ ] `Harness dispatch pilot` を手動実行し `HARNESS_DISPATCH_RESULT` を確認した
-- [ ] `kikujizo/ai-dev-workflow` 側 `harness-sync` dry-run が開始された
-- [ ] target 側で `ownership_violations=0` / `stop_reason=none` を確認した（または停止理由を記録した）
-- [ ] 結果を `docs/harness/dispatch-pilot.md` の live 検証記録表に追記した
+- [x] `HARNESS_DISPATCH_TOKEN` を人間が GitHub UI で登録した
+- [x] `Harness dispatch pilot` を手動実行し `HARNESS_DISPATCH_RESULT` を確認した
+- [x] `kikujizo/ai-dev-workflow` 側 `harness-sync` dry-run が開始された
+- [x] target 側で `ownership_violations=0` / `stop_reason=none` を確認した
+- [x] 結果を `docs/harness/dispatch-pilot.md` の live 検証記録表に追記した（Issue #26）
+
+### 初回 live dispatch 実績（2026-07-10）
+
+| 項目 | 値 |
+|---|---|
+| merge commit SHA | `a8e099ffe5a15fb6b3f547611a4d442b4fb4d8bd`（PR #24） |
+| dispatch_status | `accepted` |
+| target run URL | https://github.com/kikujizo/ai-dev-workflow/actions/runs/29071837799 |
+| source_sha | `a8e099ffe5a15fb6b3f547611a4d442b4fb4d8bd` |
+| ownership_violations | `0` |
+| stop_reason | `none` |
+| changed_files（target 側 dry-run） | `15` |
+
+既知の後続対応（run は成功）: roles 再貼付警告、Node.js 20 deprecation 警告 — 別 Issue で対応。
 
 ## 次アクション
 
-- [ ] PR を作成し ChatGPT 要件レビュー・Codex 技術レビューを受ける
-- [ ] 人間が merge 判断
-- [ ] 初回 live dispatch の人間承認を取得する
-- [ ] live dispatch を実行し、上記確認結果を記入する
+- [x] PR #24 を作成し ChatGPT 要件レビュー・Codex 技術レビューを受ける
+- [x] 人間が merge 判断（merge commit: `a8e099f`）
+- [x] 初回 live dispatch の人間承認を取得する
+- [x] live dispatch を実行し、上記確認結果を記入する（Issue #26 で正本記録へ反映）
 
 承認: 人間（2026-07-10、Issue #18）— `risk=high gate=human_approval`、実装者 Cursor、fan-out / schedule / 自動merge / `mode=create-pr` 自動起動は実装しない。初回 live dispatch は merge 後に別承認。
 

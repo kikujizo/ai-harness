@@ -109,6 +109,7 @@ stop_reason=none
 | `dispatch_unauthorized` | credential の権限不足（HTTP 401/403 等） |
 | `target_not_allowed` | allowlist 外の target repo |
 | `mode_not_allowed` | `dry-run` 以外の mode |
+| `source_ref_not_allowed` | `main` 以外の source ref（checkpoint は main merge 起点固定） |
 | `target_workflow_not_found` | target 側に `harness-sync` workflow が見つからない |
 | `dispatch_failed` | dispatch API 失敗（HTTP status 等の非秘匿情報のみ記録） |
 

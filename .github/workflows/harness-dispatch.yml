@@ -22,10 +22,12 @@ on:
         options:
           - dry-run
       source_ref:
-        description: "ai-harness source ref"
+        description: "ai-harness source ref (main merge 起点固定)"
         required: true
         default: main
-        type: string
+        type: choice
+        options:
+          - main
 
 permissions:
   contents: read
@@ -41,12 +43,14 @@ jobs:
       - name: Validate allowlist and mode
         id: guard
         shell: bash
+        env:
+          TARGET_REPO: ${{ github.event.inputs.target_repo }}
+          MODE: ${{ github.event.inputs.mode }}
+          SOURCE_REF: ${{ github.event.inputs.source_ref }}
         run: |
           set -euo pipefail
-          TARGET_REPO="${{ github.event.inputs.target_repo }}"
-          MODE="${{ github.event.inputs.mode }}"
-          SOURCE_REF="${{ github.event.inputs.source_ref }}"
           ALLOWED_TARGET="kikujizo/ai-dev-workflow"
+          ALLOWED_SOURCE_REF="main"
 
           if [[ "${TARGET_REPO}" != "${ALLOWED_TARGET}" ]]; then
             echo "HARNESS_DISPATCH_STOP stop_reason=target_not_allowed"
@@ -56,9 +60,8 @@ jobs:
             echo "HARNESS_DISPATCH_STOP stop_reason=mode_not_allowed"
             exit 1
           fi
-          if [[ -z "${SOURCE_REF}" ]]; then
-            echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_failed"
-            echo "detail=source_ref_empty"
+          if [[ "${SOURCE_REF}" != "${ALLOWED_SOURCE_REF}" ]]; then
+            echo "HARNESS_DISPATCH_STOP stop_reason=source_ref_not_allowed"
             exit 1
           fi
 
@@ -84,9 +87,9 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_REF: ${{ steps.guard.outputs.source_ref }}
         run: |
           set -euo pipefail
-          SOURCE_REF="${{ steps.guard.outputs.source_ref }}"
           if ! RESOLVED="$(gh api "repos/kikujizo/ai-harness/commits/${SOURCE_REF}" --jq .sha 2>/tmp/harness_dispatch_err.txt)"; then
             echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_failed"
             echo "detail=source_sha_unresolved"
@@ -102,13 +105,13 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.HARNESS_DISPATCH_TOKEN }}
+          TARGET_REPO: ${{ steps.guard.outputs.target_repo }}
+          WORKFLOW_FILE: harness-sync.yml
         run: |
           set -euo pipefail
-          TARGET_REPO="${{ steps.guard.outputs.target_repo }}"
-          WORKFLOW_PATH=".github/workflows/harness-sync.yml"
 
           set +e
-          WORKFLOW_ID="$(gh api "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_PATH}" --jq .id 2>/tmp/harness_dispatch_wf_err.txt)"
+          WORKFLOW_ID="$(gh api "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_FILE}" --jq .id 2>/tmp/harness_dispatch_wf_err.txt)"
           API_EXIT=$?
           set -e
 
@@ -131,16 +134,16 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.HARNESS_DISPATCH_TOKEN }}
+          TARGET_REPO: ${{ steps.guard.outputs.target_repo }}
+          MODE: ${{ steps.guard.outputs.mode }}
+          SOURCE_REF: ${{ steps.guard.outputs.source_ref }}
+          WORKFLOW_ID: ${{ steps.target_workflow.outputs.workflow_id }}
         run: |
           set -euo pipefail
-          TARGET_REPO="${{ steps.guard.outputs.target_repo }}"
-          MODE="${{ steps.guard.outputs.mode }}"
-          SOURCE_REF="${{ steps.guard.outputs.source_ref }}"
-          WORKFLOW_PATH=".github/workflows/harness-sync.yml"
 
           set +e
           HTTP_CODE="$(gh api --method POST \
-            "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_PATH}/dispatches" \
+            "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_ID}/dispatches" \
             -f ref=main \
             -f "inputs[mode]=${MODE}" \
             -f "inputs[source_ref]=${SOURCE_REF}" \
@@ -180,15 +183,15 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.HARNESS_DISPATCH_TOKEN }}
+          TARGET_REPO: ${{ steps.guard.outputs.target_repo }}
+          WORKFLOW_ID: ${{ steps.target_workflow.outputs.workflow_id }}
         run: |
           set -euo pipefail
-          TARGET_REPO="${{ steps.guard.outputs.target_repo }}"
-          WORKFLOW_PATH=".github/workflows/harness-sync.yml"
           TARGET_RUN_URL=""
 
           for _ in 1 2 3 4 5; do
             sleep 6
-            if RUN_URL="$(gh api "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_PATH}/runs?per_page=1" --jq '.workflow_runs[0].html_url' 2>/dev/null)"; then
+            if RUN_URL="$(gh api "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_ID}/runs?per_page=1" --jq '.workflow_runs[0].html_url' 2>/dev/null)"; then
               if [[ -n "${RUN_URL}" && "${RUN_URL}" != "null" ]]; then
                 TARGET_RUN_URL="${RUN_URL}"
                 break
@@ -202,19 +205,26 @@ jobs:
 
       - name: Emit HARNESS_DISPATCH_RESULT
         shell: bash
+        env:
+          SOURCE_REF: ${{ steps.guard.outputs.source_ref }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          TARGET_REPO: ${{ steps.guard.outputs.target_repo }}
+          MODE: ${{ steps.guard.outputs.mode }}
+          DISPATCH_STATUS: ${{ steps.dispatch.outputs.dispatch_status }}
+          TARGET_RUN_URL: ${{ steps.target_run.outputs.target_run_url }}
         run: |
           set -euo pipefail
           {
             echo "HARNESS_DISPATCH_RESULT"
             echo "source_repo=kikujizo/ai-harness"
-            echo "source_ref=${{ steps.guard.outputs.source_ref }}"
-            echo "source_sha=${{ steps.source.outputs.source_sha }}"
-            echo "target_repo=${{ steps.guard.outputs.target_repo }}"
+            echo "source_ref=${SOURCE_REF}"
+            echo "source_sha=${SOURCE_SHA}"
+            echo "target_repo=${TARGET_REPO}"
             echo "target_workflow=harness-sync"
-            echo "mode=${{ steps.guard.outputs.mode }}"
-            echo "dispatch_status=${{ steps.dispatch.outputs.dispatch_status }}"
-            if [[ -n "${{ steps.target_run.outputs.target_run_url }}" ]]; then
-              echo "target_run_url=${{ steps.target_run.outputs.target_run_url }}"
+            echo "mode=${MODE}"
+            echo "dispatch_status=${DISPATCH_STATUS}"
+            if [[ -n "${TARGET_RUN_URL}" ]]; then
+              echo "target_run_url=${TARGET_RUN_URL}"
             fi
             echo "step3_plus=manual_dispatch_only"
             echo "fanout_schedule_automerge=not_implemented"

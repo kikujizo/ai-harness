@@ -214,11 +214,18 @@ jobs:
 
           for _ in 1 2 3 4 5; do
             sleep 6
-            if CANDIDATE_URL="$(gh api \
+            if CANDIDATE_COUNT="$(gh api \
               "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_ID}/runs?event=workflow_dispatch&per_page=10" \
-              --jq "[.workflow_runs[] | select(.created_at >= \"${DISPATCH_STARTED_AT}\")][0].html_url" 2>/dev/null)"; then
-              if [[ -n "${CANDIDATE_URL}" && "${CANDIDATE_URL}" != "null" ]]; then
-                TARGET_RUN_URL="${CANDIDATE_URL}"
+              --jq "[.workflow_runs[] | select(.created_at >= \"${DISPATCH_STARTED_AT}\")] | length" 2>/dev/null)"; then
+              if [[ "${CANDIDATE_COUNT}" == "1" ]]; then
+                CANDIDATE_URL="$(gh api \
+                  "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_ID}/runs?event=workflow_dispatch&per_page=10" \
+                  --jq "[.workflow_runs[] | select(.created_at >= \"${DISPATCH_STARTED_AT}\")][0].html_url" 2>/dev/null)"
+                if [[ -n "${CANDIDATE_URL}" && "${CANDIDATE_URL}" != "null" ]]; then
+                  TARGET_RUN_URL="${CANDIDATE_URL}"
+                  break
+                fi
+              elif [[ "${CANDIDATE_COUNT}" =~ ^[0-9]+$ ]] && [[ "${CANDIDATE_COUNT}" -gt 1 ]]; then
                 break
               fi
             fi

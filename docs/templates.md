@@ -63,6 +63,15 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 `REVIEW_VERDICT:` はAI間機械伝達用の最終行（保留の理由は本文に明示）。書式の正本はルートの `AGENTS.md`
 「出力契約」の verdict 定義に従う。
 
+### verdict 補足（`PM_VERDICT` の `route` / `gate`）
+
+書式の正本はルートの `AGENTS.md` verdict 節。要点のみ:
+
+- `route`: 次に処理を担当する主体（`cursor`・`claude-code`）。承認ゲート通過後に付与。
+- `gate`: 次工程に進む前の停止条件。高リスク推奨: `gate=human_approval`（人間の事前承認ゲート。
+  人間が作業する意味ではない）。
+- `route=human`: deprecated 互換表記。意味は人間承認ゲート。今後の推奨は `gate=human_approval`。
+
 ## 4. Decision Log（既定は `docs/decisions.md` へ追記。導入先に `docs/decisions/` の日付ファイル慣行が既にあればそちらに従う）
 
 抜本変更・ゼロベース変更・高リスク変更・方針転換に使う。

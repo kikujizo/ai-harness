@@ -1,0 +1,221 @@
+# Issue #18 パイロット: ai-harness から 1 repo へ harness-sync を手動 dispatch
+# スコープ外: schedule / repository_dispatch / fan-out / 自動merge / mode=create-pr 自動起動
+# credential: repository secret 名のみ参照。実値はログ・docs・commit に出さない。
+
+name: Harness dispatch pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: "Target repository (allowlisted)"
+        required: true
+        default: kikujizo/ai-dev-workflow
+        type: choice
+        options:
+          - kikujizo/ai-dev-workflow
+      mode:
+        description: "Dispatch mode"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+      source_ref:
+        description: "ai-harness source ref"
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-dispatch-pilot
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate allowlist and mode
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_REPO="${{ github.event.inputs.target_repo }}"
+          MODE="${{ github.event.inputs.mode }}"
+          SOURCE_REF="${{ github.event.inputs.source_ref }}"
+          ALLOWED_TARGET="kikujizo/ai-dev-workflow"
+
+          if [[ "${TARGET_REPO}" != "${ALLOWED_TARGET}" ]]; then
+            echo "HARNESS_DISPATCH_STOP stop_reason=target_not_allowed"
+            exit 1
+          fi
+          if [[ "${MODE}" != "dry-run" ]]; then
+            echo "HARNESS_DISPATCH_STOP stop_reason=mode_not_allowed"
+            exit 1
+          fi
+          if [[ -z "${SOURCE_REF}" ]]; then
+            echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_failed"
+            echo "detail=source_ref_empty"
+            exit 1
+          fi
+
+          echo "target_repo=${TARGET_REPO}" >> "$GITHUB_OUTPUT"
+          echo "mode=${MODE}" >> "$GITHUB_OUTPUT"
+          echo "source_ref=${SOURCE_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Check credential
+        id: credential
+        shell: bash
+        env:
+          DISPATCH_TOKEN: ${{ secrets.HARNESS_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DISPATCH_TOKEN}" ]]; then
+            echo "HARNESS_DISPATCH_STOP stop_reason=credential_missing"
+            exit 1
+          fi
+          echo "credential_configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve source SHA
+        id: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SOURCE_REF="${{ steps.guard.outputs.source_ref }}"
+          if ! RESOLVED="$(gh api "repos/kikujizo/ai-harness/commits/${SOURCE_REF}" --jq .sha 2>/tmp/harness_dispatch_err.txt)"; then
+            echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_failed"
+            echo "detail=source_sha_unresolved"
+            if [[ -f /tmp/harness_dispatch_err.txt ]]; then
+              echo "http_hint=$(head -n 1 /tmp/harness_dispatch_err.txt)"
+            fi
+            exit 1
+          fi
+          echo "source_sha=${RESOLVED}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify target workflow
+        id: target_workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HARNESS_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TARGET_REPO="${{ steps.guard.outputs.target_repo }}"
+          WORKFLOW_PATH=".github/workflows/harness-sync.yml"
+
+          set +e
+          WORKFLOW_ID="$(gh api "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_PATH}" --jq .id 2>/tmp/harness_dispatch_wf_err.txt)"
+          API_EXIT=$?
+          set -e
+
+          if [[ "${API_EXIT}" -ne 0 ]]; then
+            if grep -qE "HTTP 401|HTTP 403" /tmp/harness_dispatch_wf_err.txt; then
+              echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_unauthorized"
+              echo "http_hint=$(grep -oE 'HTTP [0-9]+' /tmp/harness_dispatch_wf_err.txt | head -n 1)"
+            else
+              echo "HARNESS_DISPATCH_STOP stop_reason=target_workflow_not_found"
+              if [[ -f /tmp/harness_dispatch_wf_err.txt ]]; then
+                echo "http_hint=$(head -n 1 /tmp/harness_dispatch_wf_err.txt)"
+              fi
+            fi
+            exit 1
+          fi
+          echo "workflow_id=${WORKFLOW_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch harness-sync
+        id: dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HARNESS_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TARGET_REPO="${{ steps.guard.outputs.target_repo }}"
+          MODE="${{ steps.guard.outputs.mode }}"
+          SOURCE_REF="${{ steps.guard.outputs.source_ref }}"
+          WORKFLOW_PATH=".github/workflows/harness-sync.yml"
+
+          set +e
+          HTTP_CODE="$(gh api --method POST \
+            "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_PATH}/dispatches" \
+            -f ref=main \
+            -f "inputs[mode]=${MODE}" \
+            -f "inputs[source_ref]=${SOURCE_REF}" \
+            -i 2>/tmp/harness_dispatch_api_err.txt | head -n 1 | awk '{print $2}')"
+          API_EXIT=$?
+          set -e
+
+          if [[ "${API_EXIT}" -ne 0 ]]; then
+            if [[ "${HTTP_CODE}" == "401" || "${HTTP_CODE}" == "403" ]]; then
+              echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_unauthorized"
+              echo "http_status=${HTTP_CODE}"
+            else
+              echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_failed"
+              echo "http_status=${HTTP_CODE:-unknown}"
+              if [[ -f /tmp/harness_dispatch_api_err.txt ]]; then
+                echo "http_hint=$(head -n 1 /tmp/harness_dispatch_api_err.txt)"
+              fi
+            fi
+            exit 1
+          fi
+
+          if [[ "${HTTP_CODE}" != "204" ]]; then
+            if [[ "${HTTP_CODE}" == "401" || "${HTTP_CODE}" == "403" ]]; then
+              echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_unauthorized"
+              echo "http_status=${HTTP_CODE}"
+            else
+              echo "HARNESS_DISPATCH_STOP stop_reason=dispatch_failed"
+              echo "http_status=${HTTP_CODE:-unknown}"
+            fi
+            exit 1
+          fi
+
+          echo "dispatch_status=accepted" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve target run URL
+        id: target_run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HARNESS_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          TARGET_REPO="${{ steps.guard.outputs.target_repo }}"
+          WORKFLOW_PATH=".github/workflows/harness-sync.yml"
+          TARGET_RUN_URL=""
+
+          for _ in 1 2 3 4 5; do
+            sleep 6
+            if RUN_URL="$(gh api "repos/${TARGET_REPO}/actions/workflows/${WORKFLOW_PATH}/runs?per_page=1" --jq '.workflow_runs[0].html_url' 2>/dev/null)"; then
+              if [[ -n "${RUN_URL}" && "${RUN_URL}" != "null" ]]; then
+                TARGET_RUN_URL="${RUN_URL}"
+                break
+              fi
+            fi
+          done
+
+          if [[ -n "${TARGET_RUN_URL}" ]]; then
+            echo "target_run_url=${TARGET_RUN_URL}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Emit HARNESS_DISPATCH_RESULT
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "HARNESS_DISPATCH_RESULT"
+            echo "source_repo=kikujizo/ai-harness"
+            echo "source_ref=${{ steps.guard.outputs.source_ref }}"
+            echo "source_sha=${{ steps.source.outputs.source_sha }}"
+            echo "target_repo=${{ steps.guard.outputs.target_repo }}"
+            echo "target_workflow=harness-sync"
+            echo "mode=${{ steps.guard.outputs.mode }}"
+            echo "dispatch_status=${{ steps.dispatch.outputs.dispatch_status }}"
+            if [[ -n "${{ steps.target_run.outputs.target_run_url }}" ]]; then
+              echo "target_run_url=${{ steps.target_run.outputs.target_run_url }}"
+            fi
+            echo "step3_plus=manual_dispatch_only"
+            echo "fanout_schedule_automerge=not_implemented"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -47,11 +47,17 @@ jobs:
           TARGET_REPO: ${{ github.event.inputs.target_repo }}
           MODE: ${{ github.event.inputs.mode }}
           SOURCE_REF: ${{ github.event.inputs.source_ref }}
+          WORKFLOW_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           ALLOWED_TARGET="kikujizo/ai-dev-workflow"
           ALLOWED_SOURCE_REF="main"
+          ALLOWED_WORKFLOW_REF="main"
 
+          if [[ "${WORKFLOW_REF}" != "${ALLOWED_WORKFLOW_REF}" ]]; then
+            echo "HARNESS_DISPATCH_STOP stop_reason=source_workflow_ref_not_allowed"
+            exit 1
+          fi
           if [[ "${TARGET_REPO}" != "${ALLOWED_TARGET}" ]]; then
             echo "HARNESS_DISPATCH_STOP stop_reason=target_not_allowed"
             exit 1

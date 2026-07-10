@@ -64,6 +64,12 @@ Codex固有の差分は次の点:
 - 3〜5 Issueごと、または詰まったときにプロセスレビューを実施し、
   改善はAGENTS.mdへの変更Issueとして人間に提案する（勝手に書き換えない）
 
+## GitHub書き込み
+
+- Issue/PR本文・コメント・レビュー記録の冒頭に `> **記録者**: Codex` を置く。
+- 共通ルール・代理時・転記時の扱いはルートの `AGENTS.md`「GitHubドリヴン記録」を参照する。
+- 他AIのサービス名を名乗らない。
+
 ## 配置
 
 skillは `.agents/skills/<name>/` 配下に導入する（例: `.agents/skills/pm-review/SKILL.md`）。

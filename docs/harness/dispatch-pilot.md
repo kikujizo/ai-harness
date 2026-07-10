@@ -117,11 +117,18 @@ stop_reason=none
 
 ## target run URL が即時取得できない場合
 
-dispatch API は 204 を返し、run ID を即時返さないことがある。
-その場合は次で確認する。
+dispatch API は **204** または **200** を成功として扱う（200 の場合はレスポンス本文から run URL を取得できるときのみ利用する）。
+
+run URL の取得方針:
+
+- dispatch 開始時刻（`dispatch_started_at`）より前に作成された既存 run は、今回の結果として記録しない
+- `event=workflow_dispatch` かつ `created_at >= dispatch_started_at` の run のみを対象にする
+- 確実な run URL が取れない場合は、誤った旧 run URL を出すより `target_run_url` を未出力にする
+
+上記で URL が取れない場合は、次で手動確認する。
 
 1. `kikujizo/ai-dev-workflow` → **Actions** → **harness-sync**
-2. 最新の workflow run を開く（dispatch 実行直後に作成された run）
+2. dispatch 実行直後に作成された `workflow_dispatch` run を開く
 3. run URL を本ファイルの「live 検証記録」表に追記する
 
 `HARNESS_DISPATCH_RESULT` に `target_run_url` が無くても、`dispatch_status=accepted` まで到達していれば dispatch 自体は受理されている。

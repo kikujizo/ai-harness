@@ -489,3 +489,96 @@ Related PRs: #23
 
 承認: 人間（2026-07-10、Issue #21）
 
+---
+
+# Decision: ai-harnessから1 repoへ手動承認つきでharness-syncをdispatchする
+
+Date: 2026-07-10
+Status: Proposed
+Related Issues: #10, #14, #16, #18
+Related PRs: TBD
+
+## 決定事項
+
+`ai-harness` 側から `kikujizo/ai-dev-workflow` の `harness-sync` workflow を、人間の手動実行・承認つきで dispatch する最小経路を採用する。
+本段階では `mode=dry-run` のみを対象とし、fan-out / schedule / 自動mergeは採用しない。
+
+高リスク時の表記は `risk=high gate=human_approval` とする（旧 `route=human` は人間の事前承認ゲートの互換読み替え）。
+
+## 背景・課題
+
+Issue #16 で適用先側の dry-run は `ownership_violations=0` / `stop_reason=none` まで成功したが、まだ人間が適用先 repo で直接 `harness-sync` を起動している。
+正本更新を各 repo へ配布する構想へ進むには、まず正本側から 1 repo へ安全に呼び出す入口を検証する必要がある。
+
+## 採用する方針
+
+- 1 repo 限定（`kikujizo/ai-dev-workflow` のみ）
+- `mode=dry-run` 限定
+- `ai-harness` 側の `workflow_dispatch` workflow（`Harness dispatch pilot`）から手動 dispatch
+- GitHub REST API / `gh workflow run` 相当で既存 `harness-sync` を起動（`repository_dispatch` は使わない）
+- credential は repository secret 名 `HARNESS_DISPATCH_TOKEN` のみ参照。実値は人間が GitHub UI で登録
+- merge は人間。初回 live dispatch は実装承認とは別の人間承認を要する
+
+## 採用しない方針 / 却下した代替案
+
+- 複数 repo fan-out: 失敗範囲が広がるため後続 Issue へ分離
+- schedule: 意図しない起動を避けるため後続 Issue へ分離
+- 自動 merge: 不可逆影響が大きいため後続 Issue へ分離
+- `repository_dispatch`: target 側に追加受け口が必要で、既存 `harness-sync` 活用の最小経路から外れる
+- GitHub App 化: 恒久運用設計に膨らむため本 Checkpoint では却下
+- `GITHUB_TOKEN` のみ: cross-repo workflow dispatch には不足
+- environment approval の必須化: 本最小検証では過剰。fan-out / schedule 化前の別 Issue で検討
+- credential 実値の Issue / PR / ログ記載: 秘匿情報漏洩につながるため禁止
+
+## 判断理由
+
+- Issue #16 で target 側の dry-run 成功条件は満たされている
+- 次に検証すべき最小単位は「正本側から 1 repo へ呼べること」である
+- 1 repo / dry-run / 手動承認に制限すれば、失敗時の影響を限定できる
+- secret 名・権限・停止理由を文書化すれば、カテゴリ①を管理可能な範囲に抑えられる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ①: 該当。credential が必要。secret 値は人間のみが扱い、AI は発行・登録・出力しない
+- カテゴリ②: なし。追加課金なし
+- カテゴリ③: 該当。GitHub Actions / cross-repo dispatch / 同期経路に触れる
+- カテゴリ④: なし。dry-run 限定
+
+## 影響範囲
+
+- `kikujizo/ai-harness` — `.github/workflows/harness-dispatch.yml`, `docs/harness/dispatch-pilot.md`
+- `kikujizo/ai-dev-workflow` — 既存 `harness-sync` を dispatch 先として利用（改修なし）
+- repository secret `HARNESS_DISPATCH_TOKEN`（人間登録）
+
+## 取り消し手順
+
+- 追加した dispatch workflow を無効化または削除する
+- dispatch 用 secret `HARNESS_DISPATCH_TOKEN` を人間が GitHub UI で削除する
+- 開いている dispatch 関連 PR があれば close する
+- 本 Decision の Status を Superseded にし、理由を追記する
+- 適用先側の `harness-sync` 手動実行運用へ戻す
+
+## 見直す条件
+
+- dispatch が権限不足で安定しない場合
+- credential 権限が過大になる場合
+- target 側 run URL を追跡できず人間が確認不能になる場合
+- 1 repo dry-run で想定外の同期差分が出た場合
+
+## merge 後の確認結果（初回 live dispatch 承認後に記入）
+
+- [ ] `HARNESS_DISPATCH_TOKEN` を人間が GitHub UI で登録した
+- [ ] `Harness dispatch pilot` を手動実行し `HARNESS_DISPATCH_RESULT` を確認した
+- [ ] `kikujizo/ai-dev-workflow` 側 `harness-sync` dry-run が開始された
+- [ ] target 側で `ownership_violations=0` / `stop_reason=none` を確認した（または停止理由を記録した）
+- [ ] 結果を `docs/harness/dispatch-pilot.md` の live 検証記録表に追記した
+
+## 次アクション
+
+- [ ] PR を作成し ChatGPT 要件レビュー・Codex 技術レビューを受ける
+- [ ] 人間が merge 判断
+- [ ] 初回 live dispatch の人間承認を取得する
+- [ ] live dispatch を実行し、上記確認結果を記入する
+
+承認: 人間（2026-07-10、Issue #18）— `risk=high gate=human_approval`、実装者 Cursor、fan-out / schedule / 自動merge / `mode=create-pr` 自動起動は実装しない。初回 live dispatch は merge 後に別承認。
+

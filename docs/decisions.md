@@ -601,9 +601,9 @@ Issue #16 で適用先側の dry-run は `ownership_violations=0` / `stop_reason
 # Decision: AIのGitHub書き込みに記録者のサービス名を明記する
 
 Date: 2026-07-10
-Status: Proposed
+Status: Accepted
 Related Issues: #25
-Related PRs: （本PR）
+Related PRs: #28
 
 ## 決定事項
 
@@ -623,7 +623,8 @@ GitHubアカウントがAIサービスごとに分離されていない経路で
 - 共通テンプレート `> **記録者**: {AIサービス名}` を全AIのGitHub書き込みに適用する
 - GitHub authorで判別できる経路も例外にせず、本文に共通テンプレートを置く
 - 役割名・モデル名・バージョンは任意補足とする
-- 代行・代理時は生成主体を記録者とし、転記者・代理役割を括弧で補足する
+- 代行・代理時は生成主体を記録者とし、代理役割は記録者行の括弧補足とする
+- 人間転記時は生成主体（記録者）と投稿経路（転記者）を別行で明記する
 - 本Checkpointでは5ファイル（`AGENTS.md` / `.cursor/rules/ai-workflow.mdc` / `CLAUDE.md` /
   `docs/harness/roles/chatgpt.md` / 本Decision Log）に限定し、
   `docs/harness/roles/codex.md`・`cursor.md`・`claude-code.md` の解説同期は後続Checkpointへ分離する
@@ -669,8 +670,10 @@ GitHubアカウントがAIサービスごとに分離されていない経路で
 
 ## 次アクション
 
-- [ ] PR merge（人間判断）
-- [ ] ChatGPT要件レビュー・Codex技術レビューを受ける
+- [ ] ChatGPT要件レビュー
+- [ ] Codex技術レビュー
+- [ ] Codex PM判断
+- [ ] 人間merge
 - [ ] 後続Checkpointで roles 解説3ファイルを同期する
 
 承認: 人間（2026-07-10、Issue #25）— カテゴリ③ high-risk、実装者 Cursor

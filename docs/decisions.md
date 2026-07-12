@@ -846,3 +846,112 @@ ChatGPTアダプタの扱いも未確定だった。
 - [ ] 人間 merge 判断
 - [ ] Issue #36（PR #20 / core 候補4 Skill）へ進む
 
+---
+
+# Decision: PR #20の4行動Skillを採用する（merge時ティア確定）
+
+Date: 2026-07-13
+Status: Accepted
+Related Issues: #36
+Related PRs: #20
+
+## 決定事項
+
+PR #20 の4 Skill を `.agents/skills/` に追加する。**merge 時の実効ティアは core / lab の二択のみ**
+（`AGENTS.md` 準拠。「core候補」は README 索引用語であり merge 後の発動規則ではない）。
+
+| Skill | 実績・根拠の人間確認 | merge時の実効ティア | 確認済み根拠 / 未確認理由 | 発動範囲 | 停止条件 |
+|---|---|---|---|---|---|
+| `orchestrate` | **済** | **core** | オーナー申告: Vault で約2ヶ月の実使用（[PR #20 comment](https://github.com/kikujizo/ai-harness/pull/20#issuecomment-4952193038)）。指揮・委譲の型は `docs/harness/ops/orchestration.md` / `token-discipline.md` 参照のみ | 大量・並列・機械走査を含むタスク開始時。委譲機能なし環境では設計案のみ | 委譲未実行を実行済みと報告した場合は即停止 |
+| `reframe-question` | **未済** | **lab** | Fable セッション由来の Skill 化のみ。GitHub 上でオーナーが実績・core 直行根拠を確認した記録なし | Skill名または上位ワークフローによる**明示指定時のみ**。指定時は依頼の問い再定義の入口 | 重大事故1件（未承認仕様追加・担当外実装・誤ルーティング）で停止 |
+| `assessment-first` | **未済** | **lab** | SKILL 内に 2026-07-08 承認の記述あるが、GitHub 上の確認済み URL を特定できず | Skill名または上位ワークフローによる**明示指定時のみ**。指定時はレビュー指摘・他AI提案への実行前評価報告 | 評価なし修正・無条件横展開走査で停止 |
+| `lateral-sweep` | **未済** | **lab** | Fable セッション由来の Skill 化のみ。GitHub 上でオーナーが実績・core 直行根拠を確認した記録なし | Skill名または上位ワークフローによる**明示指定時のみ**。指定時は読み取り・分類・後続 Issue 提案まで | 無承認修正・PR 作成で停止 |
+
+### lab Skill 共通（3 Skill）
+
+`reframe-question` / `assessment-first` / `lateral-sweep` は [AGENTS.md](AGENTS.md)「lab 共通規則」に従う。
+
+1. **発動**: Skill名または上位ワークフローによる明示指定時のみ（description トリガー一致だけでは発動しない）
+2. **昇格**: 実案件で2回以上使用し、重大事故0件なら core 昇格候補（Decision Log 記録）
+3. **停止**: 重大事故1件で停止し人間判断へ
+4. **サンセット**: 8週間0回使用で見送り判断
+
+### core Skill（1 Skill）
+
+`orchestrate` は core として merge 後即時、各 `SKILL.md` の description トリガーに従って発動する。
+core 停止後の lab 降格は Decision Log に追記する。
+
+## 背景・課題
+
+Issue #35 完了後、PR #20 の4 Skill を既存ハーネスの承認フロー・正本参照・mino 入口境界と
+矛盾なく導入する必要があった。初回 Decision Log は「core候補」「正式 core 昇格保留」「lab ではない」
+を併記しており、merge 後の発動規則（core 自動 / lab 明示指定）が確定していなかった
+（ChatGPT 要件レビュー・Codex 技術レビュー指摘）。
+
+## 採用する方針
+
+- Skill ごとに実績・根拠の人間確認（済/未済）と merge 時ティア（core/lab）を一意に確定
+- `orchestrate` のみ core（GitHub 上のオーナー申告実績あり）
+- 根拠未確認の3 Skill は lab（明示指定限定）
+- Issue #36 越権防止修正は各 SKILL.md に反映済み（変更なし）
+
+## 採用しない方針 / 却下した代替案
+
+- **4 Skill 一括 core**: 3 Skill は GitHub 上の確認済み根拠なしのため却下
+- **4 Skill 一括 lab**: `orchestrate` は Vault 実使用のオーナー申告（GitHub 記録あり）のため core 採用
+- **「core候補」のまま merge**: `AGENTS.md` に存在しない中間ティアのため却下
+- **`reframe-question` から未導入 mino Skill へ無条件移行**: 未導入 Skill のパス前提を禁止（維持）
+- **`lateral-sweep` 内での即時修正 PR**: 無承認修正リスクのため却下（維持）
+
+## 判断理由
+
+- Codex / ChatGPT レビュー: AC#1・#5 未充足の原因は実効ティアの混在。Skill ごとの一意化で解消
+- Issue #36 本文「根拠を確認できない Skill は lab へ変更」に従い、確認済み根拠のない Skill を lab に確定
+- `orchestrate` のみ [PR #20 comment](https://github.com/kikujizo/ai-harness/pull/20#issuecomment-4952193038) でオーナーが実使用を申告
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`.agents/skills/` 追加）
+
+## 人間承認（カテゴリ③）
+
+| 項目 | 内容 |
+|---|---|
+| 承認対象 | Issue #36 / PR #20 |
+| 実施開始 | [Issue #36 実施開始](https://github.com/kikujizo/ai-harness/issues/36#issuecomment-4952835791) |
+| 実装指示 | [Issue #36 実装指示書](https://github.com/kikujizo/ai-harness/issues/36#issuecomment-4952847010) |
+| レビュー指摘 | [ChatGPT 要件](https://github.com/kikujizo/ai-harness/pull/20#issuecomment-4952886361) / [Codex 技術](https://github.com/kikujizo/ai-harness/pull/20#issuecomment-4952944704) |
+| 実装担当 | Cursor |
+| merge | 人間 |
+
+承認: 人間（2026-07-13、Issue #36）— カテゴリ③ high-risk
+
+## 影響範囲
+
+- `.agents/skills/reframe-question/SKILL.md`（lab 明記）
+- `.agents/skills/orchestrate/SKILL.md`（core）
+- `.agents/skills/assessment-first/SKILL.md`（lab 明記）
+- `.agents/skills/lateral-sweep/SKILL.md`（lab 明記）
+- 本 Decision Log
+- merge 後: `README.md` の導入予定表を人間が更新（本 Issue スコープ外）
+
+## 取り消し手順
+
+1. PR #20 を revert または該当 Skill ディレクトリを削除
+2. 本 Decision Log エントリの Status を Superseded に変更
+3. lab → core に昇格済みの Skill がある場合は、降格を Decision Log に追記
+4. `git revert` でファイル変更は完全に戻せる（可逆）
+
+## 見直す条件
+
+- lab Skill（3件）が実案件2回以上・事故0件で core 昇格候補になった場合（Decision Log 追記）
+- いずれかの Skill で重大事故1件（停止・lab 降格判断）
+- merge 後 README の表を現存 Skill / lab / core に同期
+
+## 次アクション
+
+- [ ] ChatGPT 要件再レビュー（AC#1・#5 のみ）
+- [ ] Codex 技術再レビュー（AC#1・#5 のみ）
+- [ ] 人間 merge 判断（PR #20）
+- [ ] merge 後 README 表更新
+

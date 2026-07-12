@@ -60,29 +60,37 @@
 
 ## Skillティア・責務境界・発動優先順位
 
-Skill本数は固定しない。一覧は `.agents/skills/*/SKILL.md` の実在を正とする。
+Skill本数は固定しない。**実在Skill**は `.agents/skills/*/SKILL.md` を正とする。
+以下の表は人間向け索引であり、**導入予定Skillは未導入**である（ディレクトリが存在しない）。
 lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節。
 
-| Skill（ディレクトリ名） | ティア | 主責務 | 発動 | 備考 |
-|---|---|---|---|---|
-| `design-check` | core | 実装前の設計チェック（5行） | description トリガー |  |
-| `handoff-report` | core | セッション引き継ぎ資料 | description トリガー |  |
-| `knowledge-reflux` | core | 知見の正本還流 | description トリガー |  |
-| `loop-design` | core | 品質ループ設計 | description トリガー |  |
-| `pm-review` | core | Issue/依頼のPM評価・ルーティング | description トリガー |  |
-| `recursive-review` | core | 基準照合レビュー | description トリガー |  |
-| `recursive-writing` | core | 基準照合執筆 | description トリガー |  |
-| `reframe-question` | core候補（#36） | 依頼の問いの再定義 | PR #20 merge 後に判断 | Issue #36 で core 昇格可否を決める |
-| `orchestrate` | core候補（#36） | 指揮・下位モデル委譲 | 同上 | 同上 |
-| `assessment-first` | core候補（#36） | 指摘への実行前評価報告 | 同上 | 同上 |
-| `lateral-sweep` | core候補（#36） | 失敗クラス横断走査 | 同上 | 同上 |
-| `mino-socratic-requirements` | lab | 要求定義（ソクラテス問答） | **明示指定時のみ** | Issue #37 以降でパイロット |
-| `mino-context-discovery` | lab | 境界・言語ゲーム発見 | **明示指定時のみ** | 同上 |
-| `mino-event-storming` | lab | イベントストーミング | **明示指定時のみ** | Issue #38 以降 |
-| `mino-model-deepening` | lab | モデル深化 | **明示指定時のみ** | 同上 |
-| `mino-contract-driven-coding` | lab | 契約駆動実装 | **明示指定時のみ** | 同上 |
-| `mino-changeability-review` | lab | 変更容易性レビュー | **明示指定時のみ** | 同上 |
-| ChatGPTアダプタ6本 | 常設移送外 | ChatGPT Projects 向け写し | 手動貼付のみ | リポジトリ常設・自動同期の対象外。必要時は都度コピー |
+### 現存Skill（`.agents/skills/` に実在）
+
+| Skill（ディレクトリ名） | ティア | 主責務 | 発動 |
+|---|---|---|---|
+| `design-check` | core | 実装前の設計チェック（5行） | description トリガー |
+| `handoff-report` | core | セッション引き継ぎ資料 | description トリガー |
+| `knowledge-reflux` | core | 知見の正本還流 | description トリガー |
+| `loop-design` | core | 品質ループ設計 | description トリガー |
+| `pm-review` | core | Issue/依頼のPM評価・ルーティング | description トリガー |
+| `recursive-review` | core | 基準照合レビュー | description トリガー |
+| `recursive-writing` | core | 基準照合執筆 | description トリガー |
+
+### 導入予定・候補Skill（未導入。Issue 完了後に `.agents/skills/` へ追加）
+
+| Skill（ディレクトリ名） | 状態 | ティア（予定） | 主責務 | 発動（予定） | 導入Issue |
+|---|---|---|---|---|---|
+| `reframe-question` | 未導入 | core候補 | 依頼の問いの再定義 | PR #20 merge 後に判断 | #36 |
+| `orchestrate` | 未導入 | core候補 | 指揮・下位モデル委譲 | 同上 | #36 |
+| `assessment-first` | 未導入 | core候補 | 指摘への実行前評価報告 | 同上 | #36 |
+| `lateral-sweep` | 未導入 | core候補 | 失敗クラス横断走査 | 同上 | #36 |
+| `mino-socratic-requirements` | 未導入 | lab | 要求定義（ソクラテス問答） | **明示指定時のみ** | #37 |
+| `mino-context-discovery` | 未導入 | lab | 境界・言語ゲーム発見 | **明示指定時のみ** | #37 |
+| `mino-event-storming` | 未導入 | lab | イベントストーミング | **明示指定時のみ** | #37 |
+| `mino-model-deepening` | 未導入 | lab | モデル深化 | **明示指定時のみ** | #38 |
+| `mino-contract-driven-coding` | 未導入 | lab | 契約駆動実装 | **明示指定時のみ** | #38 |
+| `mino-changeability-review` | 未導入 | lab | 変更容易性レビュー | **明示指定時のみ** | #38 |
+| ChatGPTアダプタ6本 | 未導入 | 常設移送外 | ChatGPT Projects 向け写し | 手動貼付のみ | 常設移送対象外 |
 
 **発動優先順位**（重複・曖昧時）:
 
@@ -93,16 +101,16 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節。
 
 **責務境界（重複時の原則）**:
 
-- 仕様化・Issue起票: ChatGPT（ロール）＋ `pm-review`（Skill）。`mino-socratic-requirements` は lab 明示指定時のみ
+- 仕様化・Issue起票: ChatGPT（ロール）＋ `pm-review`（Skill）。`mino-socratic-requirements` は lab 明示指定時のみ（#37 導入後）
 - 実装前設計: `design-check`（core）。lab の分析系Skillは明示指定時のみ
-- コードレビュー: `recursive-review`（core）。`mino-changeability-review` は lab 明示指定時のみ
-- 横断走査・還流: `lateral-sweep`（core候補）と `knowledge-reflux`（core）— #36 merge 後に境界を確定
+- コードレビュー: `recursive-review`（core）。`mino-changeability-review` は lab 明示指定時のみ（#38 導入後）
+- 横断走査・還流: `lateral-sweep`（core候補・#36）と `knowledge-reflux`（core）— #36 merge 後に境界を確定
 
-mino 共通原則の規範的正本は [docs/mino-skills/core/mino-core-principles.md](docs/mino-skills/core/mino-core-principles.md) の1ファイルのみ。各 mino Skill は参照し、全文複製しない。
+mino 共通原則の規範的正本は [docs/mino-skills/core/mino-core-principles.md](docs/mino-skills/core/mino-core-principles.md) の1ファイルのみ。各 mino Skill は参照し、全文複製しない（#37/#38 導入時に各 `SKILL.md` から参照する）。
 
 ## 既知の負債
 
 - **貼付2件は手動同期**: ChatGPT / Codex はリポジトリのファイルを自動で読めないため、
   [docs/harness/roles/chatgpt.md](docs/harness/roles/chatgpt.md) と [docs/harness/roles/codex.md](docs/harness/roles/codex.md)
   の内容を各ツールの設定へ人間が貼り付ける。**貼付元（`docs/harness/roles/`）が正本**であり、ツール側はその写し。
-- **Skill一覧の同期**: README の表は計画・境界の人間向け索引。実在Skillは `.agents/skills/` を正とし、追加・削除後は表と setup の実在確認手順で整合を取る。
+- **Skill一覧の同期**: README の表は計画・境界の人間向け索引（現存と導入予定を分離）。実在Skillは `.agents/skills/` を正とし、追加・削除後は表と setup の実在確認手順で整合を取る。

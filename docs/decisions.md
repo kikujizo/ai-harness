@@ -798,7 +798,22 @@ ChatGPTアダプタの扱いも未確定だった。
 
 ## リスク（不可逆4カテゴリの該当有無）
 
-- カテゴリ③に該当（`AGENTS.md` と Skill 運用規則の変更）。人間の事前承認: 2026-07-12〜13 取得済み（Issue #34 / #35）
+- カテゴリ③に該当（`AGENTS.md` と Skill 運用規則の変更）
+
+## 人間承認（カテゴリ③）
+
+| 項目 | 内容 |
+|---|---|
+| 承認対象 | Issue #35（本Checkpoint）。統合設計は #34 / 後続 #36〜#39 |
+| 承認根拠 | [Issue #34 統合確認 approve](https://github.com/kikujizo/ai-harness/issues/34#issuecomment-4952536622)（全AIレビュー完了後の `INTEGRATION_VERDICT: approve`） |
+| 実装指示 | [Issue #35 実装指示書](https://github.com/kikujizo/ai-harness/issues/35#issuecomment-4952560298)（人間の実装依頼後に Codex PM が発行） |
+| 実装担当 | Cursor |
+| 独立レビュー | ChatGPT（要件）＋ Codex（技術） |
+| merge | 人間 |
+| 後続順 | `#35 → #36 → #37 → #38`（`#39` は #35 完了後に #37 / #38 と並行可能） |
+| Decision Log | 本エントリ（`docs/decisions.md`） |
+
+承認: 人間（2026-07-12〜13、Issue #34 / #35）— カテゴリ③ high-risk、実装者 Cursor
 
 ## 影響範囲
 
@@ -830,6 +845,4 @@ ChatGPTアダプタの扱いも未確定だった。
 - [ ] Codex 技術レビュー
 - [ ] 人間 merge 判断
 - [ ] Issue #36（PR #20 / core 候補4 Skill）へ進む
-
-承認: 人間（2026-07-12〜13、Issue #34 / #35）— カテゴリ③ high-risk、実装者 Cursor
 

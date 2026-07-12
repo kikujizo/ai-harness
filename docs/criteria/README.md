@@ -6,6 +6,8 @@
 ## このフォルダのファイル
 
 - [writing-criteria.md](writing-criteria.md) — 文書・記事・報告書向けの基準（同梱の初期1枚）。
+- [code-review-criteria.md](code-review-criteria.md) — コード変更（diff/PR）向けのバイナリ基準（第1層）。実測ミス由来6項目＋暫定4項目。
+- [quality-lens.md](quality-lens.md) — コード向けの走査レンズ（第2層・非バイナリ）。集合知由来。発火2回で第1層へ昇格する補完層で、「1ファイル10項目以内・バイナリ」の運用ルールはこのファイルには適用しない（チェックリストではないため）。
 
 基準ファイルの作り方自体の方法論（バイナリ化・観測手順・較正・剪定）は
 [`../harness/knowledge/criteria-design-guide.md`](../harness/knowledge/criteria-design-guide.md) を参照する。

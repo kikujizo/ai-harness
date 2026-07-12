@@ -44,7 +44,7 @@
 | `AGENTS.md`・`CLAUDE.md` | 全AI共通の正本 / Claude Code実効ルール（ルート直下の実効ファイル） |
 | `.claude/settings.json` | Claude Codeの権限（読み取り許可・破壊/秘匿deny）の実JSON |
 | `.cursor/rules/ai-workflow.mdc` | Cursorの実効ルール（`alwaysApply`） |
-| `.agents/skills/<7本>/SKILL.md` | **Skillの正本（SSOT）**。Codexは直接読む。Claude Codeは `setup-links` のリンク経由 |
+| `.agents/skills/*/SKILL.md` | **Skillの正本（SSOT）**。本数は固定しない。実在は `.agents/skills/*/SKILL.md` で確認。Codexは直接読む。Claude Codeは `setup-links` のリンク経由 |
 | `.claude/skills` | `setup-links` が張るジャンクション（macOS/Linuxはシンボリックリンク。`.gitignore` 済み・コミットしない） |
 | `setup-links.bat`・`setup-links.sh` | リンク生成・検証（`--check`） |
 | `docs/templates.md`・`docs/criteria/`・`docs/risk-dial.md`・`docs/loop-ledger.md` | **運用正本**（導入先で記入して育てる） |
@@ -58,8 +58,59 @@
    本ハーネスは対話運用がベースで、CI/CD自動レーンは「承認の第2の源泉（状態機械）」として追加できる
 4. **実績ベースの昇格**: ルール・基準・ループの自律度は、実績（参照回数・×検出・完走実績）でのみ昇格し、インシデントで即降格する
 
+## Skillティア・責務境界・発動優先順位
+
+Skill本数は固定しない。**実在Skill**は `.agents/skills/*/SKILL.md` を正とする。
+以下の表は人間向け索引であり、**導入予定Skillは未導入**である（ディレクトリが存在しない）。
+lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節。
+
+### 現存Skill（`.agents/skills/` に実在）
+
+| Skill（ディレクトリ名） | ティア | 主責務 | 発動 |
+|---|---|---|---|
+| `design-check` | core | 実装前の設計チェック（5行） | description トリガー |
+| `handoff-report` | core | セッション引き継ぎ資料 | description トリガー |
+| `knowledge-reflux` | core | 知見の正本還流 | description トリガー |
+| `loop-design` | core | 品質ループ設計 | description トリガー |
+| `pm-review` | core | Issue/依頼のPM評価・ルーティング | description トリガー |
+| `recursive-review` | core | 基準照合レビュー | description トリガー |
+| `recursive-writing` | core | 基準照合執筆 | description トリガー |
+
+### 導入予定・候補Skill（未導入。Issue 完了後に `.agents/skills/` へ追加）
+
+| Skill（ディレクトリ名） | 状態 | ティア（予定） | 主責務 | 発動（予定） | 導入Issue |
+|---|---|---|---|---|---|
+| `reframe-question` | 未導入 | core候補 | 依頼の問いの再定義 | PR #20 merge 後に判断 | #36 |
+| `orchestrate` | 未導入 | core候補 | 指揮・下位モデル委譲 | 同上 | #36 |
+| `assessment-first` | 未導入 | core候補 | 指摘への実行前評価報告 | 同上 | #36 |
+| `lateral-sweep` | 未導入 | core候補 | 失敗クラス横断走査 | 同上 | #36 |
+| `mino-socratic-requirements` | 未導入 | lab | 要求定義（ソクラテス問答） | **明示指定時のみ** | #37 |
+| `mino-context-discovery` | 未導入 | lab | 境界・言語ゲーム発見 | **明示指定時のみ** | #37 |
+| `mino-event-storming` | 未導入 | lab | イベントストーミング | **明示指定時のみ** | #37 |
+| `mino-model-deepening` | 未導入 | lab | モデル深化 | **明示指定時のみ** | #38 |
+| `mino-contract-driven-coding` | 未導入 | lab | 契約駆動実装 | **明示指定時のみ** | #38 |
+| `mino-changeability-review` | 未導入 | lab | 変更容易性レビュー | **明示指定時のみ** | #38 |
+| ChatGPTアダプタ6本 | 未導入 | 常設移送外 | ChatGPT Projects 向け写し | 手動貼付のみ | 常設移送対象外 |
+
+**発動優先順位**（重複・曖昧時）:
+
+1. 人間またはIssueの明示指定（Skill名・工程名）
+2. core Skill の description 一致
+3. lab Skill は 1 がない限り発動しない
+4. 複数 core が候補のときは [AGENTS.md](AGENTS.md) の標準フロー（仕様化→PM→実装→レビュー）に沿い、最上流の工程Skillを優先する
+
+**責務境界（重複時の原則）**:
+
+- 仕様化・Issue起票: ChatGPT（ロール）＋ `pm-review`（Skill）。`mino-socratic-requirements` は lab 明示指定時のみ（#37 導入後）
+- 実装前設計: `design-check`（core）。lab の分析系Skillは明示指定時のみ
+- コードレビュー: `recursive-review`（core）。`mino-changeability-review` は lab 明示指定時のみ（#38 導入後）
+- 横断走査・還流: `lateral-sweep`（core候補・#36）と `knowledge-reflux`（core）— #36 merge 後に境界を確定
+
+mino 共通原則の規範的正本は [docs/mino-skills/core/mino-core-principles.md](docs/mino-skills/core/mino-core-principles.md) の1ファイルのみ。各 mino Skill は参照し、全文複製しない（#37/#38 導入時に各 `SKILL.md` から参照する）。
+
 ## 既知の負債
 
 - **貼付2件は手動同期**: ChatGPT / Codex はリポジトリのファイルを自動で読めないため、
   [docs/harness/roles/chatgpt.md](docs/harness/roles/chatgpt.md) と [docs/harness/roles/codex.md](docs/harness/roles/codex.md)
   の内容を各ツールの設定へ人間が貼り付ける。**貼付元（`docs/harness/roles/`）が正本**であり、ツール側はその写し。
+- **Skill一覧の同期**: README の表は計画・境界の人間向け索引（現存と導入予定を分離）。実在Skillは `.agents/skills/` を正とし、追加・削除後は表と setup の実在確認手順で整合を取る。

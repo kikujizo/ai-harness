@@ -225,5 +225,35 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 
 ## Skills
 
-Skillの正本は `.agents/skills/`。発動条件は各SKILL.mdのdescriptionに従う。
-新規Skillは正本にのみ追加する。
+Skillの正本は `.agents/skills/`。新規Skillは正本にのみ追加する。
+
+### ティア（core / lab）
+
+| ティア | 意味 | 発動 |
+|---|---|---|
+| **core** | 正式採用済み。ハーネス標準運用の一部 | 各 `SKILL.md` の description に従う |
+| **lab** | 実験・パイロット。昇格前の検証対象 | **Skill名または上位ワークフローによる明示指定時のみ** |
+
+lab Skill は description のトリガー文言があっても、一般依頼文だけでは発動候補にしない。
+明示指定とは、依頼文・Issue・PM指示・上位Skillの出力で **Skill名（または `mino-*` 等の合意済み接頭辞＋工程名）が名指し** されていること。
+人間向けの一覧・境界表は `README.md`、導入後の実在確認と非発動試験は `docs/harness/setup.md` を参照する。
+
+### lab 共通規則（規範・正本）
+
+以下は各 `SKILL.md` の description より上位の共通制約とする。
+
+1. **発動**: lab Skill は Skill名または上位ワークフローによる明示指定時のみ発動する
+2. **昇格候補**: 各 Skill を実案件で **2回以上** 使用し、次が **0件** の場合だけ core 昇格候補とする:
+   - 重大な誤ルーティング（担当外Skillの発動・本来coreが担うべき処理の lab 乗っ取り）
+   - 未承認仕様追加（Issue/受け入れ条件にない要件の勝手な追加）
+   - 担当外実装（実装AIが仕様化・merge判断等に踏み込む）
+3. **停止**: 上記いずれかの **重大事故1件** で当該 lab Skill を停止し、人間判断へ戻す（自動昇格・自動再開しない）
+4. **サンセット**: パイロット開始から **8週間** で使用 **0回** なら、見送りまたは削除を人間が判断する
+
+core への昇格・lab の停止・削除は Decision Log（`docs/decisions.md`）に記録する。
+
+### 発動条件（各Skill）
+
+core Skill の発動条件は各 `SKILL.md` の description に従う。
+lab Skill は上記 lab 共通規則に加え、各 `SKILL.md` の description を満たすこと。
+両者が矛盾する場合は、lab 共通規則（明示指定限定）が優先する。

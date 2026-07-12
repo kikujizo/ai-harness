@@ -746,3 +746,103 @@ Related PRs: #32
 
 承認: 人間（2026-07-12、Issue #31）— カテゴリ③ high-risk、実装者 Claude Code（例外委譲: 起草・成果物保有のため）
 
+---
+
+# Decision: Skill追加前のlab運用・一覧同期・minoコア原則SSOTを確定する
+
+Date: 2026-07-13
+Status: Accepted
+Related Issues: #34, #35
+Related PRs: （本PR）
+
+## 決定事項
+
+Skill追加（PR #20 / mino-* / 後続）に先立ち、次を確定する:
+
+1. **lab ティア**: 明示指定時のみ発動。昇格（実案件2回以上・重大事故0件）・停止（重大事故1件）・
+   サンセット（8週間使用0回）の共通規則を `AGENTS.md` に置く
+2. **Skill一覧**: 固定本数表記を廃止し、`.agents/skills/*/SKILL.md` の実在確認を正とする。
+   人間向け境界表は `README.md`、導入確認は `docs/harness/setup.md`
+3. **mino コア原則**: `docs/mino-skills/core/mino-core-principles.md` を唯一の規範的正本とし、
+   各 mino Skill は参照のみ（全文複製禁止）
+4. **ChatGPTアダプタ6本**: リポジトリ常設・自動同期の移送対象外。必要時は都度手動コピー
+5. **後続順**: `#35 → #36 → #37 → #38`。`#39` は #35 完了後に #37 / #38 と並行可能
+
+## 背景・課題
+
+Issue #34 で PR #33（mino-* 6本一括）と PR #20（4 Skill）の統合方針を決める必要があった。
+README / setup の「7本」固定表記は Skill 追加のたびに不整合を生む。lab 規則の正本、mino コア原則の配置、
+ChatGPTアダプタの扱いも未確定だった。
+
+## 採用する方針
+
+- lab 規則の規範的正本を `AGENTS.md`、人間向け境界表を `README.md`、導入確認を `setup.md` に分離
+- Skill 本数は固定せず実在ディレクトリを正とする
+- mino コア原則は1ファイルSSOT＋各Skill参照（PR #33 案の「各Skillへ複製」は採用しない）
+- ChatGPTアダプタは常設移送しない（手動貼付の都度利用）
+- 段階導入順を Decision Log と Issue 系列で固定
+
+## 採用しない方針 / 却下した代替案
+
+- **6本一括採用（PR #33そのまま）**: 既存Skillとの発動境界が不明確になり、撤回コストが高いため却下
+- **各 mino Skill へのコア原則全文複製**: SSOT Rot と同期漏れを生むため却下。参照のみに統一
+- **ChatGPTアダプタ6本の常設移送**: 二重保守・同期漏れ・カテゴリ③の範囲膨張のため却下
+- **README に lab 規則の規範を置く**: 実効ルール正本は `AGENTS.md` の原則に反するため却下
+- **Skill 本数の固定表記維持**: 追加のたびに陳腐化するため却下
+
+## 判断理由
+
+- 基盤（lab / 一覧 / SSOT / 導入確認）を先に固定すれば、後続 #36〜#38 の Skill 追加が既存ハーネスと矛盾しない
+- 参照のみの mino コア原則は、ハーネスの「正本1箇所」設計原則と整合する
+- 却下案（一括導入・複製・固定本数）はいずれも SSOT Rot または運用形骸化リスクが高い
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`AGENTS.md` と Skill 運用規則の変更）
+
+## 人間承認（カテゴリ③）
+
+| 項目 | 内容 |
+|---|---|
+| 承認対象 | Issue #35（本Checkpoint）。統合設計は #34 / 後続 #36〜#39 |
+| 承認根拠 | [Issue #34 統合確認 approve](https://github.com/kikujizo/ai-harness/issues/34#issuecomment-4952536622)（全AIレビュー完了後の `INTEGRATION_VERDICT: approve`） |
+| 実装指示 | [Issue #35 実装指示書](https://github.com/kikujizo/ai-harness/issues/35#issuecomment-4952560298)（人間の実装依頼後に Codex PM が発行） |
+| 実装担当 | Cursor |
+| 独立レビュー | ChatGPT（要件）＋ Codex（技術） |
+| merge | 人間 |
+| 後続順 | `#35 → #36 → #37 → #38`（`#39` は #35 完了後に #37 / #38 と並行可能） |
+| Decision Log | 本エントリ（`docs/decisions.md`） |
+
+承認: 人間（2026-07-12〜13、Issue #34 / #35）— カテゴリ③ high-risk、実装者 Cursor
+
+## 影響範囲
+
+- `AGENTS.md`（lab 共通規則）
+- `README.md`（Skill ティア・境界・発動優先順位表）
+- `docs/harness/setup.md`（実在確認・lab 非発動試験）
+- `docs/mino-skills/core/mino-core-principles.md`（新規・SSOT）
+- 本 Decision Log
+- 後続: Issue #36（PR #20）, #37/#38（mino Skill 本体）, #39（文書・検証・出典）
+
+## 取り消し手順
+
+1. 本 Decision Log エントリの Status を Superseded に変更する
+2. 上記影響範囲の変更を `git revert` で戻す
+3. README / setup の固定本数表記へ戻す場合は、別Issueで人間承認を取る
+4. 既に merge 済みの mino Skill がある場合は、個別に停止・削除判断する（ファイル revert だけでは運用ドリフトが残る）
+
+`git revert` で文書変更は完全に戻せる（可逆）。後続Issueで追加された Skill 本体は別 revert が必要。
+
+## 見直す条件
+
+- lab Skill が一般依頼で誤発動した場合（lab 規則の強化または該当 Skill 停止）
+- mino コア原則の参照方式が Skill 単体実行で機能しない場合（#39 で再検討）
+- #36 merge 後に core 候補4 Skill と既存7 Skill の境界表を更新する
+
+## 次アクション
+
+- [ ] ChatGPT 要件レビュー
+- [ ] Codex 技術レビュー
+- [ ] 人間 merge 判断
+- [ ] Issue #36（PR #20 / core 候補4 Skill）へ進む
+

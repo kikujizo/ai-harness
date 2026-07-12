@@ -846,3 +846,102 @@ ChatGPTアダプタの扱いも未確定だった。
 - [ ] 人間 merge 判断
 - [ ] Issue #36（PR #20 / core 候補4 Skill）へ進む
 
+---
+
+# Decision: PR #20の4行動Skillをcore候補として採用する
+
+Date: 2026-07-13
+Status: Accepted
+Related Issues: #36
+Related PRs: #20
+
+## 決定事項
+
+PR #20 の4 Skill（`reframe-question` / `orchestrate` / `assessment-first` / `lateral-sweep`）を
+**core候補**として `.agents/skills/` に追加する。merge 後も README の「導入予定・候補Skill」表記どおり、
+人間が実績を確認するまで正式 core への昇格判断は保留する（`AGENTS.md` lab 共通規則の昇格条件に従う）。
+
+### Skillごとの記録
+
+| Skill | ティア | core候補根拠 | 発動範囲 | 停止・lab降格条件 |
+|---|---|---|---|---|
+| `reframe-question` | core候補 | Fable 実セッションの入口行動を Skill 化。既存7 Skill と様式一致。一次資料検証型の問い直しはハーネス標準フロー（仕様化前）と整合 | 大きめ依頼・抽象依頼・前提未検証依頼の開始時。通常入口 | 重大事故1件（未承認仕様追加・担当外実装・誤ルーティング）で停止。8週間0回なら見送り判断 |
+| `orchestrate` | core候補 | 指揮・委譲の型。`docs/harness/ops/orchestration.md` / `token-discipline.md` への参照のみで SSOT 遵守 | 大量・並列・機械走査を含むタスク開始時。委譲機能なし環境では設計案のみ | 委譲未実行を実行済みと報告した場合は即停止 |
+| `assessment-first` | core候補 | オーナー明示承認（2026-07-08）の評価報告型。二重承認・過剰横展開を Issue #36 で抑制 | レビュー指摘・他AI提案への対応時。許可明示済みなら GO 再要求しない | 評価なし修正・無条件横展開走査で停止 |
+| `lateral-sweep` | core候補 | 失敗クラス横断走査の型。`knowledge-reflux` / `failure-map` と役割分担（走査 vs 還流正本） | assessment-first 等から条件付きで呼ぶ。読み取り・分類・後続Issue提案まで | 無承認修正・PR作成で停止 |
+
+## 背景・課題
+
+Issue #35 完了後、PR #20 の4 Skill を既存ハーネスの承認フロー・正本参照・mino 入口境界と
+矛盾なく導入する必要があった。旧 PR には越権・二重承認・過剰走査・タイトル3 Skill表記・
+main 未追従の問題があった。
+
+## 採用する方針
+
+- 4 Skill を core候補として追加（lab ではない。ただし README 上は merge 前は「未導入 core候補」）
+- Issue #36 受け入れ条件に沿い越権防止を各 SKILL.md に明記
+- `reframe-question` は通常入口。専用lab Skill への移行は実在＋明示指定時のみ
+- `orchestrate` は委譲機能なし環境で実行装いを禁止
+- `assessment-first` は二重承認禁止、`lateral-sweep` は条件付き呼び出し
+- `lateral-sweep` は無承認修正禁止
+
+## 採用しない方針 / 却下した代替案
+
+- **4 Skill を lab として導入**: Issue #36 では core候補と判断。Fable 行動パターンは標準フロー補完として扱う
+- **4 Skill を確認なし core 直行**: Vault 等での実績確認前の正式 core 昇格は却下。昇格は `AGENTS.md` lab 規則の実案件2回以上条件に従う
+- **`reframe-question` から未導入 mino Skill へ無条件移行**: 未導入Skillのパス前提を禁止
+- **`lateral-sweep` 内での即時修正PR**: 無承認修正リスクのため却下。後続Issueへ分離
+
+## 判断理由
+
+- 4 Skill は既存ハーネス Skill と様式・SSOT 参照方式が一致し、正本再掲なし
+- Issue #36 の5受け入れ条件を満たす修正により、越権・二重承認・過剰走査リスクを抑制
+- core候補＋昇格条件保留は Issue #35 の lab 規則と README 表記と整合
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`.agents/skills/` 追加）
+
+## 人間承認（カテゴリ③）
+
+| 項目 | 内容 |
+|---|---|
+| 承認対象 | Issue #36 / PR #20 |
+| 実施開始 | [Issue #36 実施開始](https://github.com/kikujizo/ai-harness/issues/36#issuecomment-4952835791) |
+| 実装指示 | [Issue #36 実装指示書](https://github.com/kikujizo/ai-harness/issues/36#issuecomment-4952847010) |
+| 実装担当 | Cursor |
+| 独立レビュー | ChatGPT（要件）＋ Codex（技術） |
+| merge | 人間 |
+| 前提完了 | Issue #35 / PR #41 merge 済み |
+
+承認: 人間（2026-07-13、Issue #36）— カテゴリ③ high-risk、実装者 Cursor
+
+## 影響範囲
+
+- `.agents/skills/reframe-question/SKILL.md`
+- `.agents/skills/orchestrate/SKILL.md`
+- `.agents/skills/assessment-first/SKILL.md`
+- `.agents/skills/lateral-sweep/SKILL.md`
+- 本 Decision Log
+- merge 後: `README.md` の導入予定表を人間が更新（本Issueスコープ外）
+
+## 取り消し手順
+
+1. PR #20 を revert または4 Skill ディレクトリを削除
+2. 本 Decision Log エントリの Status を Superseded に変更
+3. 既に参照開始した運用がある場合は、各 Skill の停止を Decision Log に追記
+4. `git revert` でファイル変更は完全に戻せる（可逆）
+
+## 見直す条件
+
+- 4 Skill のいずれかで重大事故1件（lab 規則どおり停止・lab降格判断）
+- merge 後30日以内に実案件使用0回の Skill がある場合（8週間サンセット判断の前倒し検討）
+- #36 merge 後に README の core候補4 Skill を「現存Skill」へ移す人間判断
+
+## 次アクション
+
+- [ ] ChatGPT 要件レビュー
+- [ ] Codex 技術レビュー
+- [ ] 人間 merge 判断（PR #20）
+- [ ] merge 後 README 表更新（人間または #36 後続）
+

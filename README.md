@@ -72,24 +72,24 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節。
 | `handoff-report` | core | セッション引き継ぎ資料 | description トリガー |
 | `knowledge-reflux` | core | 知見の正本還流 | description トリガー |
 | `loop-design` | core | 品質ループ設計 | description トリガー |
+| `orchestrate` | core | 作業の分解・下位モデルへの委譲設計 | description トリガー |
 | `pm-review` | core | Issue/依頼のPM評価・ルーティング | description トリガー |
 | `recursive-review` | core | 基準照合レビュー | description トリガー |
 | `recursive-writing` | core | 基準照合執筆 | description トリガー |
+| `assessment-first` | lab | レビュー指摘・提案への実行前評価 | Skill名または上位ワークフローの明示指定時のみ |
+| `lateral-sweep` | lab | 失敗クラスの横断走査と後続Issue提案 | Skill名または上位ワークフローの明示指定時のみ |
+| `reframe-question` | lab | 依頼の前提検証と問いの再定義 | Skill名または上位ワークフローの明示指定時のみ |
+| `mino-socratic-requirements` | lab（凍結） | 複数ターン要求定義 | **通常業務では提案・実行しない** |
+| `mino-context-discovery` | lab | 用語・境界・ユビキタス言語の整理 | Skill名または上位ワークフローの明示指定時のみ |
+| `mino-event-storming` | lab | 業務時系列・イベント・集約候補の整理 | Skill名または上位ワークフローの明示指定時のみ |
+| `mino-model-deepening` | lab | 設計Checkpointでのモデル深化 | Skill名または上位ワークフローの明示指定時のみ |
+| `mino-contract-driven-coding` | lab | 承認済みIssueから導出する契約駆動実装 | Skill名または上位ワークフローの明示指定時のみ |
+| `mino-changeability-review` | lab | 変更容易性の補助所見 | Skill名または上位ワークフローの明示指定時のみ |
 
 ### 導入予定・候補Skill（未導入。Issue 完了後に `.agents/skills/` へ追加）
 
 | Skill（ディレクトリ名） | 状態 | ティア（予定） | 主責務 | 発動（予定） | 導入Issue |
 |---|---|---|---|---|---|
-| `reframe-question` | 未導入 | core候補 | 依頼の問いの再定義 | PR #20 merge 後に判断 | #36 |
-| `orchestrate` | 未導入 | core候補 | 指揮・下位モデル委譲 | 同上 | #36 |
-| `assessment-first` | 未導入 | core候補 | 指摘への実行前評価報告 | 同上 | #36 |
-| `lateral-sweep` | 未導入 | core候補 | 失敗クラス横断走査 | 同上 | #36 |
-| `mino-socratic-requirements` | 未導入 | lab | 要求定義（ソクラテス問答） | **明示指定時のみ** | #37 |
-| `mino-context-discovery` | 未導入 | lab | 境界・言語ゲーム発見 | **明示指定時のみ** | #37 |
-| `mino-event-storming` | 未導入 | lab | イベントストーミング | **明示指定時のみ** | #37 |
-| `mino-model-deepening` | 未導入 | lab | モデル深化 | **明示指定時のみ** | #38 |
-| `mino-contract-driven-coding` | 未導入 | lab | 契約駆動実装 | **明示指定時のみ** | #38 |
-| `mino-changeability-review` | 未導入 | lab | 変更容易性レビュー | **明示指定時のみ** | #38 |
 | ChatGPTアダプタ6本 | 未導入 | 常設移送外 | ChatGPT Projects 向け写し | 手動貼付のみ | 常設移送対象外 |
 
 **発動優先順位**（重複・曖昧時）:
@@ -99,14 +99,16 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節。
 3. lab Skill は 1 がない限り発動しない
 4. 複数 core が候補のときは [AGENTS.md](AGENTS.md) の標準フロー（仕様化→PM→実装→レビュー）に沿い、最上流の工程Skillを優先する
 
+凍結済みの`mino-socratic-requirements`は上記lab優先順位の例外とし、通常業務では明示指定されても提案・実行しない。
+
 **責務境界（重複時の原則）**:
 
-- 仕様化・Issue起票: ChatGPT（ロール）＋ `pm-review`（Skill）。`mino-socratic-requirements` は lab 明示指定時のみ（#37 導入後）
+- 仕様化・Issue起票: ChatGPT（ロール）＋ `pm-review`（Skill）。`mino-socratic-requirements` は lab のまま凍結し、通常業務では提案・実行しない
 - 実装前設計: `design-check`（core）。lab の分析系Skillは明示指定時のみ
-- コードレビュー: `recursive-review`（core）。`mino-changeability-review` は lab 明示指定時のみ（#38 導入後）
-- 横断走査・還流: `lateral-sweep`（core候補・#36）と `knowledge-reflux`（core）— #36 merge 後に境界を確定
+- コードレビュー: `recursive-review`（core）。`mino-changeability-review` は lab 明示指定時のみ
+- 横断走査・還流: `lateral-sweep`（lab・明示指定時のみ）と `knowledge-reflux`（core）
 
-mino 共通原則の規範的正本は [docs/mino-skills/core/mino-core-principles.md](docs/mino-skills/core/mino-core-principles.md) の1ファイルのみ。各 mino Skill は参照し、全文複製しない（#37/#38 導入時に各 `SKILL.md` から参照する）。
+mino 共通原則の規範的正本は [docs/mino-skills/core/mino-core-principles.md](docs/mino-skills/core/mino-core-principles.md) の1ファイルのみ。各 mino Skill は参照し、全文複製しない。
 
 ## 既知の負債
 

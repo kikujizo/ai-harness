@@ -1066,7 +1066,7 @@ Issue #35/#36 完了後、mino Skill 6本（PR #33）を一括導入すると下
 Date: 2026-07-12
 Status: Accepted
 Related Issues: #38
-Related PRs: （本PR作成後に追記）
+Related PRs: #43
 Supersedes: なし（PR #33 からの部分移送。PR #33 本体は merge しない）
 
 ## 決定事項

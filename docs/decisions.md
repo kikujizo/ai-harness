@@ -1058,3 +1058,112 @@ Issue #35/#36 完了後、mino Skill 6本（PR #33）を一括導入すると下
 - [ ] 人間 merge 判断
 - [ ] merge 後 README 表更新
 
+
+---
+
+# Decision: 下流3つのmino Skillをlabとして分離導入する
+
+Date: 2026-07-12
+Status: Accepted
+Related Issues: #38
+Related PRs: #43
+Supersedes: なし（PR #33 からの部分移送。PR #33 本体は merge しない）
+
+## 決定事項
+
+PR #33 から下流3 Skill のみを最新 main へ分離導入する。merge 時の実効ティアは **lab 3 Skill すべて**。
+
+| Skill | ティア | 発動 | 主責務 |
+|---|---|---|---|
+| `mino-model-deepening` | **lab** | Skill名または上位ワークフローの明示指定時のみ | 設計Checkpointで既存モデルを問い直す |
+| `mino-contract-driven-coding` | **lab** | 同上 | 承認済みIssueから導出した契約でドメイン層実装を支援 |
+| `mino-changeability-review` | **lab** | 同上 | 変更容易性の補助所見を生成し、標準レビュー契約へ渡す |
+
+lab 共通規則は [AGENTS.md](../AGENTS.md)「Skills」節（明示指定限定・実案件2回以上で core 昇格候補・重大事故1件で停止・8週間0回で見送り）に従う。
+
+## 背景・課題
+
+Issue #35〜#37 完了後、mino Skill 6本（PR #33）のうち下流3 Skillだけを分離導入する。実装・レビューに近いSkillのため、既存ハーネスの役割分担、Issue正本、標準レビュー契約を上書きしないことを優先する。
+
+## 採用する方針
+
+- 3 Skill を lab・明示呼び出し限定として `.agents/skills/` に追加
+- `mino-model-deepening` は設計Checkpoint専用とし、実装中の自動再設計を禁止する
+- `mino-contract-driven-coding` の契約表は承認済みIssueから導出する実装契約であり、Issue正本を上書きしない
+- `mino-contract-driven-coding` の完全実行は Cursor または人間/Codex PMが明示的に例外委譲した Claude Code に限定する
+- ChatGPT / Codex は契約整理・評価までとし、実装コードを生成しない
+- 数値化可能な条件だけ数値境界を要求し、根拠のない数値を作らない
+- `mino-changeability-review` は補助所見までとし、単独でmerge可否や `REVIEW_VERDICT` を出さない
+- 最終レビュー判定は既存 `recursive-review` 契約へ委ねる
+
+## 採用しない方針 / 却下した代替案
+
+- **PR #33 をそのまま更新・merge**: 6 Skill・文書資産・ChatGPTアダプタ混在のため却下
+- **3 Skill を core 直行**: 実案件確認根拠が不足しており、lab規則に従うため却下
+- **`recursive-review/SKILL.md` の変更**: 既存レビュー契約の正本を変更せず、`mino-changeability-review` 側が従属するため却下
+- **契約表を仕様正本にする**: 承認済みIssueを上書きするため却下
+- **ChatGPT / Codex に実装コード生成を許す**: 役割分担に反するため却下
+
+## 一般依頼での非発動シナリオ試験（3 Skill）
+
+| Skill | 試験入力（明示指定なし） | 期待動作 |
+|---|---|---|
+| `mino-model-deepening` | 「モデルを見直して」「設計を深掘りして」 | mino Skill を自動発動しない。必要なら通常の設計確認または明示指定を促す |
+| `mino-contract-driven-coding` | 「このIssueを実装して」「契約を守るコードを書いて」 | mino Skill を自動発動しない。実装担当・Issue承認・明示指定がなければ通常実装フローへ従う |
+| `mino-changeability-review` | 「レビューして」「変更容易性も見て」 | mino Skill を自動発動しない。明示指定がなければ通常の `recursive-review` を優先する |
+
+明示指定例（発動候補）: 「`mino-model-deepening` を使って」「`mino-contract-driven-coding` で契約表を作って」「`mino-changeability-review` を補助レンズとして使って」。
+
+## 判断理由
+
+- Issue #38 受け入れ条件5項目を満たす最小分割（下流3 Skill + Decision Log）
+- Issue #35 の mino コア原則SSOTと lab 規則に整合
+- Issue #36 の役割分担と Issue #37 の上流Skill導入後の状態に整合
+- 既存 `recursive-review` を変更せず、補助レンズ側の従属で済ませる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`.agents/skills/` 追加）
+
+## 人間承認（カテゴリ③）
+
+| 項目 | 内容 |
+|---|---|
+| 承認対象 | Issue #38 |
+| 実施開始 | [Issue #38 開始記録](https://github.com/kikujizo/ai-harness/issues/38#issuecomment-4953282246) |
+| 移送元 | [PR #33](https://github.com/kikujizo/ai-harness/pull/33)（参照のみ・merge しない） |
+| 実装担当 | Codex（人間の明示指示による例外実装。レビュー修正時も Cursor / Claude Code のレートリミットを理由に人間が特別許可） |
+| 独立レビュー | ChatGPT（要件）＋ 人間（技術。Codex実装との独立性を確保） |
+| merge | 人間 |
+
+承認: 人間（2026-07-12、Issue #38）— カテゴリ③ high-risk、Codex例外実装
+
+追加承認: 人間（2026-07-13、PR #43レビュー修正）— Cursor / Claude Code がレートリミットのため、Codex PMが実装を兼務することを特別許可。Codex自身は主技術レビューを担当しない。
+
+## 影響範囲
+
+- `.agents/skills/mino-model-deepening/SKILL.md`
+- `.agents/skills/mino-contract-driven-coding/SKILL.md`
+- `.agents/skills/mino-changeability-review/SKILL.md`
+- 本 Decision Log
+- merge 後: `README.md` の導入予定表更新（本 Issue スコープ外）
+
+## 取り消し手順
+
+1. 本 PR を revert または3 Skill ディレクトリを削除
+2. 本 Decision Log エントリの Status を Superseded に変更
+3. 既に参照開始した運用がある場合は、各 Skill の停止を Decision Log に追記
+4. `git revert` でファイル変更は完全に戻せる（可逆）
+
+## 見直す条件
+
+- 3 Skill が実案件2回以上・事故0件で core 昇格候補になった場合
+- いずれかで重大事故1件（lab 規則どおり停止）
+- 契約表がIssueを上書きした、非実装担当がコードを書いた、補助レビューが単独判定した場合
+
+## 次アクション
+
+- [ ] ChatGPT 要件再レビュー
+- [ ] 人間による独立技術レビュー（Codex実装のため）
+- [ ] 人間 merge 判断
+- [ ] merge 後 README 表更新

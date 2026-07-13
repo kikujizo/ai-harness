@@ -1132,11 +1132,13 @@ Issue #35〜#37 完了後、mino Skill 6本（PR #33）のうち下流3 Skillだ
 | 承認対象 | Issue #38 |
 | 実施開始 | [Issue #38 開始記録](https://github.com/kikujizo/ai-harness/issues/38#issuecomment-4953282246) |
 | 移送元 | [PR #33](https://github.com/kikujizo/ai-harness/pull/33)（参照のみ・merge しない） |
-| 実装担当 | Codex（人間の明示指示による例外実装） |
-| 独立レビュー | ChatGPT（要件）＋ Codex（技術） |
+| 実装担当 | Codex（人間の明示指示による例外実装。レビュー修正時も Cursor / Claude Code のレートリミットを理由に人間が特別許可） |
+| 独立レビュー | ChatGPT（要件）＋ 人間（技術。Codex実装との独立性を確保） |
 | merge | 人間 |
 
 承認: 人間（2026-07-12、Issue #38）— カテゴリ③ high-risk、Codex例外実装
+
+追加承認: 人間（2026-07-13、PR #43レビュー修正）— Cursor / Claude Code がレートリミットのため、Codex PMが実装を兼務することを特別許可。Codex自身は主技術レビューを担当しない。
 
 ## 影響範囲
 
@@ -1161,7 +1163,7 @@ Issue #35〜#37 完了後、mino Skill 6本（PR #33）のうち下流3 Skillだ
 
 ## 次アクション
 
-- [ ] ChatGPT 要件レビュー
-- [ ] Codex 技術レビュー
+- [ ] ChatGPT 要件再レビュー
+- [ ] 人間による独立技術レビュー（Codex実装のため）
 - [ ] 人間 merge 判断
 - [ ] merge 後 README 表更新

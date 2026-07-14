@@ -13,10 +13,12 @@ description: PM作業の開始時に、Terra・Luna・Solの候補route、安全
 
 1. **高リスクを先に判定する**
    秘匿・個人情報、課金、権限・パイプライン自己変更、不可逆データ操作のいずれかなら、`route_candidate=sol` と `gate=human_approval` を出す。分析はできても、人間承認まで不可逆な実行を停止する。
-2. **通常の候補routeを判定する**
-   - 明示的・反復的・大量の抽出、分類、変換、定型要約: `route_candidate=luna`
-   - 仕様矛盾、原因不明、複数系設計、最終裁定、または信頼度が0.75未満: `route_candidate=sol`
-   - 一般的なIssue評価、PRレビュー、GitHub確認: `route_candidate=terra`
+   この高リスク判定は以下の通常候補より常に優先する。高リスクでなければ、次の順序へ進む。
+2. **通常の候補routeを優先順位どおり判定する**
+   次の順序で、最初に一致したrouteを採用する。
+   1. 仕様矛盾、原因不明、複数系設計、最終裁定、または信頼度が0.75未満: `route_candidate=sol`
+   2. 明示的・反復的・大量の抽出、分類、変換、定型要約: `route_candidate=luna`
+   3. 上記以外の一般的なIssue評価、PRレビュー、GitHub確認: `route_candidate=terra`
 3. **実行可否を偽装せず処理する**
    名前付きカスタムエージェントを利用できない場合:
    - `terra`: Terra親で継続し、`route_executed=terra_parent` とする。

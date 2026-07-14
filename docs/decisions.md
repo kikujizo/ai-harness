@@ -1456,3 +1456,91 @@ Issue #35〜#37 完了後、mino Skill 6本（PR #33）のうち下流3 Skillだ
 - [ ] 人間による独立技術レビュー（Codex実装のため）
 - [ ] 人間 merge 判断
 - [x] Issue #44でREADME表をmainの実在状態へ同期
+
+---
+
+# Decision: assessment-firstのSSOT参照化・語彙統一とlateral-sweepの記載矛盾解消
+
+Date: 2026-07-14
+Status: Proposed
+Related Issues: #56
+Related PRs: （本PR）
+
+## 決定事項
+
+lab Skill 2本の重複・記載矛盾を、吸収・統合ではなく最小トリムで解消する:
+
+1. `assessment-first`: 手順2の原理を `docs/harness/ops/orchestration.md` §4 への参照で扱い、
+   対応の宣言語彙を `recursive-review` 手順4のディスポジション三択
+   （今回修正 / wontfix（理由記録） / 後回し（追跡Issue URL必須）。正本: 本Log 2026-07-12エントリ）に統一する
+2. `lateral-sweep`: descriptionの「正本まで還流する」を本文の実態（還流方針の提示まで）に合わせ、
+   還流の実行を `knowledge-reflux`（core）へ引き渡すことを手順4に明記する
+
+両Skillの責務・停止条件・ティア（lab）は変更しない。
+
+## 背景・課題
+
+lab Skillの発動導線・競合調査（2026-07-14、Issue #55コメント）で、`assessment-first` の原理が
+正本2箇所（orchestration.md §4・recursive-reviewディスポジション契約）と概念重複し、指摘対応の語彙が
+「出す側」と「受ける側」で分裂していること、`lateral-sweep` のdescriptionが本文の禁止事項
+（修正・PR作成をしない）と矛盾して大きく謳っていることを検出した。
+
+## 採用する方針
+
+- SSOT設計原則1（同じ定義を複数ファイルに書かない・参照で扱う）による参照化
+- ディスポジション語彙の一本化（機械照合可能性の向上）
+- description と本文の実態一致（誤発動・誤期待の防止）
+
+## 採用しない方針 / 却下した代替案
+
+- **`assessment-first` の `recursive-review` への吸収**: 実績ゼロのlabをcore正本へ混ぜるのは
+  実績ベース昇格の原則に反するため却下。吸収可否は昇格前パフォーマンスレビュー（Issue #55設計）で判断
+- **`lateral-sweep` の還流機能の拡張（description側に本文を合わせる）**: knowledge-refluxとの
+  責務重複を固定化するため却下
+- **`mino-context-discovery` / `mino-event-storming` の統合**: 本Log 2026-07-13エントリで
+  意図的に分離済み。Archive棚卸し時に再評価
+- **Skillの削除**: オーナー方針（Archive制・削除しないエコシステム、Issue #55で規則化）により却下
+
+## 判断理由
+
+- 語彙の分裂は、指摘を出すAIと受けるAIの間で対応状況の突合を壊す（ディスポジション契約導入の趣旨に反する）
+- descriptionは発動判断の一次情報であり、本文より大きく謳う記載は誤期待の温床になる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`.agents/skills/` 変更）。カテゴリ①②④: なし
+
+## 人間承認（カテゴリ③）
+
+| 項目 | 内容 |
+|---|---|
+| 承認対象 | Issue #56 |
+| 承認根拠 | 人間の直接指示（2026-07-14、Claude Codeセッション「再評価し、修正案で対応実行」） |
+| 実装担当 | Claude Code（調査・成果物保有のため例外委譲） |
+| 独立レビュー | ChatGPT（要件）＋ Codex（技術） |
+| merge | 人間 |
+
+承認: 人間（2026-07-14、セッション指示。merge判断は本PRで別途）
+
+## 影響範囲
+
+- `.agents/skills/assessment-first/SKILL.md`（手順2）
+- `.agents/skills/lateral-sweep/SKILL.md`（description・手順4）
+- 本 Decision Log
+
+## 取り消し手順
+
+1. 本PRを `git revert`
+2. 本エントリの Status を Superseded に変更
+3. `git revert` で完全に戻せる（可逆）
+
+## 見直す条件
+
+- `assessment-first` の昇格前パフォーマンスレビューで吸収可否を判断する
+- ディスポジション三択が指摘受領側の実務に合わない事例が出た場合（語彙の再設計）
+
+## 次アクション
+
+- [ ] ChatGPT 要件レビュー
+- [ ] Codex 技術レビュー
+- [ ] 人間 merge 判断（merge時: 本エントリ Status を Accepted に更新）

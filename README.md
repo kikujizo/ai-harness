@@ -78,6 +78,7 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節。
 | `recursive-writing` | core | 基準照合執筆 | description トリガー |
 | `assessment-first` | lab | レビュー指摘・提案への実行前評価 | Skill名または上位ワークフローの明示指定時のみ |
 | `lateral-sweep` | lab | 失敗クラスの横断走査と後続Issue提案 | Skill名または上位ワークフローの明示指定時のみ |
+| `plan-gate` | lab | 実行境界を越える計画の可読性ゲート（最弱読者復唱） | Skill名または上位ワークフローの明示指定時のみ |
 | `reframe-question` | lab | 依頼の前提検証と問いの再定義 | Skill名または上位ワークフローの明示指定時のみ |
 | `mino-socratic-requirements` | lab（凍結） | 複数ターン要求定義 | **通常業務では提案・実行しない** |
 | `mino-context-discovery` | lab | 用語・境界・ユビキタス言語の整理 | Skill名または上位ワークフローの明示指定時のみ |

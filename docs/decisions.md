@@ -1462,7 +1462,7 @@ Issue #35〜#37 完了後、mino Skill 6本（PR #33）のうち下流3 Skillだ
 # Decision: 計画可読性ゲート（plan-gate）をlab Skillとして導入する
 
 Date: 2026-07-14
-Status: Proposed
+Status: Accepted
 Related Issues: #52
 Related PRs: #53
 
@@ -1512,17 +1512,17 @@ merge時の実効ティアは **lab**（明示指定時のみ。共通規則は 
 | 項目 | 内容 |
 |---|---|
 | 承認対象 | Issue #52 / PR #53 |
-| 発案・実装承認 | 人間の直接指示（2026-07-14、Claude Codeセッション。レビュー後の修正実装もレビュー結果の転送により継続指示） |
-| 実装担当 | Claude Code（発案ユーザーの直接依頼による例外委譲） |
-| 独立レビュー | ChatGPT（要件）＋ Codex（技術） |
+| 発案・実装承認 | 人間の直接指示（2026-07-14）。Claude Codeのレートリミット後、残存2点の修正実装をCodexへ明示委任 |
+| 実装担当 | Claude Code（初期実装・前回修正）＋ Codex（残存2点の修正。人間の明示委任） |
+| 独立レビュー | ChatGPT（要件）＋ 人間（技術。Codex修正との独立性を確保） |
 | merge | 人間 |
 
-承認: 人間（2026-07-14、Claude Codeセッションでの直接指示。merge判断は PR #53 で別途） — merge時に本行へ日付を確定しStatusをAcceptedへ
+承認: 人間（2026-07-14、カテゴリ③の導入方針を採用し、残存修正をCodexへ明示委任）。Statusはmerge前にAcceptedへ確定し、merge判断は別途人間が行う。
 
 ## 影響範囲
 
 - `.agents/skills/plan-gate/SKILL.md`（新規・手順の正本）
-- `docs/harness/ops/orchestration.md`（§3追加・以降の節番号繰り下げ・§7スニペット1行）
+- `docs/harness/ops/orchestration.md`（§3追加・以降の節番号繰り下げ・§7でlab Skillをグローバル既定から除外）
 - `docs/loop-ledger.md`（初回の実登録エントリ。記入例のラベルをL-0に変更して実登録と区別）
 - `README.md`（現存Skill表にlab行を追加）
 - 本 Decision Log
@@ -1542,5 +1542,5 @@ merge時の実効ティアは **lab**（明示指定時のみ。共通規則は 
 ## 次アクション
 
 - [ ] ChatGPT 要件再レビュー
-- [ ] Codex 技術再照合
-- [ ] 人間 merge 判断（merge時: 本エントリ Status を Accepted に更新）
+- [ ] 人間による独立技術レビュー（Codex修正との独立性を確保）
+- [ ] 人間 merge 判断

@@ -1552,7 +1552,7 @@ merge時の実効ティアは **lab**（明示指定時のみ。共通規則は 
 Date: 2026-07-14
 Status: Proposed
 Related Issues: #56
-Related PRs: （本PR）
+Related PRs: #57
 
 ## 決定事項
 

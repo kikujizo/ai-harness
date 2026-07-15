@@ -112,3 +112,59 @@ Attempt B 子応答（全文）:
 
 `%USERPROFILE%\.cache\ai-harness-scratch\ai-harness\20260715-issue66\`  
 （prompt / last message / jsonl / meta。secret なし。Attempt A の出力も残置）
+
+---
+
+# Issue #69: Terra 単体・UTF-8確認後・1回spawn
+
+Date: 2026-07-15  
+Executor: Cursor（実装AI）  
+Environment: Windows 11 / `npx @openai/codex` `codex-cli 0.144.4` / branch `feature/issue-69-terra-once`（`origin/main`）  
+最終判定: **Checkpoint 達成候補**（spawn 1回・UTF-8事前確認済み・書き込み0）
+
+## UTF-8 事前確認（spawn前）
+
+- 方法: Cursor Write で UTF-8（BOMなし）prompt 作成 → Python で Fixed Message を Issue #69 固定入力と完全一致比較 → Read ツールで日本語表示確認
+- 結果: `exact_match=true` / decode ok / BOM=false
+- 判定: spawn 実施を許可
+
+## 実行回数
+
+| 対象 | spawn 回数 |
+|---|---|
+| Terra (`pm_router`) | **1回のみ** |
+
+Luna / Sol は再実行していない。
+
+## 結果
+
+| 項目 | 内容 |
+|---|---|
+| 終了状態 | spawn 成功（`pm_router`） |
+| 書き込み | 0（親報告・検証起因の tracked 変更なし） |
+| 代替 | なし（親回答・別モデル・無名子・再試行なし） |
+| model / effort 表示 | 親報告上はなし |
+
+子応答（全文）:
+
+```text
+- 担当範囲: 通常のドキュメント修正。実装担当は Cursor、要件確認は ChatGPT、技術確認は Codex。
+
+- リスク: 通常。不可逆4カテゴリには該当しない。
+
+- 次アクション: Cursor に「既存 README の指定された誤字1か所のみを修正し、他の変更は行わない」と指示する。
+```
+
+## 受け入れ条件（Issue #69）
+
+| # | 判定 |
+|---|---|
+| 1 UTF-8完全一致の事前証拠 | 充足 |
+| 2 spawn 1回だけ | 充足 |
+| 3 成功時3項目出力 | 充足 |
+| 4 書き込み0・代替なし | 充足 |
+| 5 第三者追跡 | 充足（本節・session note・Issue/PRコメント） |
+
+## 生証跡（scratch・非repo）
+
+`%USERPROFILE%\.cache\ai-harness-scratch\ai-harness\20260715-issue69`

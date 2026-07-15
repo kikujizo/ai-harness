@@ -64,7 +64,7 @@ Terra / Luna / Sol を固定入力で各1回手動起動し、正式起動方法
 
 1. 本PRは「失敗を含む正確な検証記録」としてレビュー・merge 可
 2. merge 後、Issue #66 は「Checkpoint 未達・後続 Issue へ継続」として終了
-3. 後続 Issue: UTF-8 入力を spawn 前に検証したうえで Terra を1回だけ再検証
+3. 後続 Issue: [Issue #69: TerraがUTF-8固定入力で1回だけ手動起動され結果が記録されている](https://github.com/kikujizo/ai-harness/issues/69)
 
 ## 詳細正本
 

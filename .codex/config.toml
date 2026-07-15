@@ -1,0 +1,9 @@
+# Issue #64: project-scoped named PM agents. This configuration does not
+# automatically route, spawn, or run agents.
+# route_candidate=terra -> pm_router
+# route_candidate=luna  -> pm_fast_worker
+# route_candidate=sol   -> pm_arbiter
+
+[agents]
+max_threads = 1
+max_depth = 1

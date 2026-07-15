@@ -103,7 +103,7 @@ Attempt B 子応答（全文）:
 
 ## 未確認・次Checkpoint候補
 
-1. **UTF-8 入力を spawn 前に検証したうえで、Terra を1回だけ再検証する後続 Issue**（本Issue内での Terra 再実行はしない）
+1. [Issue #69: TerraがUTF-8固定入力で1回だけ手動起動され結果が記録されている](https://github.com/kikujizo/ai-harness/issues/69)（本Issue内での Terra 再実行はしない）
 2. Sol（`pm_arbiter` / `gpt-5.6-sol`）の spawn 失敗原因の切り分け（CLI multi_agent / モデル利用可否 / ephemeral）
 3. 成功 spawn 時に model / reasoning effort を第三者が機械的に確認できる証跡経路
 4. 実案件入力への接続は引き続き対象外（自動ルーティングも対象外）

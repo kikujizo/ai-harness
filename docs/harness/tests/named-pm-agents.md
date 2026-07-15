@@ -3,7 +3,8 @@
 Date: 2026-07-15  
 Executor: Cursor（実装AI）  
 Environment: Windows 11 / `npx @openai/codex` `codex-cli 0.144.4` / project `.codex/agents/*.toml` on `feature/issue-66-named-pm-smoke`（`origin/main` 起点）  
-`multi_agent` feature: stable / true
+`multi_agent` feature: stable / true  
+最終判定: **Issue #66 Checkpoint 未達**（失敗を含む正確な検証記録）
 
 ## 正式な手動起動方法（根拠）
 
@@ -19,25 +20,48 @@ Environment: Windows 11 / `npx @openai/codex` `codex-cli 0.144.4` / project `.co
 
 ## 実行条件
 
-- 固定入力は Issue #66 本文どおり（各エージェント1回）
+- 固定入力は Issue #66 本文どおり（各エージェント**1回だけ**）
 - 利用不能時は代替モデル・無名子・別エージェントへ置換しない
 - 3エージェント実行自身の書き込み 0 件（親の証拠記録は除外）
+
+## 実行回数（実測）
+
+| 対象 | spawn 回数 |
+|---|---|
+| Terra (`pm_router`) | **2回** |
+| Luna (`pm_fast_worker`) | 1回 |
+| Sol (`pm_arbiter`) | 1回 |
+
+Terra は Attempt A（文字化け）と Attempt B（UTF-8 再投入）の2回 spawn した。Attempt A を「正式カウント外」として1回扱いにはしない。
 
 ## 結果一覧
 
 | 対象 | name | 終了状態 | 書き込み | 要約 |
 |---|---|---|---|---|
-| Terra | `pm_router` | 成功（spawn `/root/pm_router`） | 0 | README誤字1件を通常リスクのドキュメント修正として分類。担当=Cursor、次=人間の明示指名 |
+| Terra | `pm_router` | **手順条件未達**（出力取得は成功、ただし spawn 2回） | 0 | Attempt B で固定入力への分類結果は取得。Issue #66「各1回」は未達 |
 | Luna | `pm_fast_worker` | 成功（spawn `/root/pm_fast_worker`） | 0 | 6語を設定/実行/記録に分類。再委譲なし。子応答は短文（600 token以下） |
-| Sol | `pm_arbiter` | **利用不能停止** `ROUTE_BLOCKED` | 0 | `collab spawn failed: no thread with id: 019f63b5-05cb-7751-8b67-e23d6c0283f2`。代替実行なし。固定入力への回答なし |
+| Sol | `pm_arbiter` | **正常停止** `ROUTE_BLOCKED` | 0 | `collab spawn failed: no thread with id: 019f63b5-05cb-7751-8b67-e23d6c0283f2`。代替実行なし。固定入力への回答なし |
+
+## 受け入れ条件照合
+
+| # | 条件（要約） | 判定 |
+|---|---|---|
+| 1 | 正式起動根拠と、固定入力で各1回起動した結果（または利用不能停止）が個別に確認できる | **未達**（Terra が2回 spawn） |
+| 2 | 成功実行が役割・reasoning・read-only と矛盾せず、Luna は600 token以下・再委譲なし、Sol は `gate=human_approval` を示す | 部分（Luna 整合 / Sol は利用不能停止のため `gate` 未観測 / Terra は手順未達） |
+| 3 | 3エージェント実行自身の書き込み0、自動ルーティング・再試行・無名子代替なし | 充足（Terra の2回目はエンコーディング是正の再実行であり、モデル代替ではない） |
+| 4 | 利用不能時に暗黙置換せず、Luna=`fallback=terra_parent`、Sol=`ROUTE_BLOCKED` を記録 | 部分（Sol=`ROUTE_BLOCKED` 充足 / Luna は成功のため fallback 非該当） |
+| 5 | 検証環境・固定入力・結果・未確認・次候補を第三者が追跡できる | 充足（本ファイル・session note・Issue/PR コメント） |
 
 ## 固定入力と観測出力
 
 ### Terra / `pm_router`
 
-入力: Issue #66 Terra 固定入力（README誤字1か所のPM分類）
+実行回数: 2（Attempt A + Attempt B）。Issue #66 手順の「各1回」には**未達**。
 
-子応答（全文）:
+- Attempt A: spawn 成功。Fixed Message が mojibake。子は再送を要求。
+- Attempt B: spawn 成功（`/root/pm_router`）。下記の分類結果を取得。
+
+Attempt B 子応答（全文）:
 
 ```text
 担当範囲: Cursorによる通常のドキュメント修正。Codexは技術PM確認。
@@ -47,11 +71,12 @@ Environment: Windows 11 / `npx @openai/codex` `codex-cli 0.144.4` / project `.co
 次アクション: 人間が実装担当としてCursorを明示指名し、対象箇所を指定する。
 ```
 
-期待との照合: 通常PM作業として処理。子起動・書き込みの報告なし。矛盾なし。
+内容の役割整合: 通常PM作業として処理。子からの書き込み報告なし。  
+ただし **出力取得成功 ≠ Checkpoint 手順達成**。2回 spawn のため受け入れ条件1は未達。
 
 ### Luna / `pm_fast_worker`
 
-入力: Issue #66 Luna 固定入力（6語分類）
+入力: Issue #66 Luna 固定入力（6語分類） / spawn 1回
 
 子応答（全文）:
 
@@ -66,23 +91,24 @@ Environment: Windows 11 / `npx @openai/codex` `codex-cli 0.144.4` / project `.co
 
 ### Sol / `pm_arbiter`
 
-入力: Issue #66 Sol 固定入力（sandbox_mode 変更のリスク分類）
+入力: Issue #66 Sol 固定入力 / spawn 1回
 
-結果: spawn 失敗のため子応答なし。`ROUTE_BLOCKED` として停止。Terra/無名子への代替なし。  
-このため本実行では Sol 本人による `gate=human_approval` 表明は未観測（利用不能停止が正規結果）。
+結果: spawn 失敗のため子応答なし。`ROUTE_BLOCKED` として**正常停止**。Terra/無名子への代替なし。  
+本実行では Sol 本人による `gate=human_approval` 表明は未観測（利用不能停止が正規結果）。
 
 ## 観測できなかった項目
 
 - 親の JSONL / 最終メッセージ上で、子の pinned `model` / `model_reasoning_effort` は表示されなかった
-- TOML 上の定義（Terra=medium/`gpt-5.6-terra`、Luna=low/`gpt-5.6-luna`、Sol=high/`gpt-5.6-sol`）と、成功実行の振る舞いとの矛盾は観測されていない
+- TOML 上の定義（Terra=medium/`gpt-5.6-terra`、Luna=low/`gpt-5.6-luna`、Sol=high/`gpt-5.6-sol`）と、Luna 成功実行の振る舞いとの矛盾は観測されていない
 
 ## 未確認・次Checkpoint候補
 
-1. Sol（`pm_arbiter` / `gpt-5.6-sol`）の spawn 失敗原因の切り分け（CLI multi_agent / モデル利用可否 / ephemeral）
-2. 成功 spawn 時に model / reasoning effort を第三者が機械的に確認できる証跡経路
-3. 実案件入力への接続は引き続き対象外（自動ルーティングも対象外）
+1. **UTF-8 入力を spawn 前に検証したうえで、Terra を1回だけ再検証する後続 Issue**（本Issue内での Terra 再実行はしない）
+2. Sol（`pm_arbiter` / `gpt-5.6-sol`）の spawn 失敗原因の切り分け（CLI multi_agent / モデル利用可否 / ephemeral）
+3. 成功 spawn 時に model / reasoning effort を第三者が機械的に確認できる証跡経路
+4. 実案件入力への接続は引き続き対象外（自動ルーティングも対象外）
 
 ## ローカル生証跡（scratch・非repo）
 
 `%USERPROFILE%\.cache\ai-harness-scratch\ai-harness\20260715-issue66\`  
-（prompt / last message / jsonl / meta。secret なし）
+（prompt / last message / jsonl / meta。secret なし。Attempt A の出力も残置）

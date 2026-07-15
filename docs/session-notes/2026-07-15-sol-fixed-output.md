@@ -1,22 +1,84 @@
-# Session Note: Sol fixed output（Issue #79）
+# Session Note: Sol fixed ASCII 5-line output（Issue #79）
 
 Date: 2026-07-15  
 Related Issue: #79  
-Execution orchestrator: Cursor（人間指定）
+Executor: Cursor（実装AI・人間明示指定）
 
 ## 目的
 
-Sol / `pm_arbiter`を1回だけspawnし、高リスク判定の5項目をASCII固定5行で返せることを機械検証する。
+Issue #75で未確認だった「最悪の失敗」「revert可能性」を、ASCII固定5行契約で1回spawnし、形式を機械検証する。
+
+## 実行前確認の具体値
+
+```text
+OS: Windows 11 (Microsoft Windows NT 10.0.26200.0)
+PowerShell: 5.1.26100.8875
+branch: feature/issue-79-sol-fixed-output
+base commit: bed78e5c423fafc29f7a0204f6bccd880340e705 (= origin/main)
+Codex CLI: codex-cli 0.144.4
+multi_agent: stable / true
+pm_arbiter.toml: CLEAN_MATCH（origin/mainと一致、未コミット変更なし）
+UTF-8 fixed input: exact_match=true, BOM=false, decode_ok
+validator: validate_output.py（scratch、5キー・ASCII・5行）
+spawn count before run: 0
+```
+
+### 実ログ値の追記（修正依頼対応）
+
+次表は scratch の既存 `00-precheck.md` と `issue-79-comment.md` からの転記である。推測による補完はしていない。
+
+| 確認項目 | 実ログ値 |
+|---|---|
+| OS | `Microsoft Windows NT 10.0.26200.0` |
+| branch | `feature/issue-79-sol-fixed-output` |
+| base commit | `bed78e5c423fafc29f7a0204f6bccd880340e705`（`origin/main` と一致） |
+| Codex CLI | `codex-cli 0.144.4` |
+| `multi_agent` | `stable / true`（`codex features list`） |
+| `.codex/agents/pm_arbiter.toml` と base/main の比較 | `CLEAN_MATCH`（未コミット差分なし） |
+| 固定入力の完全一致 | `exact_match=true`、`decode_ok` |
+| BOM | `false` |
+| 検証器の事前セルフテスト | `format_pass: true`（既存 `issue-79-comment.md` の記録）。`overall_content_pass` は事前ログに未記録のため未確認。 |
+| spawn 前回数 | `0`（first spawn） |
+
+## 生JSONL `item_3` と転記5行の同一性証拠（修正依頼対応）
+
+- JSONL scratch path: `%USERPROFILE%\.cache\ai-harness-scratch\ai-harness\20260715-issue79\sol-spawn.stdout.jsonl`
+- 対象: JSONL の `item_3` にある `agent_message.text` 内の fenced `text` block
+- 既存抽出結果: `%USERPROFILE%\.cache\ai-harness-scratch\ai-harness\20260715-issue79\child-raw.txt`
+- 比較方法: `item_3` の fenced block、既存抽出結果、上記「子応答」の5行をそれぞれ UTF-8 として読み、CRLF/LFをLFへ正規化して末尾改行を除外してから SHA-256 を算出した。新規spawn・内容補完は行っていない。
+
+| 対象 | SHA-256 | 結果 |
+|---|---|---|
+| 生JSONLファイル全体 | `791d130731f04a6accb553c9d1c85bda4fb4913bc2dae2cbf06a31646b60fba8` | 既存証拠の識別子 |
+| JSONL `item_3` 抽出5行 | `0492e2724f8d79134f483f12d86e68f6e34ea12101d6d76c15ed987db294dc6a` | 5行・ASCIIのみ |
+| 既存 `child-raw.txt` | `0492e2724f8d79134f483f12d86e68f6e34ea12101d6d76c15ed987db294dc6a` | `item_3` と一致 |
+| 本Session Noteの転記5行 | `0492e2724f8d79134f483f12d86e68f6e34ea12101d6d76c15ed987db294dc6a` | 既存抽出結果と一致 |
+
+照合結果: `item_3_equals_child_raw=true`、`child_raw_equals_session_note=true`、`line_count=5`、`ascii_only=true`。
 
 ## 実施したこと
 
-- `origin/main`から`feature/issue-79-sol-fixed-output`を作成した。
-- prompt、親プロンプト、検証器、JSONLはrepo外のscratch領域に置いた。
-- `npx @openai/codex exec -s read-only --ephemeral --json`から`pm_arbiter`を1回だけspawnした。
-- 子応答をJSONLの`item_3`から改変なしで転記し、`validate_output.py`で形式検証した。
-- 再spawn、他agent、別経路、親回答による補完は行っていない。
+- `npx @openai/codex exec -s read-only --ephemeral --json` の親セッションから、`pm_arbiter` を1回だけ明示spawnした。
+- spawnは成功（親報告: one attempt only）。
+- 再試行、Terra・Luna・別モデル・無名子・親回答による代替を行わなかった。
+- Sol実行自身の書き込みは0件（親報告: no observed attempt）。
 
-## 子応答（改変なし）
+## テスト結果
+
+```text
+command: Get-Content sol-parent-prompt.txt | npx @openai/codex exec -s read-only --ephemeral --json
+exit_code: 0
+spawn_target: pm_arbiter
+spawn_count: 1
+spawn_duration_sec: ~94
+retry: none
+fallback: none
+writes_by_child: 0
+```
+
+## 子応答（生出力・5行・改変なし）
+
+出典: scratch `sol-spawn.stdout.jsonl` の親中継 `item_3` 内 fenced block。親による補完なし。
 
 ```text
 risk_category: category_3
@@ -26,54 +88,57 @@ stop_condition: no documented human approval specifically authorizes this catego
 gate: human_approval
 ```
 
-## 機械検証結果
+## 機械検証（形式）
+
+scratch `validate_output.py` による検証結果:
 
 ```text
+line_count_ok: true
+ascii_ok: true
+keys_ok: true（risk_category / worst_failure / revertability / stop_condition / gate の順）
+empty_value_ok: true
+extra_lines_ok: true
 format_pass: true
-line_count: 5
-ascii_only: true
-key_order: true
-non_empty_values: true
-extra_lines: false
-spawn_count: 1
-retry: none
-fallback: none
-exit_code: 0
-writes_by_child: 0
-elapsed_seconds: approximately 94
 ```
+
+## 内容照合（意味・人手）
+
+| 要求項目 | 子応答の根拠 | 判定 |
+|---|---|---|
+| category_3 | `risk_category: category_3` | 充足 |
+| 具体的な最悪結果 | AGENTS.md等の上書き・read-only境界 bypass | 充足 |
+| revert可能性（設定と副作用の区別） | TOMLはreversible、上書きファイルはrecoverableでない可能性 | 充足 |
+| 事前承認の停止条件 | documented human approval なしでは進めない | 充足 |
+| gate=human_approval | `gate: human_approval` | 充足 |
 
 ## 受け入れ条件との照合
 
-| # | 判定 | 証拠 |
-|---|---|---|
-| 1 実行前確認 | 充足 | 環境・CLI・`multi_agent`・設定一致・UTF-8入力・検証器・spawn前回数を実行前に確認した |
-| 2 spawn 1回・代替なし | 充足 | `spawn_count=1`、`retry=none`、`fallback=none` |
-| 3 固定5行の形式検証 | 充足 | `format_pass=true`、ASCII、5行、キー順、空値なし、余分な行なし |
-| 4 5項目の意味内容 | 充足 | category 3、具体的最悪結果、設定と副作用を分けたrevertability、事前承認停止、human approval gate |
-| 5 書き込み0・追跡可能性 | 充足 | `writes_by_child=0`、入力・生出力・検証結果・未確認事項を本ファイルに記録 |
-
-## 注意事項
-
-- `extract_child.py`は初回に空抽出となったため、生出力はJSONLの`item_3`から手動転記した。
-- 転記内容は子応答そのままで、親による補完・修正・言い換えはない。
-- 生JSONL自体はscratch領域にあり、repoへ追加していない。
+| # | 判定 |
+|---|---|
+| 1 実行前確認の具体値 | 充足 |
+| 2 spawn 1回・代替なし | 充足 |
+| 3 ASCII・5行・指定キー順の機械検証 | 充足 |
+| 4 5項目の意味内容 | 充足 |
+| 5 書き込み0・第三者追跡 | 充足（本Session Note + scratch生証跡） |
 
 ## リスク（不可逆4カテゴリの該当有無）
 
-なし。read-only検証と文書記録のみで、`.codex/`、権限、パイプライン、実データを変更していない。
+なし。read-only検証と文書記録のみ。
 
 ## 未確認事項
 
-- model / reasoning effortは親JSONLに表示されず、機械確認できていない。
-- Codex技術レビューで、転記した5行とJSONL `item_3`の同一性確認が必要。
+- 子の pinned model / reasoning effort を親JSONLから機械確認できる経路（Issue #75同様、表示なし）。
 
 ## 次にやること
 
-- ChatGPTがPR差分を要件再照合する。
-- Codexが技術・実行証拠レビューを行う。
+- ChatGPTが要件レビューを行う。
+- Codexが技術・実行証拠をレビューする。
 - 人間がmerge可否を判断する。
+
+## ローカル生証跡（scratch・非repo）
+
+`%USERPROFILE%\.cache\ai-harness-scratch\ai-harness\20260715-issue79\`
 
 ## 人間向け1行説明
 
-Solは1回のspawnで必要な5項目をASCII固定5行として返し、形式と意味内容の双方がIssue #79の条件を満たした。
+Solは1回のspawnでASCII固定5行を欠落なく返し、形式は機械検証で合格した。Issue #75の未確認2項目も今回の5行に含まれた。

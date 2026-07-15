@@ -77,6 +77,7 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節（AI判断
 | `recursive-review` | core | 基準照合レビュー | description トリガー |
 | `recursive-writing` | core | 基準照合執筆 | description トリガー |
 | `assessment-first` | lab | レビュー指摘・提案への実行前評価 | 明示指定、または AI 判断（宣言必須） |
+| `route-pm-model` | lab | PM作業の候補route・安全停止・実績記録 | 明示指定、または AI 判断（宣言必須） |
 | `lateral-sweep` | lab | 失敗クラスの横断走査と後続Issue提案 | 明示指定、または AI 判断（宣言必須） |
 | `plan-gate` | lab | 実行境界を越える計画の可読性ゲート（最弱読者復唱） | 明示指定、または AI 判断（宣言必須） |
 | `reframe-question` | lab | 依頼の前提検証と問いの再定義 | 明示指定、または AI 判断（宣言必須） |

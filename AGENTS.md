@@ -175,7 +175,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 ### verdict（AI間の機械伝達・正本）
 
 AI間の機械伝達は構造化verdict 1行で行う。**両形式の定義はここが唯一の正本**。他ファイル
-（`.agents/skills/pm-review/SKILL.md`・`docs/templates.md`）はこの定義に従う:
+（`.agents/skills/pm-review/SKILL.md`・`.agents/skills/recursive-review/SKILL.md`・`docs/templates.md`）はこの定義に従う:
 
 ```
 PM_VERDICT: {approve|reject|needs-info} risk={high|normal} [route={cursor|claude-code}] [gate={human_approval}]
@@ -200,6 +200,41 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
   即時削除しない（既存Issue・過去コメントとの互換のため）。
 - `REVIEW_VERDICT`: レビュアーの最終行。merge可能=`approve`、修正必須・保留=`request-changes`。
   高リスク（不可逆4カテゴリ）を新たに検出したら `risk=high` を付ける
+
+### verdict 補助行（評価対象と成果物の分離・任意）
+
+上記 `PM_VERDICT` / `REVIEW_VERDICT` の書式・最終行要件・意味は変更しない。
+必要な場合のみ、**既存verdictの直前**に次の補助行を置ける（省略時も既存出力は有効）:
+
+```
+SUBJECT_VERDICT: {pass|fail|incomplete|not-applicable}
+ARTIFACT_READINESS: {ready|draft}
+```
+
+- `SUBJECT_VERDICT`: 評価対象そのものの状態（実装・仕様・設計等）。
+- `ARTIFACT_READINESS`: 評価報告・設計書・引き継ぎ等、**その成果物自体**を次工程へ渡せるか。
+  `ready` は必要項目が揃い引き渡し可能という宣言であり、内容の正しさを自己証明するものではない。
+- **`ARTIFACT_READINESS: ready` だけでは、高リスク承認ゲート・独立レビュー・人間mergeを省略できない**
+  （`gate=human_approval` 等の既存ゲートはそのまま適用する）。
+
+補助行の未定義値は確定verdictとして扱わず修正する。補助行が既存 `PM_VERDICT` /
+`REVIEW_VERDICT` と矛盾する場合は、既存verdictを正本として停止し、PMへ差し戻す。
+
+例（評価対象が未完成だが、レビュー報告自体は確定している）:
+
+```
+SUBJECT_VERDICT: incomplete
+ARTIFACT_READINESS: ready
+REVIEW_VERDICT: request-changes
+```
+
+例（レビュー途中で、判定も報告も未確定）:
+
+```
+SUBJECT_VERDICT: incomplete
+ARTIFACT_READINESS: draft
+REVIEW_VERDICT: request-changes
+```
 
 ## 人間への問いかけ
 

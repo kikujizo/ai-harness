@@ -1931,3 +1931,66 @@ AIから人間への問いかけを、提案・推奨・理由つきのクロー
 - [ ] ChatGPT要件レビュー
 - [ ] Codex技術レビュー
 - [ ] 人間merge判断
+
+---
+
+# Decision: 評価対象と成果物完成度の2軸補助行（SUBJECT_VERDICT / ARTIFACT_READINESS）
+
+Date: 2026-07-16
+Status: Accepted
+Related Issues: #72, #67
+Related PRs: なし（後続PR予定）
+
+## 決定事項
+
+`SUBJECT_VERDICT`（評価対象の状態）と `ARTIFACT_READINESS`（評価成果物の完成度）の2軸を、任意補助行として `AGENTS.md` verdict節に追加する。既存の `PM_VERDICT` / `REVIEW_VERDICT` は正本のまま維持し、補助行は既存verdictの直前に配置する。
+
+## 背景・課題
+
+これまで、評価対象そのものの状態（実装・仕様・設計等）と、その評価を記述した成果物（レビュー報告書・設計書等）の引き渡し可能さが区別されていなかった。このため、中間報告や不完全な成果物を受け渡す際の機械的な判別が困難だった。
+
+## 採用する方針
+
+- 補助行（`SUBJECT_VERDICT` / `ARTIFACT_READINESS`）を既存verdict直前に任意配置として追加する
+- 補助行の未定義値は確定verdictとして扱わず修正を求める
+- 補助行が既存verdictと矛盾する場合は、既存verdictを正本として停止する
+
+## 採用しない方針 / 却下した代替案
+
+- **PM_VERDICT/REVIEW_VERDICT の値を拡張する案**: 既存のparserや他AIの解釈を壊す（後方互換破壊）ため却下
+- **ready を merge 代替（ゲート省略）とする案**: `ARTIFACT_READINESS: ready` は項目の不備がない宣言であり、内容の妥当性や安全性を保証するものではないため、既存ゲートの省略は許可しない
+
+## 判断理由
+
+- 既存のverdict形式を維持することで後方互換性を保てる
+- 2軸の導入により、中間報告と確定報告を機械的に区別でき、ワークフローの柔軟性が向上する
+- 成果物の「揃っているか（readiness）」と内容の「合格か（verdict）」を分離できる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`AGENTS.md` の verdict 契約変更）。人間事前承認: 2026-07-16（Issue #72）
+
+## 影響範囲
+
+- `AGENTS.md`（verdict節、verdict補助行の定義追加）
+- `docs/templates.md`（評価テンプレートの更新）
+- `.agents/skills/pm-review/SKILL.md`（出力例の更新）
+- `.agents/skills/recursive-review/SKILL.md`（出力例の更新）
+- `docs/decisions.md`（本記録）
+
+## 取り消し手順
+
+本決定に伴う各ファイルの変更節を `git revert` で戻す。補助行は任意項目であるため、既存運用への破壊的影響は限定的であり、可逆である。
+
+## 見直す条件
+
+- 補助行の誤用（例: `ready` 宣言を根拠に人間の事前承認ゲートや独立レビューを省略する等）が発生した場合
+- 補助行の導入によりAI間のコミュニケーションに混乱が生じた場合
+
+## 次アクション
+
+- [ ] ChatGPTによる要件レビューを受ける
+- [ ] Codexによる技術レビューを受ける
+- [ ] 人間による merge 判断
+
+承認: 人間（2026-07-16、Issue #72）

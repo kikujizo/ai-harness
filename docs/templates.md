@@ -207,12 +207,15 @@ P3（Issue #73）マージ後に新規作成・新規昇格する項目には帰
 ```markdown
 # 基準: {対象。例: 良い仕様書 / 良いPRレビュー / 読みやすい社内文書}
 1. {検証可能な形で書く。例:「受け入れ条件がすべて観測可能な事象で書かれている」}
+   attribution: {source-derived | operationalization | repository-policy}
+   source:
+   - source-derived: 原典URLまたは識別可能な出所
+   - operationalization: 根拠原典（または上位知見）と ai-harness 側の追加解釈を分離
+   - repository-policy: 採用理由と適用範囲
+2. {2項目目}
+   attribution:
+   source:
 ...
-attribution: {source-derived | operationalization | repository-policy}
-source:
-- source-derived: 原典URLまたは識別可能な出所
-- operationalization: 根拠原典（または上位知見）と ai-harness 側の追加解釈を分離
-- repository-policy: 採用理由と適用範囲
 ```
 
 ## 8. 実行計測ログ（ループの計測を機械的に残す）

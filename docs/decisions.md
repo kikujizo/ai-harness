@@ -2002,7 +2002,7 @@ Related PRs: なし（後続PR予定）
 Date: 2026-07-16
 Status: Accepted
 Related Issues: #73
-Related PRs: （本PR作成後に追記）
+Related PRs: #84
 
 ## 決定事項
 

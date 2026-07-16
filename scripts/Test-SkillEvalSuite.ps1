@@ -71,7 +71,9 @@ $requiredFields = @(
     'model',
     'workspace',
     'fresh_context',
-    'oracle_undisclosed_before_solve'
+    'oracle_undisclosed_before_solve',
+    'solver_summary',
+    'evaluation'
 )
 
 $runIds = New-Object System.Collections.Generic.List[string]

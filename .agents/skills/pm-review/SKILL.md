@@ -21,7 +21,8 @@ description: GitHub Issueや実装依頼を技術PMとして評価するSkill。
 ## 出力
 
 PM評価コメント（Checkpoint / 実装方針2〜4行 / 受け入れ条件の確認 / リスク / 担当）に続けて、
-最終行に必ず `PM_VERDICT:` 1行を置く。**形式・値の正本はルートの `AGENTS.md` のverdict契約**
+最終行に必ず `PM_VERDICT:` 1行を置く。必要時は PM_VERDICT 直前に補助行（SUBJECT_VERDICT / ARTIFACT_READINESS）を置ける。
+**形式・値の正本はルートの `AGENTS.md` のverdict節**
 （このSkillでは再掲しない。形式をここへ写すと、正本の変更時にドリフトする）。
 
 ## 制約

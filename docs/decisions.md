@@ -1876,7 +1876,7 @@ Issue #61とIssue #62で確定した候補route、安全停止、実績記録を
 Date: 2026-07-16
 Status: Proposed
 Related Issues: #76
-Related PRs: 作成予定
+Related PRs: #81
 
 ## 決定事項
 

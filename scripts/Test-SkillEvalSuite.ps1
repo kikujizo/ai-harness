@@ -16,11 +16,20 @@ function Get-RepoRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 }
 
-function Get-FileSha256Hex {
+function Get-NormalizedCaseSha256Hex {
     param([string]$FilePath)
+    # UTF-8 text → CRLF/CR を LF に正規化 → UTF-8 bytes の SHA-256（checkout 改行形式に依存しない）
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    $text = [System.IO.File]::ReadAllText($FilePath, $utf8)
+    $normalized = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+    $bytes = $utf8.GetBytes($normalized)
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
-    return (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }))
+    try {
+        return (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }))
+    }
+    finally {
+        $sha.Dispose()
+    }
 }
 
 function Test-Sha256HexFormat {
@@ -124,7 +133,7 @@ if ($distinctHashes.Count -ne 1) {
 }
 
 $recordHash = [string]$distinctHashes[0]
-$caseHash = Get-FileSha256Hex -FilePath $casePath
+$caseHash = Get-NormalizedCaseSha256Hex -FilePath $casePath
 if ($recordHash -ne $caseHash) {
     Write-Fail "record input_sha256 does not match case file SHA-256"
 }

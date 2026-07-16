@@ -28,7 +28,7 @@ lab Skill（現時点では `route-pm-model` パイロット）の**判断品質
 | 項目 | 説明 |
 |---|---|
 | `run_id` | 実行識別子（同一 record 内で重複禁止） |
-| `input_sha256` | case ファイル内容の SHA-256（小文字 hex 64 桁） |
+| `input_sha256` | case 本文の SHA-256（小文字 hex 64 桁）。UTF-8 テキストとして読み、CRLF / CR を LF に正規化したうえで、その本文を UTF-8 bytes 化して計算する。PowerShell validator（`scripts/Test-SkillEvalSuite.ps1`）と record の記録値は、いずれもこの定義に従う |
 | `model` | solver に使ったモデル名 |
 | `workspace` | 実行ワークスペース識別子（同一 record 内で重複禁止） |
 | `fresh_context` | `true` / `false` — 新規コンテキストで solve したか |
@@ -44,7 +44,7 @@ lab Skill（現時点では `route-pm-model` パイロット）の**判断品質
 
 - **case / oracle 分離**: solver 入力と評価基準を分け、事前答え合わせを防ぐ
 - **counted run**: 同一入力に対する反復実行と記録
-- **入力ダイジェスト**（`input_sha256`）: case 内容の固定化と記録間の一致検証
+- **入力ダイジェスト**（`input_sha256`）: case 本文同一性の固定化と記録間の一致検証（改行は LF 正規化後に hash）
 - **fresh context**: 各 run が独立コンテキストであることの宣言
 - **oracle 事前非開示**（`oracle_undisclosed_before_solve`）: solve 前に期待値を見ない運用
 

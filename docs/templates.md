@@ -169,18 +169,56 @@ Related PR: #
 {この変更を1行で説明}
 ````
 
-## 6. 基準ファイル（`docs/criteria/{対象}.md`）
+## 6. 昇格提案（knowledge-reflux → 人間承認）
+
+P3（Issue #73）マージ後の新規昇格提案に使う。帰属区分の正本は `docs/harness/knowledge/reflux.md` §3層帰属区分。
+
+```markdown
+# 昇格提案: {知見の短いタイトル}
+
+## 知見
+{何を昇格させるか（1〜3文）}
+
+## 提案する昇格先
+- [ ] docs/（読み物として構造化）
+- [ ] docs/criteria/（新規基準ファイル）
+- [ ] docs/criteria/（既存基準への項目追記: {ファイル名}）
+- [ ] AGENTS.md
+
+## 根拠（数値ゲート）
+- 参照回数 / ×の実績: {ゲート①②③のどれに該当するか}
+
+## 帰属（必須）
+attribution: {source-derived | operationalization | repository-policy}
+source:
+- source-derived の場合: 原典URLまたは識別可能な出所
+- operationalization の場合: 根拠原典（または上位知見）と、ai-harness側で加えた解釈を分けて記載
+- repository-policy の場合: 採用理由と適用範囲（外部URLは不要）
+
+## 出所不明時
+attribution または source を埋められない場合は本提案を出さず、docs/ または生メモに留める。
+```
+
+## 7. 基準ファイル（`docs/criteria/{対象}.md`）
 
 再帰的推論ループ（ルートの `AGENTS.md`「品質ループ」）で使い回す基準。1ファイル10項目以内。
+P3（Issue #73）マージ後に新規作成・新規昇格する項目には帰属欄を必須とする（既存 criteria への遡及適用はしない）。
 
 ```markdown
 # 基準: {対象。例: 良い仕様書 / 良いPRレビュー / 読みやすい社内文書}
 1. {検証可能な形で書く。例:「受け入れ条件がすべて観測可能な事象で書かれている」}
+   attribution: {source-derived | operationalization | repository-policy}
+   source:
+   - source-derived: 原典URLまたは識別可能な出所
+   - operationalization: 根拠原典（または上位知見）と ai-harness 側の追加解釈を分離
+   - repository-policy: 採用理由と適用範囲
+2. {2項目目}
+   attribution:
+   source:
 ...
-出典: {外部情報から作った場合はURL、経験則なら「運用知見」と日付}
 ```
 
-## 7. 実行計測ログ（ループの計測を機械的に残す）
+## 8. 実行計測ログ（ループの計測を機械的に残す）
 
 `docs/loop-ledger.md` が要求する最小計測と、ルートの `AGENTS.md`「品質ループ」の無進展検知を、
 タスク単位で1件ずつ残す形式。人間が毎回手で書く運用ではなく、ワークフロー側が機械的に追記できる項目にする。

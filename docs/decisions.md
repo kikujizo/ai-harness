@@ -1994,3 +1994,78 @@ Related PRs: なし（後続PR予定）
 - [ ] 人間による merge 判断
 
 承認: 人間（2026-07-16、Issue #72）
+
+---
+
+# Decision: knowledge-reflux への3層帰属区分（出所管理）の導入
+
+Date: 2026-07-16
+Status: Accepted
+Related Issues: #73
+Related PRs: #84
+
+## 決定事項
+
+knowledge-reflux の昇格パイプラインに、新規昇格知見の出所と解釈層を追跡する **3層帰属区分**
+（`source-derived` / `operationalization` / `repository-policy`）を導入する。
+昇格提案と criteria 作成テンプレートに `attribution` と `source` の記入欄を追加し、
+出所不明の知見は criteria へ昇格させない。
+
+## 背景・課題
+
+inspired-mino-design-skills は知見を外部原典・操作的解釈・リポジトリ固有運用の3層に厳密に区別し、
+帰属の誤りを防いでいる。ai-harness の knowledge-reflux は criteria へ昇格する仕組みを持つが、
+昇格した知見が「外部由来か・自分たちの解釈か・単なる運用都合か」の区別が残らず、
+後から原典に当たり直す・解釈だけ見直すことができなかった。
+
+## 採用する方針
+
+- 3層の定義・選択規則・混在時の分割規則を `docs/harness/knowledge/reflux.md` に正本として記載
+- `.agents/skills/knowledge-reflux/SKILL.md` の昇格ゲートに帰属ゲートを追加
+- `docs/templates.md` に昇格提案テンプレートと criteria テンプレートの帰属欄を追加
+- P3マージ後の新規昇格分から適用（既存 `docs/criteria/`、P1・P2成果物への遡及適用なし）
+
+## 採用しない方針 / 却下した代替案
+
+- **既存 criteria の一括書き換え**: コストと誤帰属リスクが大きく、受け入れ条件のスコープ外のため却下
+- **外部原典本文のコピー**: 正本の肥大化とメンテ負荷のため却下。URL・識別可能な出所の参照に留める
+- **validator・CI による機械検査の同時導入**: 本Issueのスコープ外。様式導入後に別Issueで検討
+
+## 判断理由
+
+- 3層区分により、後続の criteria・Skill 作成時に「原典を見直す」「解釈だけ見直す」「運用判断を見直す」
+  の切り分けが可能になる
+- 遡及適用を避けることで、既存成果物への破壊的影響を抑えつつ、新規昇格から規律を適用できる
+- 出所不明時の昇格停止により、誤帰属の拡散をゲートで防げる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`.agents/skills/knowledge-reflux/SKILL.md` の変更）。
+  人間事前承認: 2026-07-16（Issue #73 対話承認）
+
+## 影響範囲
+
+- `.agents/skills/knowledge-reflux/SKILL.md`（帰属ゲート・提案様式の追加）
+- `docs/harness/knowledge/reflux.md`（3層帰属区分の正本）
+- `docs/harness/knowledge/criteria-design-guide.md`（新規昇格分の帰属要件）
+- `docs/templates.md`（昇格提案・基準ファイルテンプレート）
+- `docs/decisions.md`（本記録）
+
+## 取り消し手順
+
+本決定に伴う5ファイルの変更を `git revert` で戻す。変更自体は可逆。
+ただし、誤帰属を参照して作られた後続 criteria・Skill は個別に訂正が必要になる可能性がある
+（revert だけでは後続成果物は自動修正されない）。
+
+## 見直す条件
+
+- 帰属欄が形骸化し、記入なしで昇格が進む運用が常態化した場合
+- P4 移植時に3層区分が実務上過剰と判明した場合（様式の簡素化を再検討）
+
+## 次アクション
+
+- [ ] ChatGPTによる要件レビューを受ける
+- [ ] Codexによる技術レビューを受ける
+- [ ] 人間による merge 判断
+
+承認: 人間（2026-07-16、Issue #73）

@@ -26,7 +26,7 @@ P3（Issue #73）マージ後に新規作成・新規昇格する基準項目に
 [reflux.md](reflux.md) §3層帰属区分に従い `attribution` と `source` を記録する。
 
 - `source-derived`: 外部一次資料由来。原典URLまたは識別可能な出所を必須。
-- `operationalization`: 操作的解釈。根拠原典と ai-harness 側の追加解釈を分離して記録。
+- `operationalization`: 操作的解釈。根拠となる原典または上位知見と ai-harness 側の追加解釈を分けて記録。
 - `repository-policy`: リポジトリ固有運用。採用理由と適用範囲を必須（外部URLは不要）。
 
 出所不明の知見は criteria へ昇格させない。既存 `docs/criteria/` への遡及適用はしない。

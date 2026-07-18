@@ -15,8 +15,9 @@ description: GitHub Issueや実装依頼を技術PMとして評価するSkill。
 4. **リスク分類**: ルート`AGENTS.md`の不可逆4カテゴリ（リスク分類の正本）への該当だけを high とする。
    **diffの大きさ・ファイル数はリスクではない**
 5. **ルーティング**: 通常→Cursor。横断的設計判断・デバッグ主体・Cursor失敗歴→Claude Code。
-   カテゴリ③→人間の承認ゲートへ（人間が承認し実装者を指名する—承認後はAI実装可、
-   実装AIと独立したレビュー＋人間merge＋Decision Log記録を必須）
+   カテゴリ③→PMが実装AIと独立レビュアーを同時確定し、可逆工程（実装・テスト・レビュー・PR作成）は
+   AIレーンで進める。発効点（merge・設定反映）のみ人間approve/deny（`gate=human_approval`、
+   approve後のmerge実行はAI）＋Decision Log記録を必須とする（実装開始の事前承認・人間による実装者指名は不要）
 
 ## 出力
 

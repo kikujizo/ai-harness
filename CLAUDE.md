@@ -23,7 +23,7 @@ Codex PMが例外委譲を判断したときのみ起動する。
 
 代理参加時は、**代理した役割・理由をGitHubコメントに明記**する（`AGENTS.md`「GitHubドリヴン記録」）。
 
-Claude Codeが実装した場合のレビューは Codex ＋ ChatGPT（不可なら人間）。Claude Codeは通常フローで
+Claude Codeが実装した場合のレビューは Codex ＋ ChatGPT（不足時は独立AIへ再ルーティング。候補がなければ `blocked`）。Claude Codeは通常フローで
 Cursor実装の既定レビュアーにならない。
 
 ## オーケストレーション規律（対話レーン・例外起動時）

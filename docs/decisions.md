@@ -4,6 +4,61 @@
 
 ---
 
+# Decision: 技術レビュー・復旧の人間フォールバック廃止（独立AI再ルート / blocked）
+
+Date: 2026-07-19
+Status: Accepted
+Related Issues: #51
+Related PRs: #94
+
+## 決定事項
+
+技術レビュー・技術復旧・ルーティング停滞において、人間をAIの代替要員にしない。
+
+- 独立レビュアー不足時は、人間をレビュアー代替にせず、AI PMが独立AIへ再ルーティングする。
+  候補がなければ `blocked` を記録し、実装へ流さない
+- 2回失敗時のエスカレーションも同様（Cursor差し戻し・Claude Code例外委譲・独立AI再ルーティング。
+  候補がなければ `blocked`。人間を技術復旧の代替にしない）
+- 人間の役割は変更しない: 意図入力と不可逆4カテゴリの**発効点**（merge・設定反映・実行の直前）での
+  approve/deny のみ
+- lab Skill の昇格・停止・Archive の日常判断は AI PM が確定。カテゴリ③に該当する正本変更の発効点のみ人間 approve/deny
+
+## 採用理由
+
+Issue #51 の裁定（`PM_VERDICT: approve risk=high route=cursor gate=human_approval`）に沿い、
+「人間は判断専任PM」体制を技術レーンまで一貫させる。人間フォールバックはボトルネック化し、
+レビュー独立性も損なう。
+
+## 却下した代替案
+
+- **人間フォールバック維持**（「不可なら人間」「または人間」）: 人間が技術レビュアー・復旧担当の
+  代替要員になり、判断専任PMの体制目的に反するため却下
+
+## 影響範囲
+
+- `AGENTS.md`（エスカレーション・レビュー独立表・人間への問いかけ・自動マージG1/G2・lab Skill節）
+- `CLAUDE.md`
+- `docs/harness/roles/claude-code.md` / `codex.md`
+- `.agents/skills/pm-review/SKILL.md`（`blocked` 追記）
+- 本 Decision Log
+
+## 取り消し手順
+
+本Decisionを含むPRを `git revert` する。旧文言（人間フォールバック）へ戻す場合は
+`docs/decisions.md` に Supersedes 記録を追記する。
+
+## リスク（不可逆4カテゴリの該当有無）
+
+カテゴリ③に該当（`AGENTS.md`・`CLAUDE.md`・roles・pm-review の正本改定）。
+発効点で人間 approve/deny 後に AI が merge 実行する（PR #93 merge 後ルール）。
+
+## 独立レビュー予定
+
+- 要件レビュー: ChatGPT
+- 技術レビュー: Codex
+
+---
+
 # Decision: 責務境界の再定義（人間ゲートを不可逆操作の発効点へ移動）
 
 Date: 2026-07-18

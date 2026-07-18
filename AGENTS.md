@@ -111,7 +111,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 
 - mainへの直接push
 - **発効点の人間approveなし**の高リスク（不可逆4カテゴリ）PRのmerge、および「自動マージ条件」を
-  満たさない通常リスクPRのmerge（技術ゲート不成立はAI PMが再ルーティングまたは locked を記録。不可逆案件の発効点のみ人間approve/deny。approve後のmerge実行はAIが行う）
+  満たさない通常リスクPRのmerge（技術ゲート不成立はAI PMが再ルーティングまたは `blocked` を記録。不可逆案件の発効点のみ人間approve/deny。approve後のmerge実行はAIが行う）
 - **発効点の人間approveなし**の不可逆操作の実行（カテゴリ③を含む。高リスク案件のAI実装自体は
   事前承認不要だが、実装AIと独立したレビュー＋発効点の人間approve＋Decision Log記録を必須とする）
 

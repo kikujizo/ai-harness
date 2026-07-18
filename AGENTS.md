@@ -120,8 +120,12 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 通常リスクPRは、G1〜G6を**全て**満たす場合に限りAIがmergeしてよい（1つでも欠けたら人間の判断キューへ）。
 本節が役割表・他節の「merge禁止」記述に対する唯一の例外を定義する（高リスクPRには適用されない）。
 
-1. **G1 リスク**: 不可逆4カテゴリ非該当。diffが secret/`.env`・課金設定・`.github/workflows/`・
-   `AGENTS.md`/`CLAUDE.md`/`.agents/`・スキーマ/migration に触れていない。
+1. **G1 リスク**: 上記「リスク分類（正本）」の不可逆4カテゴリに**非該当**であること。
+   カテゴリ③該当のうち、PR diffから観測できる次の変更は自動マージ対象外（人間レーンへ）:
+   secret/`.env`/credential（カテゴリ①）、課金設定（カテゴリ②）、CI/CD定義（`.github/workflows/`を含む）、
+   `AGENTS.md`/`CLAUDE.md`/`.agents/`/`.claude/`/`.codex/`（カテゴリ③）、スキーマ/migration（カテゴリ④）。
+   リポジトリ設定・権限設定など、diffだけでは変更の有無を確認できないものは、
+   該当有無の判定がつかない場合も含め人間レーンへ戻す。
    迷ったら1問「revertで完全に戻せるか」= Yes であること
 2. **G2 独立レビュー**: 実装AIと**別の**AIによる `REVIEW_VERDICT: approve`（「レビュー独立」表準拠、risk=high注記なし）
 3. **G3 指摘ゼロ残し**: 全レビュー指摘がディスポジション済み（今回修正 / wontfix理由付き / 追跡Issue URL）

@@ -111,7 +111,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 
 - mainへの直接push
 - **発効点の人間approveなし**の高リスク（不可逆4カテゴリ）PRのmerge、および「自動マージ条件」を
-  満たさない通常リスクPRのmerge（これらは人間の判断キューへ。approve後のmerge実行はAIが行う）
+  満たさない通常リスクPRのmerge（技術ゲート不成立はAI PMが再ルーティングまたは locked を記録。不可逆案件の発効点のみ人間approve/deny。approve後のmerge実行はAIが行う）
 - **発効点の人間approveなし**の不可逆操作の実行（カテゴリ③を含む。高リスク案件のAI実装自体は
   事前承認不要だが、実装AIと独立したレビュー＋発効点の人間approve＋Decision Log記録を必須とする）
 
@@ -136,7 +136,7 @@ G2等の技術ゲート不成立は人間をレビュアー代替にせず、AI 
 2. **G2 独立レビュー**: 実装AIと**別の**AIによる `REVIEW_VERDICT: approve`（「レビュー独立」表準拠、risk=high注記なし）。
    独立レビュアーが確保できない場合、人間をレビュアー代替にせず、AI PMが再ルーティングするか `blocked` を記録する
 3. **G3 指摘ゼロ残し**: 全レビュー指摘がディスポジション済み（今回修正 / wontfix理由付き / 追跡Issue URL）
-4. **G4 CI**: statusCheckRollup 全success。CI未整備リポジトリは自動マージ対象外（人間レーン）
+4. **G4 CI**: statusCheckRollup 全success。CI未整備リポジトリは自動マージ対象外（AI PMが次アクションを判断。人間を技術判断の代替にしない）
 5. **G5 スコープ一致**: AI PMが承認した（`PM_VERDICT: approve`）Issueに紐づき、到達状態（Checkpoint）がPM評価と一致
 6. **G6 実行様式**: merge前にPRへ判断コメント（署名＋G1〜G5チェックリスト＋根拠URL）を記録し、
    squash mergeで実行し、人間へ事後報告する

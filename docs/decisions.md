@@ -68,9 +68,7 @@ Claude Code検証所見（Issue #51）を経て、ユーザーが対話レーン
 ## リスク（不可逆4カテゴリの該当有無）
 
 カテゴリ③に該当（正本 `AGENTS.md`・`CLAUDE.md`・`.claude/settings.json` 等の書き換え）。
-本決定時点の現行ルール（事前承認＋独立レビュー＋人間merge）に従って実施する:
-人間の事前裁定は2026-07-18取得済み（Issue #51記録）、実装AI=Claude Code、
-独立レビュー=Codex/ChatGPT、mergeは人間approve。
+**移行時例外**: 本Decisionを導入するPR（#93）自身のmergeは、改定前ルールにより**人間が実行する**（独立レビュー＋人間merge）。本PRのmerge完了をもって新境界が発効し、以降の高リスクPRは「人間approve → AIがmerge実行」を適用する。人間の事前裁定は2026-07-18取得済み（Issue #51記録）、実装AI=Claude Code/Cursor、独立レビュー=Codex/ChatGPT。
 
 ## 影響範囲
 
@@ -94,8 +92,8 @@ Status注記を元に戻す。
 
 ## 次アクション
 
-- 本PRの独立レビュー（Codex/ChatGPT）→ 人間approve → merge
-- merge後、open Issue/PR本文の旧境界記述をAIレーンで更新（#51へ完了報告）
+- 本PR（#93）の独立レビュー（Codex/ChatGPT）→ 人間がmerge実行（上記移行時例外）
+- merge後から新境界を適用。open Issue/PR本文の旧境界記述をAIレーンで更新（#51へ完了報告）
 - 下流リポジトリへの反映はHARNESS_VERSION同期時に個別判断
 
 承認: kazuk（2026-07-18 対話レーン。裁定記録: https://github.com/kikujizo/ai-harness/issues/51#issuecomment-5011677151）

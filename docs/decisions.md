@@ -4,6 +4,56 @@
 
 ---
 
+# Decision: pm-review / recursive-review への運用実測教訓の反映（レビュアー同時確定・独立性・AI再ルーティング）
+
+Date: 2026-07-19
+Status: Accepted
+Related Issues: #92
+Related PRs: #88
+
+## 決定事項
+
+頻用Skill `pm-review` / `recursive-review` に、運用実測で判明した次の教訓を正本へ反映する。
+
+- **pm-review**: 実装担当決定時に、ルート`AGENTS.md`「レビュー独立」表に従い独立レビュアーも同時確定する。
+  候補不在時は独立AIへ再ルーティングまたは `blocked`（人間をレビュアー代替にしない）
+- **recursive-review**: 自己実装物の主レビュー禁止、証拠の帰属確認、書き込み不能時の独立AI再ルーティング、
+  前回レビュー復元不能時の無進展判定、委譲時の復唱済み基準埋め込みを手順に明記する
+- カテゴリ③の可逆工程はAIレーンで進め、発効点（merge・設定反映）のみ人間approve/deny。
+  approve後のmerge実行はAI
+
+## 採用理由
+
+- 独立レビュアー未確定によるPR停滞（ai-dev-workflow PR #79/#81）を、PM評価段階で防ぐ
+- 自己レビュー・帰属反転（PR #45）・下位モデルへの基準未伝達（2026-07-17実測）をSkill手順で塞ぐ
+- PR #94 で発効した「人間を技術代替にしない」境界と整合させる（旧PR #88の人間フォールバック記述は採用しない）
+
+## 却下した代替案
+
+- **旧PR #88のまま取り込む**（カテゴリ③で人間が実装者指名・人間merge）: PR #93/#94 の正本と矛盾するため却下
+- **人間へのIssue化依頼・人間への無進展返却**: 判断専任PMの体制目的に反するため却下。独立AI再ルーティングまたは `blocked` に統一
+
+## 影響範囲
+
+- `.agents/skills/pm-review/SKILL.md`（手順6追加）
+- `.agents/skills/recursive-review/SKILL.md`（独立性・帰属・再ルーティング・無進展・委譲基準）
+- 本 Decision Log
+
+## 取り消し手順
+
+PR #88 を `git revert` する。下流同期済みの場合は、正本revert後の差分を各導入先へ同期する。
+
+## リスク（不可逆4カテゴリの該当有無）
+
+カテゴリ③（`.agents/skills/` の正本改定）。発効点で人間 approve/deny 後に AI が merge 実行する。
+
+## 独立レビュー予定
+
+- 要件レビュー: ChatGPT
+- 技術レビュー: Codex
+
+---
+
 # Decision: 技術レビュー・復旧の人間フォールバック廃止（独立AI再ルート / blocked）
 
 Date: 2026-07-19

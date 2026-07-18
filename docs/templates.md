@@ -69,9 +69,10 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 
 書式の正本はルートの `AGENTS.md` verdict 節。要点のみ:
 
-- `route`: 次に処理を担当する主体（`cursor`・`claude-code`）。承認ゲート通過後に付与。
-- `gate`: 次工程に進む前の停止条件。高リスク推奨: `gate=human_approval`（人間の事前承認ゲート。
-  人間が作業する意味ではない）。
+- `route`: 次に処理を担当する主体（`cursor`・`claude-code`）。AI PMが確定して付与。
+- `gate`: 満たすまで不可逆操作を実行しない停止条件。高リスク推奨: `gate=human_approval`
+  （不可逆操作の発効点＝merge・設定反映での人間approve/deny。実装開始の事前承認ではなく、
+  人間が作業する意味でもない）。
 - `route=human`: deprecated 互換表記。意味は人間承認ゲート。今後の推奨は `gate=human_approval`。
 - 補助行 (`SUBJECT_VERDICT` / `ARTIFACT_READINESS`): 評価対象の状態や成果物の準備状況を分離して報告する際に使用。詳細は `AGENTS.md` 参照。
 

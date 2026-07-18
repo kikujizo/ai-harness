@@ -46,7 +46,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 
 | 役割 | 担当 | やること | やらないこと |
 |---|---|---|---|
-| 仕様化＋要件レビュー | ChatGPT | 要件定義、Issue本文作成（起票は人間）、レビュー観点整理・要件充足レビュー | 実装、ルーティング、merge、コード行レビュー |
+| 仕様化＋要件レビュー | ChatGPT | 要件定義、Issue本文作成・起票（書き込み経路がなければ人間へ転記依頼）、レビュー観点整理・要件充足レビュー | 実装、ルーティング、merge、コード行レビュー |
 | 技術PM | Codex | Issue評価、リスク分類、ルーティング、技術レビュー、次アクション判定 | 実装（原則）、merge |
 | メイン実装 | Cursor | 実装、ファイル雑務、文章生成、PR作成 | 仕様の勝手な拡張、再設計 |
 | フェールセーフ | Claude Code | 全役割の代理（例外時のみ）、対話レーンの指揮 | 人間approveのない高リスクmerge、本番deploy判断、通常フローの既定レビュアー |
@@ -132,7 +132,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 2. **G2 独立レビュー**: 実装AIと**別の**AIによる `REVIEW_VERDICT: approve`（「レビュー独立」表準拠、risk=high注記なし）
 3. **G3 指摘ゼロ残し**: 全レビュー指摘がディスポジション済み（今回修正 / wontfix理由付き / 追跡Issue URL）
 4. **G4 CI**: statusCheckRollup 全success。CI未整備リポジトリは自動マージ対象外（人間レーン）
-5. **G5 スコープ一致**: 人間が承認したIssueに紐づき、到達状態（Checkpoint）がPM評価と一致
+5. **G5 スコープ一致**: AI PMが承認した（`PM_VERDICT: approve`）Issueに紐づき、到達状態（Checkpoint）がPM評価と一致
 6. **G6 実行様式**: merge前にPRへ判断コメント（署名＋G1〜G5チェックリスト＋根拠URL）を記録し、
    squash mergeで実行し、人間へ事後報告する
 

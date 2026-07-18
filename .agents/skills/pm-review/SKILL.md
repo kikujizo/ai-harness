@@ -17,7 +17,8 @@ description: GitHub Issueや実装依頼を技術PMとして評価するSkill。
 5. **ルーティング**: 通常→Cursor。横断的設計判断・デバッグ主体・Cursor失敗歴→Claude Code。
    カテゴリ③→PMが実装AIと独立レビュアーを同時確定し、可逆工程（実装・テスト・レビュー・PR作成）は
    AIレーンで進める。発効点（merge・設定反映）のみ人間approve/deny（`gate=human_approval`、
-   approve後のmerge実行はAI）＋Decision Log記録を必須とする（実装開始の事前承認・人間による実装者指名は不要）
+   approve後のmerge実行はAI）＋Decision Log記録を必須とする（実装開始の事前承認・人間による実装者指名は不要）。
+   独立レビュアーが確保できない場合は実装へ流さず `blocked` を記録する
 
 ## 出力
 

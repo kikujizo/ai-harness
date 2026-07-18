@@ -42,7 +42,10 @@ Claude Codeが実装した場合のレビューは Codex ＋ ChatGPT（不可な
   AIは通常フローでこれらのパスを変更できず、変更が必要なタスクでは停止して人間の承認を求める。
   承認後は人間が用意した専用ブランチ・環境で実装できる（実装AIと独立したレビュー＋人間merge＋
   Decision Log記録を必須）。denyの機械壁は常設のまま外さない
-- `Bash(gh pr merge:*)` のdenyはAGENTS.md「mergeは人間」の、`Bash(gh repo edit:*)` は「リポジトリ設定変更禁止」
+- `Bash(gh pr merge:*)` のdenyは、高リスクPR・自動マージ条件（AGENTS.md）未達PRのmerge禁止の機械的な裏付け。
+  ai-harnessリポジトリは正本群を含み変更の多くがカテゴリ③のため、自動マージ条件を満たす場合でも
+  本リポジトリではdenyを常設のまま維持する（下流リポジトリへの適用は人間がdeny設定込みで個別判断）。
+  `Bash(gh repo edit:*)` は「リポジトリ設定変更禁止」
   （カテゴリ③）の機械的な裏付け。`Read(./**/.env)`・`Read(./**/.env.*)` はサブディレクトリの `.env` も塞ぐ
 - `deny` の `Read(./.env)` はCLAUDE.mdの禁止ルールの**機械的な裏付け**。
   「CLAUDE.mdに書いても徹底されない」問題への対策は、指示ではなく権限で塞ぐこと

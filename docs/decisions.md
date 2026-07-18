@@ -9,7 +9,7 @@
 Date: 2026-07-19
 Status: Accepted
 Related Issues: #51
-Related PRs: （PR番号確定後に追記）
+Related PRs: #94
 
 ## 決定事項
 

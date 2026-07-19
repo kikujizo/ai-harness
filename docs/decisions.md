@@ -93,7 +93,7 @@ approve後のmergeはAIが実行する（PR #93 merge 後ルール）。
 - ChatGPT要件レビュー: 完了。要件上の変更要求は解消済み
 - Codex独立技術レビュー: 事後監査として実施。`request-changes` — Decision Log整合性の是正を要求し、Issue #96で対応
 - 発効点の人間approve/deny: **未確認**。PR #95はmerge済みだが、確認可能な承認証跡はない
-- merge: 実施済み。ただし
+- merge: 実施済み。ただし、発効点の人間approve/denyは未確認
 
 ---
 

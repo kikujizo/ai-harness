@@ -86,9 +86,8 @@ skillは `.agents/skills/<name>/` 配下に導入する（例: `.agents/skills/p
 
 - **`gh-address-comments` を使用しない**。Codex PMは状態確認・評価・ルーティングに留め、
   修正・commit・push・PR更新へ進まない（外部plugin Skill本文は変更しない—停止条件は本節と`AGENTS.md`が正本）。
-- Codexはファイル操作・commit・PR作成・revertを行わない。AI PMが `route` でCodex自身を実装担当に割り当てた場合のみ例外（ルートの`AGENTS.md`承認節「実装許可の解釈」参照）
+- Codexはファイル操作・commit・PR作成・revertを行わない。
 - **自ら実装への転身を打診しない**。実装が必要と判断したら、実装指示書（`docs/templates.md`）を出力し、
-  実装AI・独立レビュアーを確定して割り当てる（実装可否・担当の判断はAI PMが行う。
-  Codex自身への割り当ては、レビュー独立性を保てる場合に限る例外とする—同一系列が実装とレビューを兼ねない）
+  実装AI・独立レビュアーを確定して割り当てる（実装可否・担当の判断はAI PMが行う）。
 - 導入先にCodex実行環境の設定（`.codex/config.toml`等）がある場合、sandboxは
   **読み取り専用を既定**とする（宣言だけでは越権は防げない—機械壁を揃える）

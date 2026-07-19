@@ -311,6 +311,32 @@ REVIEW_VERDICT: request-changes
 Skillの正本は `.agents/skills/`。新規Skillは正本にのみ追加する。
 Archive済みSkillは `.agents/skills-archive/` に置き、`.agents/skills/` の実在確認と発動候補から外す。
 
+### GitHub作業Skillの責務境界（正本）
+
+Issue #50の実測（2026-07）に基づき、GitHub作業で頻用するSkillの責務を固定する。
+外部plugin Skill（Codexの `github`・`gh-address-comments` 等）の**本文は変更しない**。
+実効ルールは本節と `docs/harness/roles/codex.md` に置く。
+
+| Skill | 所在 | 責務 | やること | やらないこと |
+|---|---|---|---|---|
+| `github` | 外部plugin | GitHub一次情報の取得・記録 | Issue/PR/コメントの読取、状態確認の記録 | PM評価、差分レビュー、修正・commit・push |
+| `pm-review` | `.agents/skills/pm-review/` | Issue・実装依頼のPM評価 | Checkpoint検証、リスク分類、`PM_VERDICT`、ルーティング | 実装、PR差分の基準照合 |
+| `recursive-review` | `.agents/skills/recursive-review/` | PR・差分・文書の基準照合 | 基準復唱、1項目ずつ照合、`REVIEW_VERDICT` | Issue粒度のPM評価、実装 |
+
+**ルーティング（強制遷移しない）**:
+
+- 状態確認・記録だけなら `github`（または同等の読取経路）で終了する。評価Skillへ強制遷移しない。
+- 評価判断がある場合のみ、目的に応じた評価Skill（`pm-review` または `recursive-review`）へ移る。
+- 例:「PR #123の状態確認」→ `github` で終了。「Issue #123を実装へ流せるか」→ `pm-review`。
+  「PR #123がACを満たすか」→ `recursive-review`。
+
+**Codex PMの非実装停止条件（正本）**:
+
+- Codexが技術PMとして動作中は `gh-address-comments` を発動しない（修正・commit・pushへ進まない）。
+- 修正が必要と判断したら、AI PMが許可されたroute（通常 `route=cursor`、例外時のみ `route=claude-code`）へ
+  割り当てる。Cursor差し戻し・Claude Code例外委譲・独立AI再ルーティング・`blocked` のいずれかを
+  AI PMが確定する（人間を実装担当の指名者にしない）。
+
 ### ティア（core / lab / 凍結 / Archive）
 
 | ティア | 意味 | 発動 |

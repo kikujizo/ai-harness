@@ -4,6 +4,94 @@
 
 ---
 
+# Decision: GitHub作業Skillの責務境界とCodex PM非実装停止条件
+
+Date: 2026-07-19
+Status: Proposed
+Related Issues: #50, #51
+Related PRs: （本PR）
+
+## 決定事項
+
+Issue #50の実測に基づき、GitHub作業で頻用する3 Skillの責務境界を `AGENTS.md` に正本化する。
+あわせて、Codex PMが `gh-address-comments` を発動せず、修正・commit・pushへ進まない停止条件を
+`AGENTS.md` と `docs/harness/roles/codex.md` に同期する。外部plugin Skill（`github`・`gh-address-comments`）の
+本文は変更しない。
+
+| Skill | 責務 |
+|---|---|
+| `github`（外部plugin） | GitHub一次情報の取得・記録のみ |
+| `pm-review` | Issue・実装依頼のPM評価（`PM_VERDICT`） |
+| `recursive-review` | PR・差分・文書の基準照合（`REVIEW_VERDICT`） |
+
+- 状態確認・記録だけでは評価Skillへ強制遷移しない。
+- 実装が必要な場合、AI PMは通常 `route=cursor`、例外時のみ `route=claude-code` へ割り当てる
+  （`route=codex` は新設しない）。
+
+## 背景・課題
+
+Issue #50で、Codex PMがレビュー確認から `gh-address-comments` 経由で越権実装へ進むリスクと、
+`github` / `pm-review` / `recursive-review` の責務混在が観測された。正本に境界がなく、
+PMが状態確認だけの依頼でも評価Skillへ遷移したり、実装Skillを起動したりする余地があった。
+
+## 採用する方針
+
+- 3 Skillの責務表とルーティング規則を `AGENTS.md` に置く（実効正本）
+- Codex PMの `gh-address-comments` 禁止を機械的に明記（`AGENTS.md` + `codex.md`）
+- 実装routeは現行verdict契約どおり `cursor` / `claude-code` のみ
+
+## 採用しない方針 / 却下した代替案
+
+- **外部plugin Skill本文の変更**: リポジトリ管理外のため却下。上位ルール（`AGENTS.md`）で停止させる
+- **`route=codex` の新設**: verdict正本・機械検証の変更が必要でCheckpoint Aの範囲を超えるため却下
+- **人間による実装者指名の維持**: 2026-07-18「責務境界の再定義」で廃止済みのため却下
+- **状態確認でも評価Skillを必須化**: トークン浪費と責務混在を招くため却下
+
+## 判断理由
+
+- Issue #50の気づき（`recursive-review` は低頻度高アウトカム、`github` は基盤、`gh-address-comments` はPMと衝突）
+  を実効ルールへ落とし込む最小変更
+- 外部pluginを変えずに `AGENTS.md` で越権を止められる（カテゴリ③の多層防御の一層）
+- 3ファイル・半日のCheckpoint Aで観測可能な受け入れ条件を満たせる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+カテゴリ③に該当（`AGENTS.md` と Codexロール定義の変更）。
+可逆工程（実装・テスト・レビュー・PR更新）はAIレーンで進める。実装開始の事前承認と人間による実装者指名は不要。
+AI PMが実装担当と独立レビュアーを確定する。発効点（merge・設定反映）のみ人間approve/denyを必須とし、
+approve後のmergeはAIが実行する（PR #93 merge 後ルール）。
+
+## 独立レビュー予定
+
+- 要件レビュー: ChatGPT
+- 技術レビュー: Codex
+
+## 影響範囲
+
+- `AGENTS.md`（「GitHub作業Skillの責務境界」節の追加）
+- `docs/harness/roles/codex.md`（使い分け表・`gh-address-comments` 停止条件）
+- 本 Decision Log
+- Checkpoint B（別Issue）: `.agents/skills/pm-review/SKILL.md`、`.agents/skills/recursive-review/SKILL.md`、`docs/harness/setup.md`
+
+## 取り消し手順
+
+本Issueの3ファイルを同一PR単位で `git revert` する。適用先へ同期済みなら、正本revert後に
+各適用先へ再同期する。外部plugin Skillは変更していないため、revert対象外。
+
+## 見直す条件
+
+- Codex PMが `gh-address-comments` を起動する越権事故が1件でも起きた場合（停止条件の強化を検討）
+- `github` / `pm-review` / `recursive-review` の責務が再び混在した場合（Checkpoint BでSkill本文を同期）
+
+## 次アクション
+
+- [ ] ChatGPT要件レビュー
+- [ ] Codex独立技術レビュー
+- [ ] 発効点で人間approve/deny
+- [ ] approve後、AIがmerge
+
+---
+
 # Decision: pm-review / recursive-review への運用実測教訓の反映（レビュアー同時確定・独立性・AI再ルーティング）
 
 Date: 2026-07-19

@@ -32,6 +32,20 @@ PM評価コメント（Checkpoint / 実装方針2〜4行 / 受け入れ条件の
 **形式・値の正本はルートの `AGENTS.md` のverdict節**
 （このSkillでは再掲しない。形式をここへ写すと、正本の変更時にドリフトする）。
 
+## 責務境界（Issue #51同期）
+
+- **状態確認だけの依頼**（例: 「PR #123の状態を確認して」）は本Skillの対象外。
+  `github`（外部plugin）でGitHub一次情報の取得・記録だけ行い終了する。PM評価へ強制遷移しない。
+- **本Skillの対象**は Issue・実装依頼のPM評価（例: 「Issue #123を実装へ流せるか評価して」）。
+  最終行は `PM_VERDICT:`。
+- **依頼の主目的が一意に判定できない**場合は、実装やレビューを開始せず、
+  状態確認・PM評価・基準照合のどれを求めているか確認する。
+- **Codex PMとして動作中**は `gh-address-comments` を起動しない。修正・commit・push・PR更新へ進まない
+  （停止条件の正本: ルート`AGENTS.md`「GitHub作業Skillの責務境界」）。
+- **修正が必要と判断したら**、AI PMが許可済みrouteを確定する: 通常はCursor（`route=cursor`）、
+  例外時のみClaude Code（`route=claude-code`）、独立AIへの再ルーティング、または `blocked`。
+  `route=codex` は新設しない。
+
 ## 制約
 
 - 読むのはIssue本文（または依頼文）とAGENTS.mdだけ。リポジトリ全体をスキャンしない（枠の節約）

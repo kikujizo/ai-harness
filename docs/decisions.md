@@ -7,9 +7,9 @@
 # Decision: GitHub作業Skillの責務境界とCodex PM非実装停止条件
 
 Date: 2026-07-19
-Status: Proposed
+Status: Accepted
 Related Issues: #50, #51
-Related PRs: （本PR）
+Related PRs: #95
 
 ## 決定事項
 
@@ -61,10 +61,15 @@ PMが状態確認だけの依頼でも評価Skillへ遷移したり、実装Skil
 AI PMが実装担当と独立レビュアーを確定する。発効点（merge・設定反映）のみ人間approve/denyを必須とし、
 approve後のmergeはAIが実行する（PR #93 merge 後ルール）。
 
-## 独立レビュー予定
+## レビュー記録
 
-- 要件レビュー: ChatGPT
-- 技術レビュー: Codex
+| 項目 | 結果 | 証跡 |
+|---|---|---|
+| merge | mainへmerge済み（2026-07-19 02:42:29 UTC）。merge commit: `1bc08bee316ac016496d30593fcc2da96b6c045b` | PR #95 |
+| ChatGPT要件レビュー | 要件上の変更要求は解消（修正後HEAD `1d8e14163f65241e2b58196583b0eced029f272c`） | https://github.com/kikujizo/ai-harness/pull/95#issuecomment-5013858459 |
+| Codex独立技術・事後監査 | `REVIEW_VERDICT: request-changes risk=high`（P1: Decision Logの状態と完了記録をmainの実態へ整合させる必要） | https://github.com/kikujizo/ai-harness/pull/95#issuecomment-5013893412 |
+| CI | **未報告・成功確認不能**（PR #95 head `1d8e14163f65241e2b58196583b0eced029f272c` のcheck run 0件） | 監査注記 |
+| 発効点の人間approve/deny | **未確認**（merge済みだが確認可能な承認証跡なし） | 監査注記 |
 
 ## 影響範囲
 
@@ -85,10 +90,10 @@ approve後のmergeはAIが実行する（PR #93 merge 後ルール）。
 
 ## 次アクション
 
-- [ ] ChatGPT要件レビュー
-- [ ] Codex独立技術レビュー
-- [ ] 発効点で人間approve/deny
-- [ ] approve後、AIがmerge
+- ChatGPT要件レビュー: 完了。要件上の変更要求は解消済み
+- Codex独立技術レビュー: 事後監査として実施。`request-changes` — Decision Log整合性の是正を要求し、Issue #96で対応
+- 発効点の人間approve/deny: **未確認**。PR #95はmerge済みだが、確認可能な承認証跡はない
+- merge: 実施済み。ただし、発効点の人間approve/denyは未確認
 
 ---
 

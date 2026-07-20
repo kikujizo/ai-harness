@@ -69,6 +69,16 @@ Codex固有の差分は次の点:
 
 skillは `.agents/skills/<name>/` 配下に導入する（例: `.agents/skills/pm-review/SKILL.md`）。
 
+## GitHub書き込み
+
+CodexがGitHubへPM判断または技術レビューを記録するとき、冒頭に次を置く:
+
+```md
+> **記録者**: Codex
+```
+
+共通ルール・代理時・転記時の扱いは、ルートの `AGENTS.md`「GitHubドリヴン記録」を参照する。
+
 ## GitHub作業Skillの使い分け（AGENTS.md同期）
 
 ルートの`AGENTS.md`「GitHub作業Skillの責務境界」と整合させる。外部plugin Skill本文は変更しない。

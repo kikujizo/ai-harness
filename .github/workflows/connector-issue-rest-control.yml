@@ -1,0 +1,25 @@
+name: Connector Issue REST Control
+on:
+  push:
+    branches: [test/connector-issue-rest-control-20260721]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create and verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          body='# Direct REST control'
+          for i in $(seq -w 1 30); do body="$body
+$i. Direct REST API control line $i remains complete."; done
+          body="$body
+END_MARKER_DIRECT_REST"
+          n=$(gh api repos/${{ github.repository }}/issues -f title='[CONTROL] Direct REST long body' -f body="$body" --jq .number)
+          saved=$(gh api repos/${{ github.repository }}/issues/$n --jq .body)
+          test "$saved" = "$body"
+          gh issue close "$n" --reason completed

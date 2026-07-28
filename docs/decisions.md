@@ -2507,3 +2507,70 @@ retry 可能なら idempotency も必要とみなす、duplicate を key の有�
 - [ ] ChatGPT による要件レビューを受ける
 - [ ] Codex による技術レビューを受ける
 - [ ] 人間による merge 判断
+
+---
+
+# Decision: オーケストレーション軽作業境界のループ構造基準化
+
+Date: 2026-07-28
+Status: Proposed
+Related Issues: #110
+Related PRs: #111
+
+## 決定事項
+
+`docs/harness/ops/orchestration.md` §2・§7 および `CLAUDE.md` のオーケストレーション規律を、
+「1〜2ファイル」基準から**ループ非発生**基準へ変更する。多段実装ループ（調査→実装→CI→修正→再CI→記録）は
+軽作業に含めず委譲必須とする。ツール着手前の委任表宣言を明文化する。
+実測記録を `docs/harness/knowledge/2026-07-28-conductor-direct-heavy-loop.md` に新設し、正本から参照する。
+
+## 背景・課題
+
+ai-dev-workflow Issue #130 で、変更見込み2ファイルにもかかわらず指揮者が多段実装ループを直接実行した。
+正本の軽作業定義がファイル数に偏り、ループ構造と委任表宣言が欠けていた。
+
+## 採用する方針
+
+- §2 委譲ラダー: 軽作業行を「ループ非発生の読み取り/1行修正」に変更し、多段ループ委譲必須を注記
+- §7 グローバルスニペット: 委任表着手前必須・ループ基準を同期
+- `CLAUDE.md`: 同上をオーケストレーション規律に反映
+- knowledge/ 実測記録新規 + orchestration.md から参照
+- 可逆工程（実装・PR作成）は先行可。発効点（merge・設定反映）は人間 approve/deny 必須
+
+## 採用しない方針 / 却下した代替案
+
+- **ファイル数基準の維持**: 多段ループを軽作業と誤判定する実測があるため却下
+- **incidents/ 新設**: 本リポジトリに incidents/ 慣行がないため knowledge/ に記録
+
+## 判断理由
+
+- Vault76 で実測・ルール改訂済みの知見を正本へ還流し、全リポジトリの指揮者挙動を揃える
+- 文言変更のみで実行主体・ティア・発動条件は変えない
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`CLAUDE.md`・`docs/harness/ops/orchestration.md` の変更）。
+  可逆工程は AI レーンで進める。発効点のみ人間 approve/deny を必須とする。
+
+## 影響範囲
+
+- `docs/harness/ops/orchestration.md`
+- `CLAUDE.md`
+- `docs/harness/knowledge/2026-07-28-conductor-direct-heavy-loop.md`（新規）
+- `docs/decisions.md`（本記録）
+
+## 取り消し手順
+
+1. 本 PR を `git revert` で戻す
+2. 本 Decision Log の Status を Superseded へ変更する
+
+## 見直す条件
+
+- 委譲過多・委譲不足の新たな実測が蓄積した場合
+- orchestration.md と Vault 側 orchestrate Skill の差分が運用上問題化した場合
+
+## 次アクション
+
+- [ ] ChatGPT による要件レビューを受ける
+- [ ] Codex による技術レビューを受ける
+- [ ] 人間による merge 判断

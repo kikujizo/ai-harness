@@ -2582,7 +2582,7 @@ ai-dev-workflow Issue #130 で、変更見込み2ファイルにもかかわら�
 Date: 2026-07-28
 Status: Proposed
 Related Issues: #109, #74
-Related PRs: （本PR）
+Related PRs: #112
 
 ## 決定事項
 
@@ -2632,7 +2632,11 @@ Evidence 不足は `unknown` として停止し、本番データ・本番環境
 ## リスク（不可逆4カテゴリの該当有無）
 
 - カテゴリ③に該当（`.agents/skills/mino-model-deepening/SKILL.md` の変更）。
-  可逆工程（実装・テスト・レビュー・PR作成）は AI レーンで進める。発効点（merge・設定反映）のみ人間 approve/deny を必須とする。
+  承認ゲートは `AGENTS.md` 承認節・verdict 契約（`gate=human_approval`）に従い、次の一続きとして扱う（merge のみのゲートではない）:
+  1. **着手前**: Codex PM による `PM_VERDICT: approve risk=high route=cursor gate=human_approval`（実装担当 `route=cursor`・独立レビュアー ChatGPT/Codex の確定）と、人間による実装着手の明示承認（Issue #109 対話承認、2026-07-28）
+  2. **可逆工程**: Cursor による実装・テスト・PR 作成（`human_approval` は発効点ゲートであり、実装開始の事前承認ではない — `AGENTS.md` verdict 節）
+  3. **merge 前必須**: 実装 AI と独立した ChatGPT 要件レビュー・Codex 技術レビュー、本 Decision Log の確認
+  4. **発効点**: 不可逆操作（main への merge・設定反映）の直前で人間 approve/deny。approve 後の merge 実行は AI が担う
 - 最悪の失敗: AI が本番データへ破壊操作を行う、または無効状態を生成可能なモデルを安全と誤判定して後続実装へ渡すこと。文書変更は revert 可能だが、既に発生した外部副作用は完全には戻せない。
 
 ## 影響範囲

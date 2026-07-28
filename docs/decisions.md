@@ -2632,12 +2632,18 @@ Evidence 不足は `unknown` として停止し、本番データ・本番環境
 ## リスク（不可逆4カテゴリの該当有無）
 
 - カテゴリ③に該当（`.agents/skills/mino-model-deepening/SKILL.md` の変更）。
-  `AGENTS.md` 承認節・verdict 契約（`gate=human_approval`）に従う:
-  - カテゴリ③の AI 実装は**人間の事前承認なし**で進めてよい。可逆な実装・テスト・レビュー・PR 作成は承認不要で実行し、出力契約で事後報告する
-  - Codex PM が `PM_VERDICT: approve risk=high route=cursor gate=human_approval` により実装担当（`route`）と独立レビュアーを同時確定する（人間の実装者指名は不要）
-  - `gate=human_approval` は実装開始の事前承認ではなく、merge・設定反映・実行直前の**発効点**ゲートである
-  - merge 前必須: 実装 AI と独立した ChatGPT 要件レビュー・Codex 技術レビュー、本 Decision Log の記録
-  - **発効点**: 不可逆操作の直前で人間 approve/deny。approve 後の merge 実行は AI が担う
+  `AGENTS.md` 承認節・verdict 契約および Decision「責務境界の再定義」（2026-07-18）に従う。
+
+**人間ゲートの分離（混同しないこと）**:
+
+| フェーズ | 人間の関与 | 根拠 |
+|---|---|---|
+| 1. 可逆工程（実装着手〜レビュー・PR作成） | **事前承認は不要**。AI PM が `PM_VERDICT: approve risk=high route=cursor gate=human_approval` で実装担当（`route`）と独立レビュアーを同時確定する（人間の実装者指名は不要） | `AGENTS.md` 承認節・verdict 節 |
+| 2. merge 前の必須条件 | 人間の判断ではなく **AI 独立レビュー**（ChatGPT 要件レビュー・Codex 技術レビュー）と本 Decision Log の記録 | `AGENTS.md` レビュー独立・G2 |
+| 3. 発効点（不可逆操作の直前） | **`gate=human_approval`**: merge・設定反映について人間が approve/deny。approve 後の merge 実行は AI が担う | `AGENTS.md` verdict 節・Decision 2026-07-18 |
+
+- `gate=human_approval` は**実装着手前の事前承認ではない**。可逆工程（実装・テスト・レビュー・PR 作成）はこのゲートを待たずに進めてよい。
+- 発効点の人間 approve/deny は、可逆工程の完了・独立レビュー合格・Decision Log 記録を**省略しない**。
 - 最悪の失敗: AI が本番データへ破壊操作を行う、または無効状態を生成可能なモデルを安全と誤判定して後続実装へ渡すこと。文書変更は revert 可能だが、既に発生した外部副作用は完全には戻せない。
 
 ## 影響範囲

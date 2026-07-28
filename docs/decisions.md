@@ -2574,3 +2574,85 @@ ai-dev-workflow Issue #130 で、変更見込み2ファイルにもかかわら�
 - [ ] ChatGPT による要件レビューを受ける
 - [ ] Codex による技術レビューを受ける
 - [ ] 人間による merge 判断
+
+---
+
+# Decision: mino-model-deepening への 12観点欠落監査と destruction probe の導入
+
+Date: 2026-07-28
+Status: Proposed
+Related Issues: #109, #74
+Related PRs: （本PR）
+
+## 決定事項
+
+`mino-model-deepening` の設計 Checkpoint 手順に、対象 scope 固定後の **12観点欠落監査（screening）**、**applicable 観点の詳細化**、**destruction probe（反証）** を追加する。
+Evidence 不足は `unknown` として停止し、本番データ・本番環境での probe を禁止する。無効状態を公開 writer または迂回 writer から生成できる候補は採用可能・完了扱いにしない。
+
+## 背景・課題
+
+現行 Skill は既存モデルの暗黙前提を問い直し代替候補を比較できるが、要件に必要な意味がどの観点で欠落しているかを網羅的に screening する手順と、無効状態を具体的な writer から作れてしまうかを検証する手順がない。
+そのため、state・transition・failure・writer・authority 等の欠落や serializer・migration・admin 等の迂回経路を見逃したまま採用候補にできてしまう。
+
+## 採用する方針
+
+- 手順に「前提: 対象 scope の固定」を追加し、無限 scope を禁止する
+- STEP 4〜6 として 12 観点 screening、applicable 観点の詳細化、destruction probe を追加する
+- 各観点を `applicable | not_applicable | unknown` で判定し、`rationale`・`evidence` を必須とする
+- `unknown` 時は `confirmation_method`・`impact_if_unresolved` を記録し、詳細化・完了扱いに進めない
+- destruction probe は思考実験または使い捨て fixture を既定とし、writer / entry から伝播・業務影響まで追跡する
+- Hard Gate で架空要素禁止・本番 probe 禁止・無効状態生成可能候補の完了扱い禁止をブロックする
+- 外部 `inspired-mino-design-skills`（commit `afd50e2`）から部分移植し、P3 の3層帰属で記録する
+
+## 採用しない方針 / 却下した代替案
+
+- **全観点の詳細モデル化**: screening の穴埋めに架空要素を生むため却下
+- **外部 `mino-domain-model-completeness` Skill 丸ごと輸入**: lab ティア・既存深化フロー・上位仕様境界と衝突するため却下
+- **Completeness Package の全 schema・coverage 計算・canonical decision schema の導入**: 本 Issue のスコープ外のため却下
+- **本番データ・本番環境での destruction probe**: 不可逆リスクのため却下
+- **架空 probe による screening 穴埋め**: 監査の信頼性を損なうため却下
+- **新規テスト基盤・CI の同時導入**: 本 Issue のスコープ外。既存構造検証が無いため検証ファイル追加は行わない
+
+## 判断理由
+
+- Issue #74 P4 部品2として、モデル候補評価時の見落としを最小変更で防げる
+- 既存 STEP 1〜3・反証ラウンド・出力契約へ追記するだけで、lab ティア・発動条件・採否権限を変えずに適用できる
+- 外部原典の「12 観点 rubric・applicability screening・destruction probe・本番 data 禁止」を ai-harness のモデル深化様式へ操作的に落とし込める
+
+## 3層帰属（P3）
+
+| 層 | 内容 | 出所 |
+|---|---|---|
+| `source-derived` | 12 観点 rubric、applicability screening、destruction probe の追跡項目、本番データ禁止 | `inspired-mino-design-skills` commit `afd50e2` の `mino-domain-model-completeness`（SKILL.md L14–25,36,44–54,62–76,78–88；workflow.md L34–45,47–84,145–200,233–269,297–371） |
+| `operationalization` | 完全性監査 Skill 全体は輸入せず、既存モデル深化フローへ欠落監査表と反証記録として組み込む | ai-harness Issue #109 仕様化 |
+| `repository-policy` | lab ティア・明示発動・実装中の自動再設計禁止・採否を人間に残す既存境界を維持 | ai-harness 既存 `mino-model-deepening` 境界 |
+
+12 観点は外部 Skill 内の suite operationalization であり、一般 DDD 理論の固定定義として帰属させない。
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ③に該当（`.agents/skills/mino-model-deepening/SKILL.md` の変更）。
+  可逆工程（実装・テスト・レビュー・PR作成）は AI レーンで進める。発効点（merge・設定反映）のみ人間 approve/deny を必須とする。
+- 最悪の失敗: AI が本番データへ破壊操作を行う、または無効状態を生成可能なモデルを安全と誤判定して後続実装へ渡すこと。文書変更は revert 可能だが、既に発生した外部副作用は完全には戻せない。
+
+## 影響範囲
+
+- `.agents/skills/mino-model-deepening/SKILL.md`（12 観点 screening・destruction probe・Hard Gate・出力契約・品質基準の追加）
+- `docs/decisions.md`（本記録）
+
+## 取り消し手順
+
+1. 本 PR を `git revert` で戻す
+2. 本 Decision Log の Status を Superseded へ変更する
+3. 誤監査に基づき既に採用されたモデル設計がある場合は個別に訂正が必要（revert だけでは自動修正されない）
+
+## 見直す条件
+
+- 12 観点 screening が形骸化し、架空要素で穴埋めする運用が再発した場合
+- Issue #74 部品3 との整合で様式変更が必要になった場合
+
+## 次アクション
+
+- [ ] ChatGPT による要件レビューを受ける
+- [ ] Codex による技術レビューを受ける
+- [ ] 人間による merge 判断

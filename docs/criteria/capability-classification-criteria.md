@@ -25,12 +25,12 @@
 1. **対象種別が明示されている**
    観測手順: 成果物内で capability の対象種別が `business_capability | subdomain | technical_capability | unknown` のいずれかとして**明示**されているか見る。種別の記載がない、または曖昧な比喩だけで種別が読み取れない場合は×。
    attribution: `source-derived`
-   source: `inspired-mino-design-skills` commit `afd50e2ca18bb22e336a05df1c8481dbcd652b5c` — `.agents/skills/mino-architecture-quality-strategy/SKILL.md` L50–52（capability kind の先行判定）
+   source: `inspired-mino-design-skills` commit `afd50e2ca18bb22e336a05df1c8481dbcd652b5c` — `.agents/skills/mino-architecture-quality-strategy/SKILL.md` L49（capability kind を `business_capability | subdomain | technical_capability | unknown` へ判定する）
 
 2. **technical capability へ事業分類・価値物語を直接付与していない**
    観測手順: `kind: technical_capability`（または同等の記述）の capability に、`core | supporting | generic`、domain vision、unique value、事業上の differentiation を**直接**付与していないか見る。1つでも付与されていれば×。business capability / subdomain であることを示す Evidence へ遡れる場合のみ、対象種別の訂正後に再評価する。
    attribution: `source-derived`
-   source: `inspired-mino-design-skills` commit `afd50e2` — `.agents/skills/mino-architecture-quality-strategy/SKILL.md` L66–75（core/supporting/generic を business capability / subdomain のみへ適用する Hard Gate）
+   source: `inspired-mino-design-skills` commit `afd50e2` — `.agents/skills/mino-architecture-quality-strategy/SKILL.md` L66–75（Hard Gates。特に L69–70: technical capability へ core/supporting/generic を付与しない）
 
 3. **technical capability は技術的評価軸で扱われている**
    観測手順: `kind: technical_capability` の capability が、quality scenario・failure risk・operation・cost 等の**技術的評価軸**で記述されているか見る。技術名・新規性・「高速」「スケーラブル」等の形容だけを価値根拠にしている場合は×。`classification: not_applicable` とその理由が明示されていれば○（技術手段への core 分類回避として有効）。
@@ -44,10 +44,12 @@
    - 根拠原典: `inspired-mino-design-skills` commit `afd50e2` — `mino-architecture-quality-strategy/references/workflow.md` L47–87（Evidence 不足は unknown へ接続）
    - ai-harness 側解釈: Issue #113 受け入れ条件に合わせ、`confirmation_method` / `impact_if_unresolved` の記録を観測必須とした
 
-5. **× が1つでもあれば完成・推奨扱いに接続しない**
-   観測手順: 項目1〜4のいずれかが×のとき、対象成果物が「完成」「推奨」「採用可能」「レビュー合格」等の扱いになっていないか見る。×が残ったまま完成扱いなら×。×は `request-changes` または未解決事項へ接続し、`artifact_status: not_ready` 等の未完了表現が残っていれば○。
+5. **×・未解決のまま完成・推奨扱いにしていない**
+   観測手順: 次のいずれかに該当するのに、対象成果物が「完成」「推奨」「採用可能」「レビュー合格」等の扱いになっていないか見る。(a) 項目1〜4のいずれかが×、(b) `kind: unknown` または classification が未確定のまま未解決として停止すべき状態（項目4が○でも未解決は継続）、(c) `artifact_status: not_ready` 等の未完了表記と矛盾する完了扱い。該当する完了・推奨扱いがあれば×。×・未解決は `request-changes` または未解決事項へ接続し、未完了表現が整合していれば○。
    attribution: `repository-policy`
-   source: ai-harness `docs/criteria/` 運用 — バイナリ基準の×は推奨・完了へ進めない（`docs/criteria/README.md` 運用ルール）。事業価値の最終承認は人間または上位仕様の Evidence に残す
+   source:
+   - ai-harness Issue #113 判定規則5（1項目でも×の場合、完成・推奨扱いにしない）
+   - `.agents/skills/recursive-review/SKILL.md` L31–34（未解決の指摘が残る限り approve しない — 本基準では×および unknown 未解決を未完了として扱う）
 
 ## 判定規則
 
@@ -55,7 +57,7 @@
 - 本基準の対象外の成果物には「**対象外**」と明記する（誤適用しない）
 - ×は「項目番号 + 該当箇所（ファイル・フィールド名・行）」で名指しする
 - 基準にない問題は「基準外の気づき」として分離する（reflux ゲート②）
-- 項目4で `unknown` 停止が正しい場合、項目1〜3の未確定は×ではなく、**未解決として停止**が期待結果
+- 項目4で `unknown` 停止が正しい場合、項目1・4は○になりうるが、**項目5により完成・推奨扱いには進めない**（`artifact_status: not_ready` 等と整合すること）
 
 ## 照合例（静的確認用）
 
@@ -102,7 +104,7 @@ capability:
   evidence: []
 ```
 
-期待: 項目4=○（推測確定なし）。項目1=○（unknown 明示）。完成・推奨扱いには進めない（項目5）
+期待: 項目4=○（推測確定なし）。項目1=○（unknown 明示）。項目5=○（`artifact_status: not_ready` 等で完成・推奨扱いになっておらず、未解決停止と整合していること）
 
 ## ファイル全体の帰属（P3）
 

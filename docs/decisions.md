@@ -2675,7 +2675,7 @@ Evidence 不足は `unknown` として停止し、本番データ・本番環境
 Date: 2026-07-28
 Status: Proposed
 Related Issues: #113, #74
-Related PRs: （本PR）
+Related PRs: #114
 
 ## 決定事項
 
@@ -2713,7 +2713,7 @@ technical capability への根拠なき `core | supporting | generic` 付与・�
 
 | 層 | 内容 | 出所 |
 |---|---|---|
-| `source-derived` | capability kind 先行判定、technical capability への core/価値物語禁止、技術軸評価、Evidence 不足時の unknown | `inspired-mino-design-skills` commit `afd50e2` の `mino-architecture-quality-strategy`（SKILL.md L50–52, L66–75；workflow.md L47–87） |
+| `source-derived` | capability kind 先行判定、technical capability への core/価値物語禁止、技術軸評価、Evidence 不足時の unknown | `inspired-mino-design-skills` commit `afd50e2` の `mino-architecture-quality-strategy`（SKILL.md L49, L66–75；workflow.md L47–87） |
 | `operationalization` | Architecture Strategy Package 全体は輸入せず、5項目のバイナリ設計基準へ変換。`confirmation_method` / `impact_if_unresolved` を観測必須化 | ai-harness Issue #113 仕様化 |
 | `repository-policy` | `docs/criteria/` を運用正本とする。1ファイル10項目以内。事業価値・優先順位の承認は AI が確定しない | ai-harness `docs/criteria/README.md` 運用ルール |
 

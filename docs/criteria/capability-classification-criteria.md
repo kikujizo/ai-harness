@@ -33,9 +33,9 @@
    source: `inspired-mino-design-skills` commit `afd50e2` — `.agents/skills/mino-architecture-quality-strategy/SKILL.md` L66–75（Hard Gates。特に L69–70: technical capability へ core/supporting/generic を付与しない）
 
 3. **technical capability は技術的評価軸で扱われている**
-   観測手順: `kind: technical_capability` の capability が、quality scenario・failure risk・operation・cost 等の**技術的評価軸**で記述されているか見る。技術名・新規性・「高速」「スケーラブル」等の形容だけを価値根拠にしている場合は×。`classification: not_applicable` とその理由が明示されていれば○（技術手段への core 分類回避として有効）。
+   観測手順: `kind: technical_capability` の capability について次を見る。(a) quality scenario・failure risk・operation・cost 等の**技術的評価軸**のうち、適用可能なものが少なくとも1つ具体的に記述されているか。技術名・新規性・「高速」「スケーラブル」等の形容だけを価値根拠にしている場合は×。(b) `classification: not_applicable` は `core | supporting | generic` の**事業分類**を technical capability へ付与しないための表記としてのみ用いる。`not_applicable` と理由（`classification_rationale` 等）だけで (a) の技術的評価軸をすべて省略している場合は×。(c) 個別の評価軸が本当に適用不可なら、**軸ごと**に非適用理由と Evidence（または value-preservation / risk statement）を記録していること。理由1行のみで項目3全体を○にしてはならない。
    attribution: `source-derived`
-   source: `inspired-mino-design-skills` commit `afd50e2` — `.agents/skills/mino-architecture-quality-strategy/references/workflow.md` L47–87（named technology を目的にしない・logging/deployment/cache 等を技術軸で評価）
+   source: `inspired-mino-design-skills` commit `afd50e2` — `.agents/skills/mino-architecture-quality-strategy/references/workflow.md` L47–87（named technology を目的にしない・logging/deployment/cache 等を技術軸で評価。`not_applicable` は理由・Evidence・value-preservation / risk statement を伴う）
 
 4. **Evidence 不足時は unknown を維持し推測で確定していない**
    観測手順: kind または classification を Evidence から決められない記述がある場合、`unknown` が維持され、`confirmation_method` と `impact_if_unresolved` が残っているか見る。Evidence 不足なのに AI の推測で `business_capability` / `technical_capability` 等へ確定している場合は×。`unknown` 維持かつ確認方法・未解決影響が記録されていれば○。
@@ -58,6 +58,7 @@
 - ×は「項目番号 + 該当箇所（ファイル・フィールド名・行）」で名指しする
 - 基準にない問題は「基準外の気づき」として分離する（reflux ゲート②）
 - 項目4で `unknown` 停止が正しい場合、項目1・4は○になりうるが、**項目5により完成・推奨扱いには進めない**（`artifact_status: not_ready` 等と整合すること）
+- `classification: not_applicable` は項目2の事業分類回避であり、**項目3の技術評価要件の免除にならない**
 
 ## 照合例（静的確認用）
 
@@ -74,6 +75,19 @@ capability:
 ```
 
 期待: 項目2=×（core・differentiation・domain_vision の直接付与）、項目3=×（技術的評価軸なし）→ 項目5=×（not_ready へ接続すること）
+
+### 不正例（項目3のみ× — `not_applicable` 理由だけで技術評価を省略）
+
+```yaml
+capability:
+  name: Redisキャッシュ
+  kind: technical_capability
+  classification: not_applicable
+  classification_rationale: core分類はbusiness capability / subdomain向けのため
+  evidence: []
+```
+
+期待: 項目2=○、項目3=×（`not_applicable` と理由だけでは技術的評価軸が欠落）→ 項目5=×（not_ready へ接続すること）
 
 ### 合格例（○）
 

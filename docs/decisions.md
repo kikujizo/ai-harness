@@ -2515,7 +2515,7 @@ retry 可能なら idempotency も必要とみなす、duplicate を key の有�
 Date: 2026-07-28
 Status: Proposed
 Related Issues: #110
-Related PRs: （PR作成後に追記）
+Related PRs: #111
 
 ## 決定事項
 

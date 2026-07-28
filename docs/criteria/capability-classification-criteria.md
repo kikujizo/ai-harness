@@ -108,10 +108,10 @@ capability:
 
 ## ファイル全体の帰属（P3）
 
-| 層 | 内容 |
-|---|---|
-| `source-derived` | capability kind 先行判定、technical capability への core/価値物語禁止、技術軸評価、Evidence 不足時の unknown |
-| `operationalization` | 外部 Architecture Strategy Package 全体は輸入せず、5項目のバイナリ設計基準へ変換。`confirmation_method` / `impact_if_unresolved` を観測必須化 |
-| `repository-policy` | `docs/criteria/` を運用正本とする。1ファイル10項目以内。事業価値・優先順位の承認は AI が確定しない |
+| 層 | 内容 | 出所 |
+|---|---|---|
+| `source-derived` | capability kind 先行判定、technical capability への core/価値物語禁止、技術軸評価、Evidence 不足時の unknown | `inspired-mino-design-skills` commit `afd50e2` の `mino-architecture-quality-strategy`（SKILL.md L49, L66–75；workflow.md L47–87） |
+| `operationalization` | 外部 Architecture Strategy Package 全体は輸入せず、5項目のバイナリ設計基準へ変換。`confirmation_method` / `impact_if_unresolved` を観測必須化 | ai-harness Issue #113 仕様化 |
+| `repository-policy` | `docs/criteria/` を運用正本とする（1ファイル10項目以内・バイナリ＋観測手順）。事業価値・優先順位・事業上の差別化の承認は AI が確定しない | `docs/criteria/README.md` 運用ルール（形式）+ ai-harness Issue #113 repository-policy（価値・優先順位・事業上の差別化の承認は AI が確定せず、人間または上位仕様の Evidence へ残す） |
 
 外部原典: `my-take-dev/inspired-mino-design-skills` commit `afd50e2ca18bb22e336a05df1c8481dbcd652b5c`。原典の参照位置が確認できない場合は実装・照合を停止する（架空の出所を補わない）。

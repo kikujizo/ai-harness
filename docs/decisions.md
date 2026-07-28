@@ -2667,3 +2667,81 @@ Evidence 不足は `unknown` として停止し、本番データ・本番環境
 - [ ] ChatGPT による要件レビューを受ける
 - [ ] Codex による技術レビューを受ける
 - [ ] 人間による merge 判断
+
+---
+
+# Decision: capability-classification-criteria の導入（technical capability 誤分類の限定阻止）
+
+Date: 2026-07-28
+Status: Proposed
+Related Issues: #113, #74
+Related PRs: （本PR）
+
+## 決定事項
+
+`docs/criteria/capability-classification-criteria.md` を新設し、設計・アーキテクチャ成果物で capability 種別・差別化・domain vision を扱うとき、
+technical capability への根拠なき `core | supporting | generic` 付与・架空の differentiation / unique value / domain vision を
+5項目のバイナリ基準で検出し、完成・推奨扱いに進めない。
+
+## 背景・課題
+
+親 Issue #74 部品3として、外部 `mino-architecture-quality-strategy` の Hard Gate を Skill 丸ごと輸入せず `docs/criteria/` へ限定移植する必要がある。
+現行 `docs/criteria/` には、Redis・cache・deployment 等の技術手段をそれ自体で競争優位とみなす誤りや、Evidence なしの価値物語を直接止める設計基準がない。
+
+## 採用する方針
+
+- 適用対象を capability classification / differentiation / domain vision / architecture investment を扱う成果物に限定する
+- 5項目のバイナリ基準（観測手順・項目ごとの `attribution` / `source` 付き）として実装する
+- 外部 `inspired-mino-design-skills`（commit `afd50e2`）から部分移植し、P3 の3層帰属で記録する
+- `docs/criteria/README.md` へ索引追加、`docs/decisions.md` に本記録のみ追加する
+
+## 採用しない方針 / 却下した代替案
+
+- **外部 `mino-architecture-quality-strategy` Skill 丸ごと輸入**: lab ティア・既存 Skill 境界と衝突するため却下
+- **全設計成果物への常時適用**: 過剰適用とトークン浪費のため却下。適用対象を明示して限定する
+- **技術要素の一律低評価**: technical capability を貶めるのではなく、技術軸（quality scenario 等）での評価を要求する
+- **AI による事業価値・投資判断の承認**: 本基準は検出と停止のみ。最終承認は人間または上位仕様の Evidence に残す
+- **新規テスト基準・CI・AGENTS.md / `.agents/` の同時変更**: 本 Issue のスコープ外のため却下
+
+## 判断理由
+
+- Issue #113 の Checkpoint と受け入れ条件5項目を、変更3ファイル・半日以内で満たせる
+- 既存 `recursive-review` 運用から README 索引経由で選択でき、Skill・CI を変えずに導入できる
+- 5項目固定により「10項目以内」と「5項目以内」の併記による曖昧性を解消する
+
+## 3層帰属（P3）
+
+| 層 | 内容 | 出所 |
+|---|---|---|
+| `source-derived` | capability kind 先行判定、technical capability への core/価値物語禁止、技術軸評価、Evidence 不足時の unknown | `inspired-mino-design-skills` commit `afd50e2` の `mino-architecture-quality-strategy`（SKILL.md L50–52, L66–75；workflow.md L47–87） |
+| `operationalization` | Architecture Strategy Package 全体は輸入せず、5項目のバイナリ設計基準へ変換。`confirmation_method` / `impact_if_unresolved` を観測必須化 | ai-harness Issue #113 仕様化 |
+| `repository-policy` | `docs/criteria/` を運用正本とする。1ファイル10項目以内。事業価値・優先順位の承認は AI が確定しない | ai-harness `docs/criteria/README.md` 運用ルール |
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- **該当なし（通常リスク）**。変更はドキュメント3件のみ。`git revert` で戻せる。
+- 最悪の失敗: 基準が過剰適用され妥当な設計を止める、または逆に偽の差別化を見逃すこと。誤判定に基づく後続判断が既に行われた場合は個別訂正が必要。
+
+## 影響範囲
+
+- `docs/criteria/capability-classification-criteria.md`（新規）
+- `docs/criteria/README.md`（索引追加のみ）
+- `docs/decisions.md`（本記録）
+
+## 取り消し手順
+
+1. 本 PR を `git revert` で戻す
+2. 本 Decision Log の Status を Superseded へ変更する
+3. 誤適用に基づき既に却下された設計案がある場合は個別に訂正が必要（revert だけでは自動修正されない）
+
+## 見直す条件
+
+- 基準が capability を扱わない成果物へ誤適用される運用が再発した場合
+- Issue #74 他部品との整合で様式変更が必要になった場合
+- 6ヶ月間項目5以外が一度も×を出さない場合は剪定候補（`criteria-design-guide.md` のライフサイクルに従う）
+
+## 次アクション
+
+- [ ] ChatGPT による要件レビューを受ける
+- [ ] Codex による技術レビューを受ける
+- [ ] 人間による merge 判断

@@ -2793,8 +2793,7 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 
 - **カテゴリ③に該当**（`.agents/skills/` 変更＝AIエージェント設定ディレクトリ）。
   実装route `route=cursor` は Codex PM が Issue #106 PM評価で決定済み。
-  人間承認（`gate=human_approval`）は merge・設定反映の**発効点**で未実施。
-  merge前に独立レビュー＋人間approve/deny必須。
+  人間承認（`gate=human_approval`）: merge発効点で**承認済み**（2026-07-29 [#5113842833](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113842833)）。
 
 ## 影響範囲
 
@@ -2823,5 +2822,5 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 ## 次アクション
 
 - [x] ChatGPT による要件レビュー（PR #117・[#5113515005](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113515005) request-changes → [#5113618866](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113618866) approve）
-- [ ] Codex による技術レビュー（[#5113660726](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113660726) request-changes → 修正後再照合待ち）
-- [ ] 人間による merge 判断（発効点・`gate=human_approval`）
+- [x] Codex による技術レビュー（[#5113660726](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113660726) request-changes → [#5113726262](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113726262) approve）
+- [x] 人間による merge 判断（発効点・`gate=human_approval`・[#5113842833](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113842833) approve・2026-07-29）

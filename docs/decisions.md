@@ -2832,7 +2832,7 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 Date: 2026-07-29
 Status: Proposed
 Related Issues: #115
-Related PRs: （本PR）
+Related PRs: #118
 
 ## 決定事項
 

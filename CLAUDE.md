@@ -69,6 +69,8 @@ Issue/PR本文・コメント・レビュー記録の冒頭に `> **記録者**:
 発効点の人間approveのない高リスクPRのmergeをしない（通常リスクPRはルート`AGENTS.md`「自動マージ条件」を
 全て満たす場合にmerge可、高リスクPRは人間approve後にmerge実行可）。
 Issueのスコープを勝手に広げない。承認されたDecision Logなしに大規模リファクタをしない。
+**Issue外の設計変更**（`AGENTS.md`「実装ルール」節）が必要と判明したら、影響範囲だけを止め提案5点を記録し、
+Codex PMへ返す。Issue内の実装詳細は通常どおり継続し、逐次人間承認や全作業停止は新設しない。
 カテゴリ③（権限・パイプライン・正本・AI設定）に触れる変更は、専用ブランチで実装してよい（事前承認不要）。
 ただし発効点（merge・設定反映）で人間のapprove/denyを求める（推奨表記: `gate=human_approval`。
 実装AIと独立したレビュー＋Decision Log記録＋approve後のAIによるmerge実行。詳細は `AGENTS.md` verdict 節）。

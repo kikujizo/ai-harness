@@ -2753,11 +2753,11 @@ technical capability への根拠なき `core | supporting | generic` 付与・�
 Date: 2026-07-29
 Status: Proposed
 Related Issues: #106
-Related PRs: （本PR）
+Related PRs: #117
 
 ## 決定事項
 
-停滞案件（同種失敗2回以上・失敗層移動）を安全に診断し最小再開手順を提示する `stall-rescue` Skill を、
+停滞案件（同種失敗2回以上など。失敗層移動はチェックポイントの1つ）を安全に診断し最小再開手順を提示する `stall-rescue` Skill を、
 `.agents/skills/stall-rescue/` に **lab ティア**として正本導入する。
 Vault76_Cloud の同名Skillはマージ後ミラーとして扱い、正本は ai-harness とする。
 
@@ -2772,7 +2772,7 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 
 - 正本: `ai-harness/.agents/skills/stall-rescue/`（`SKILL.md` + `references/adapters.md`）
 - 初期ティア: **lab**（明示指定または AI 判断＋宣言。core の代替ではなく補助プレイブック）
-- 発動境界: 同種失敗2回以上・失敗層移動・律速支配・安全契約弱化案・断定直前の5チェックポイント
+- 発動境界: 同種失敗2回以上・失敗層未整理・律速支配・安全契約弱化案・断定直前の5チェックポイント（いずれか）
 - 非発動: 初回失敗のみ → 通常デバッグ。仕様判断・PMルーティングは `pm-review` 等へ
 - README・setupシナリオ試験・Decision Log で名称・lab・正本/ミラー・発動境界を一致させる
 
@@ -2792,7 +2792,8 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 ## リスク（不可逆4カテゴリの該当有無）
 
 - **カテゴリ③に該当**（`.agents/skills/` 変更＝AIエージェント設定ディレクトリ）。
-  人間の事前承認: 2026-07-29 取得済み（Issue #106 コメント経由）。
+  実装route `route=cursor` は Codex PM が Issue #106 PM評価で決定済み。
+  人間承認（`gate=human_approval`）は merge・設定反映の**発効点**で未実施。
   merge前に独立レビュー＋人間approve/deny必須。
 
 ## 影響範囲
@@ -2821,8 +2822,6 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 
 ## 次アクション
 
-- [ ] ChatGPT による要件レビュー
+- [x] ChatGPT による要件レビュー（PR #117・request-changes）
 - [ ] Codex による技術レビュー
-- [ ] 人間による merge 判断
-
-承認: 人間（2026-07-29、Issue #106 カテゴリ③事前承認・`route=cursor` 実装指定）
+- [ ] 人間による merge 判断（発効点・`gate=human_approval`）

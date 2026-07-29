@@ -81,7 +81,7 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節（AI判断
 | `lateral-sweep` | lab | 失敗クラスの横断走査と後続Issue提案 | 明示指定、または AI 判断（宣言必須） |
 | `plan-gate` | lab | 実行境界を越える計画の可読性ゲート（最弱読者復唱） | 明示指定、または AI 判断（宣言必須） |
 | `reframe-question` | lab | 依頼の前提検証と問いの再定義 | 明示指定、または AI 判断（宣言必須） |
-| `stall-rescue` | lab | 停滞案件の安全な診断と最小再開手順（同種失敗2回以上・失敗層移動時） | 明示指定、または AI 判断（宣言必須） |
+| `stall-rescue` | lab | 停滞案件の安全な診断と最小再開手順（同種失敗2回以上など） | 明示指定、または AI 判断（宣言必須） |
 | `mino-socratic-requirements` | lab（凍結） | 複数ターン要求定義 | **通常業務では提案・実行しない** |
 | `mino-context-discovery` | lab | 用語・境界・ユビキタス言語の整理 | 明示指定、または AI 判断（宣言必須） |
 | `mino-event-storming` | lab | 業務時系列・イベント・集約候補の整理 | 明示指定、または AI 判断（宣言必須） |

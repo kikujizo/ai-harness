@@ -2977,6 +2977,7 @@ PR #118 で Issue外設計変更の境界が正本化済みであり、本 Issue
 
 ## 次アクション
 
-- [ ] ChatGPT による要件レビュー
-- [ ] Codex による技術レビュー
-- [ ] 人間による merge 判断（発効点・`gate=human_approval`）
+- [x] ChatGPTによる要件レビュー（[#5115059848](https://github.com/kikujizo/ai-harness/pull/119#issuecomment-5115059848) approve）
+- [x] Codexによる技術レビュー（[#4805904431](https://github.com/kikujizo/ai-harness/pull/119#pullrequestreview-4805904431) approve）
+- [x] Codex PM最終判断（[#5115449824](https://github.com/kikujizo/ai-harness/pull/119#issuecomment-5115449824) `PM_VERDICT: approve risk=high gate=human_approval`）
+- [ ] 人間によるmerge判断（発効点・`gate=human_approval`）

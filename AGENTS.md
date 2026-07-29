@@ -215,6 +215,17 @@ Codex PMがChatGPTへ仕様更新を戻す。Issue更新後に実装再開。
 GitHubへ書き込めない場合は、同じ提案5点を `handoff-report` に含め、影響する設計変更は実装せず停止する。
 投稿不能を理由に、Issue本文を推測で補わない。
 
+### fail-closed機構の新設・変更時の基準確認
+
+fail-closed 機構を**新設**する、または**安全契約を変更**する場合、実装着手前と独立レビュー時に
+[`docs/criteria/fail-closed.md`](docs/criteria/fail-closed.md) の8基準を照合する。
+
+- 各基準は `criterion=<id>` / `result=pass|fail|not_applicable` / `basis=` / `next_action=` で記録する
+- 根拠不足・未確認は `fail`（`next_action=blocked`）。推測で `pass` にしない
+- 対象外は理由付き `not_applicable` のみ。未確認を対象外扱いしない
+- Issue外の設計変更が必要なら上記「Issue外の設計変更」に従い提案5点を記録し Codex PM へ返す（`next_action=return_to_pm`）
+- 本確認は逐次人間承認や全作業停止を新設しない
+
 ## 出力契約（正本）
 
 **構造化報告の定型はここが唯一の正本。** 作業結果は全文貼り付けではなく、必ずこの見出しで返す:

@@ -2897,6 +2897,6 @@ Issue内の実装詳細は通常どおり継続し、逐次人間承認や全作
 
 ## 次アクション
 
-- [ ] ChatGPT による要件レビュー
+- [x] ChatGPT による要件レビュー（[#5114152763](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114152763) request-changes → [#5114231564](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114231564) approve）
 - [ ] Codex による技術レビュー
 - [ ] 人間による merge 判断（発効点・`gate=human_approval`）

@@ -2822,6 +2822,6 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 
 ## 次アクション
 
-- [x] ChatGPT による要件レビュー（PR #117・request-changes）
-- [ ] Codex による技術レビュー
+- [x] ChatGPT による要件レビュー（PR #117・[#5113515005](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113515005) request-changes → [#5113618866](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113618866) approve）
+- [ ] Codex による技術レビュー（[#5113660726](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113660726) request-changes → 修正後再照合待ち）
 - [ ] 人間による merge 判断（発効点・`gate=human_approval`）

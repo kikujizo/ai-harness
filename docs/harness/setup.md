@@ -91,6 +91,15 @@ criteriaは同梱の `writing-criteria.md` 1枚と `README.md` から育てる�
 - PR基準照合: 「PR #123が受け入れ条件を満たすか」と依頼し、`recursive-review` で `REVIEW_VERDICT` を出すことを確認する
 - Codex PMの修正停止: Codex PMがレビュー指摘を確認し修正が必要と判断した状態で、`gh-address-comments` を起動せず、AI PMの実装route判断へ返すことを確認する
 
+#### stall-rescue（Issue #106 Checkpoint・2件）
+
+- **正例（発動候補）**: 同種のE2E失敗が2回続いた状況を渡し、`stall-rescue` が
+  (1) 試行履歴の時系列化、(2) 製品側と測定側の分離仮説、(3) 読み取り専用の最小反証手順、
+  (4) 続行・停止・PM再ルーティング条件を分離して提示することを確認する。
+  明示指定（「`stall-rescue` を使って」）または description 一致＋lab発動宣言のいずれかで起動すること。
+- **負例（非発動）**: 初回失敗のみの状況を渡し、通常のデバッグ（エラー修正・ログ確認）に留まり、
+  `stall-rescue` を自動提案・自動発動しないことを確認する。
+
 ## 既存リポジトリへの導入（差分マージ方式）
 
 テンプレート丸コピーは新規リポジトリ専用。既にAI運用（`AGENTS.md`・`CLAUDE.md`・`.claude/settings.json`・独自の機械契約）があるリポジトリでは:

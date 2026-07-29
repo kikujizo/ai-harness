@@ -2745,3 +2745,82 @@ technical capability への根拠なき `core | supporting | generic` 付与・�
 - [ ] ChatGPT による要件レビューを受ける
 - [ ] Codex による技術レビューを受ける
 - [ ] 人間による merge 判断
+
+---
+
+# Decision: stall-rescue Skill を ai-harness 正本へ lab として導入
+
+Date: 2026-07-29
+Status: Proposed
+Related Issues: #106
+Related PRs: #117
+
+## 決定事項
+
+停滞案件（同種失敗2回以上など。失敗層移動はチェックポイントの1つ）を安全に診断し最小再開手順を提示する `stall-rescue` Skill を、
+`.agents/skills/stall-rescue/` に **lab ティア**として正本導入する。
+Vault76_Cloud の同名Skillはマージ後ミラーとして扱い、正本は ai-harness とする。
+
+## 背景・課題
+
+ai-dev-workflow WSL2 sandbox PoC（15 Run成功0・約2週間停滞）の立て直し手順は、
+Vault側 `.claude/skills/stall-rescue/` で稼働しているが、ai-harnessの正本・レビュー・配布対象になっていなかった。
+PR #107 の暫定repository-policy（瞬間特定型description＋チェックポイント表のセット採用）に従い、
+本Skillも発動境界を明示する必要がある。
+
+## 採用する方針
+
+- 正本: `ai-harness/.agents/skills/stall-rescue/`（`SKILL.md` + `references/adapters.md`）
+- 初期ティア: **lab**（明示指定または AI 判断＋宣言。core の代替ではなく補助プレイブック）
+- 発動境界: 同種失敗2回以上・失敗層未整理・律速支配・安全契約弱化案・断定直前の5チェックポイント（いずれか）
+- 非発動: 初回失敗のみ → 通常デバッグ。仕様判断・PMルーティングは `pm-review` 等へ
+- README・setupシナリオ試験・Decision Log で名称・lab・正本/ミラー・発動境界を一致させる
+
+## 採用しない方針 / 却下した代替案
+
+- **Vaultのみで継続**: ai-harness導入先で再現不能。SSOT Rot の原因になる
+- **core ティアで初回導入**: 発動効果の実測が未完了。lab でパイロット後に昇格判断する（別Checkpoint）
+- **AGENTS.md への規範再掲**: SSOT原則に反する。Skill内・adapters は `AGENTS.md` を参照のみ
+- **PM判定・merge権限の付与**: Issueスコープ外。本Skillは診断プレイブックに限定
+
+## 判断理由
+
+- WSL2 PoC立て直しで実証済みの手順を、4AI体制で共有可能な形に固定する価値がある
+- lab ティア＋明示発動境界により、通常デバッグ・PMルーティングとの責務衝突を抑える
+- 5ファイル・単一Checkpointで受け入れ条件が観測可能
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- **カテゴリ③に該当**（`.agents/skills/` 変更＝AIエージェント設定ディレクトリ）。
+  実装route `route=cursor` は Codex PM が Issue #106 PM評価で決定済み。
+  人間承認（`gate=human_approval`）: merge発効点で**承認済み**（2026-07-29 [#5113842833](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113842833)）。
+
+## 影響範囲
+
+- `.agents/skills/stall-rescue/SKILL.md`（新規）
+- `.agents/skills/stall-rescue/references/adapters.md`（新規）
+- `README.md`（Skill一覧・責務境界）
+- `docs/harness/setup.md`（シナリオ試験2件追加）
+- `docs/decisions.md`（本記録）
+
+## 取り消し手順
+
+1. 本PRを `git revert` で戻す
+2. `.agents/skills/stall-rescue/` ディレクトリを削除
+3. README・setup から `stall-rescue` 記載を除去
+4. 本 Decision Log の Status を Superseded へ変更
+5. Vault側ミラーは正本削除後も残るが、ai-harness正本との同期は人間が判断する
+
+`git revert` で完全に戻せる（可逆）。
+
+## 見直す条件
+
+- lab 共通規則の重大事故（誤ルーティング・未承認仕様追加・担当外実装）が1件でも発生した場合 → 即停止
+- 発動効果の実測（別Checkpoint）で core 昇格候補と判定された場合 → Decision Log で昇格判断
+- 8週間使用0回 → Archive候補（lab共通規則に従う）
+
+## 次アクション
+
+- [x] ChatGPT による要件レビュー（PR #117・[#5113515005](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113515005) request-changes → [#5113618866](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113618866) approve）
+- [x] Codex による技術レビュー（[#5113660726](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113660726) request-changes → [#5113726262](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113726262) approve）
+- [x] 人間による merge 判断（発効点・`gate=human_approval`・[#5113842833](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113842833) approve・2026-07-29）

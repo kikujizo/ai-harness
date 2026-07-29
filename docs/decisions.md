@@ -2901,3 +2901,82 @@ Issue内の実装詳細は通常どおり継続し、逐次人間承認や全作
 - [x] Codex による技術レビュー（[#5114309408](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114309408) request-changes → [#5114380333](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114380333) approve）
 - [x] Codex PM最終判断（[#5114462900](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114462900) `PM_VERDICT: approve risk=high gate=human_approval`）
 - [ ] 人間による merge 判断（発効点・`gate=human_approval`）
+
+---
+
+# Decision: fail-closed機構の既知迂回パターン基準を docs/criteria へ集約
+
+Date: 2026-07-29
+Status: Proposed
+Related Issues: #116
+Related PRs: （本PR）
+
+## 決定事項
+
+新設または変更する fail-closed 機構について、実装前と独立レビュー時に照合する8基準を
+[`docs/criteria/fail-closed.md`](../criteria/fail-closed.md) に集約する。
+`AGENTS.md`・`CLAUDE.md`・`.cursor/rules/ai-workflow.mdc` から同一基準を必須参照する。
+根拠不足は `fail`、Issue外設計変更は提案5点で Codex PM へ返す契約を明記する。
+
+## 背景・課題
+
+ai-dev-workflow の WSL2 sandbox PoC では、fail-closed 追加後に独立レビューで別の迂回経路が繰り返し発見され、
+専用 Issue で補修する流れが観測された（Issue #123 / #128 / #139 / #147）。
+個別機構の実装ではなく、既知パターンを再利用可能な基準へ変換する必要がある。
+PR #118 で Issue外設計変更の境界が正本化済みであり、本 Issue はその後続として実施する。
+
+## 採用する方針
+
+- 8基準を `docs/criteria/fail-closed.md` に閉じ、各項目に判定質問・pass証拠・失敗時挙動・attribution・一次資料を置く
+- 実効ルール3ファイルが同一基準を参照し、実装前・レビュー時の照合を義務化
+- 判定形式: `pass|fail|not_applicable` + `basis` + `next_action=continue|return_to_pm|blocked`
+- 4具体例（`$HOME` 偽装、symlink/mountpoint、manifest 前 backup 消費、provenance 不明）を基準ファイル内に置く
+- 将来の新パターンは別 Issue で基準へ追加（共通コア肥大化を避ける）
+
+## 採用しない方針 / 却下した代替案
+
+- **8基準を `AGENTS.md` 本文へ全量展開**: 共通コア肥大化。基準ファイル参照に集約
+- **fail-closed 照合ごとの人間承認ゲート**: ボトルネック化。発効点（merge）のみ `gate=human_approval`
+- **全作業停止**: 独立に進められる Issue 内作業まで止める必要はない
+- **新規 CLI / Skill / GitHub Action**: Issue スコープ外。基準ファイルと参照のみ
+
+## 判断理由
+
+- 観測済み4系統の迂回を重複なく8項目に分離でき、10項目上限内に収まる
+- `docs/templates.md` の基準ファイル形式と `capability-classification-criteria.md` の運用実績に整合
+- PR #118 の提案5点ルールと接続し、推測 `pass` を構造的に禁止できる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- **カテゴリ③に該当**（`AGENTS.md`・`CLAUDE.md`・`.cursor/rules/` 変更）。
+  実装 route は Codex PM が `route=cursor` で確定済み。
+  実装・テスト・レビュー・Draft PR 作成は事前承認不要。
+  発効点（merge）のみ `gate=human_approval`。
+
+## 影響範囲
+
+- `docs/criteria/fail-closed.md`（新規）
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.cursor/rules/ai-workflow.mdc`
+- `docs/decisions.md`
+
+## 取り消し手順
+
+1. 実装 PR を `git revert` する
+2. `AGENTS.md`・`CLAUDE.md`・`.cursor/rules/ai-workflow.mdc` から必須参照節を除去
+3. `docs/criteria/fail-closed.md` を削除
+4. 本 Decision Log の Status を Superseded へ更新
+
+`git revert` で完全に戻せる（可逆）。
+
+## 見直す条件
+
+- 新しい迂回パターンが2回以上観測された場合 → 別 Issue で基準へ追加
+- 対象外判定が過剰停止を招いた場合 → `not_applicable` 具体例の剪定
+
+## 次アクション
+
+- [ ] ChatGPT による要件レビュー
+- [ ] Codex による技術レビュー
+- [ ] 人間による merge 判断（発効点・`gate=human_approval`）

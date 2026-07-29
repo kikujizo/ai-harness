@@ -14,6 +14,9 @@ Cursor-specific rules only:
 - If an **out-of-Issue design change** is needed (`AGENTS.md`「実装ルール」節), stop only the affected work,
   record the 5-point proposal on Issue/PR (or in `handoff-report` if GitHub is unavailable), and return to Codex PM.
   Continue independent in-Issue work. Do not halt the entire task or add per-detail human approval gates.
+- When **creating or changing a fail-closed mechanism**, check [`docs/criteria/fail-closed.md`](docs/criteria/fail-closed.md)
+  before implementation and during independent review (`AGENTS.md`「実装ルール」節). Insufficient evidence = `fail`;
+  do not `pass` by guesswork. Out-of-Issue design changes follow the 5-point proposal path to Codex PM.
 - Escalate instead of retrying: if you fail the same task twice, stop and output
   a handoff summary for the upper reviewer (use the handoff-report skill).
 - After completing work, always report via the handoff-report skill format.

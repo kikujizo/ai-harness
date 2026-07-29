@@ -2909,12 +2909,12 @@ Issue内の実装詳細は通常どおり継続し、逐次人間承認や全作
 Date: 2026-07-29
 Status: Proposed
 Related Issues: #116
-Related PRs: （本PR）
+Related PRs: #119
 
 ## 決定事項
 
 新設または変更する fail-closed 機構について、実装前と独立レビュー時に照合する8基準を
-[`docs/criteria/fail-closed.md`](../criteria/fail-closed.md) に集約する。
+[`docs/criteria/fail-closed.md`](criteria/fail-closed.md) に集約する。
 `AGENTS.md`・`CLAUDE.md`・`.cursor/rules/ai-workflow.mdc` から同一基準を必須参照する。
 根拠不足は `fail`、Issue外設計変更は提案5点で Codex PM へ返す契約を明記する。
 

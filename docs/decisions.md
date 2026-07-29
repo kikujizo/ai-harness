@@ -2824,3 +2824,80 @@ PR #107 の暫定repository-policy（瞬間特定型description＋チェック�
 - [x] ChatGPT による要件レビュー（PR #117・[#5113515005](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113515005) request-changes → [#5113618866](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113618866) approve）
 - [x] Codex による技術レビュー（[#5113660726](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113660726) request-changes → [#5113726262](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113726262) approve）
 - [x] 人間による merge 判断（発効点・`gate=human_approval`・[#5113842833](https://github.com/kikujizo/ai-harness/pull/117#issuecomment-5113842833) approve・2026-07-29）
+
+---
+
+# Decision: Issue外の設計変更を実装前に提案へ分離する境界を正本へ追加
+
+Date: 2026-07-29
+Status: Proposed
+Related Issues: #115
+Related PRs: #118
+
+## 決定事項
+
+実装AIがIssue外の要件・安全契約・外部挙動・変更範囲を必要とした場合、影響する実装だけを停止し、
+提案5点を記録してCodex PMへ返却する境界を、`AGENTS.md`・`CLAUDE.md`・`.cursor/rules/ai-workflow.mdc` に追加する。
+Issue内の実装詳細は通常どおり継続し、逐次人間承認や全作業停止は新設しない。
+
+## 背景・課題
+
+- ai-dev-workflow Issue #32: Issueにない変更の越権実装
+- ai-dev-workflow PR #138: `getent passwd` をIssue本文へ同期せず実装し撤回
+- 現行正本はスコープ拡張禁止を示すが、提案・停止・復帰手順が未定義
+
+## 採用する方針
+
+- 正本: `AGENTS.md`「実装ルール」節に境界・具体例・提案5点・Codex PM返却を記載
+- 実効ルール: `CLAUDE.md`・`.cursor/rules/ai-workflow.mdc` が同一境界を参照
+- setupに正例・負例・GitHub書き込み不能の3シナリオを追加
+- `scope-guard` Skillの新設・移送は行わない（Issue #115スコープ外）
+- 人間approveは不可逆4カテゴリの**発効点**（merge等）のみ。通常仕様同期への新ゲートは作らない
+
+## 採用しない方針 / 却下した代替案
+
+- **Vault `scope-guard` Skillの丸ごと移送**: ai-harness導入先で過剰。共通境界への短い追記で再発抑制を優先
+- **実装詳細ごとの人間承認ゲート**: ボトルネック化。Issue外変更のみ停止
+- **事後報告での正当化**: 独断実装の再発を許す。実装前提案を必須化
+- **全作業停止**: 独立に進められるIssue内作業まで止める必要はない
+
+## 判断理由
+
+- 仕様を勝手に変えたい部分だけ止め、Issue内の通常実装は止めない運用が実事故に最も適合
+- 5ファイル・単一Checkpointで受入条件が観測可能
+- Issue #116（fail-closed迂回パターン集約）は本境界確立後に続ける順序が妥当
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- **カテゴリ③に該当**（`AGENTS.md`・`CLAUDE.md`・`.cursor/rules/` 変更）。
+  実装route `route=cursor` は Codex PM が Issue #115 PM評価で決定済み。
+  人間承認（`gate=human_approval`）: merge発効点で未実施。
+  merge前に独立レビュー＋人間approve/deny必須。
+
+## 影響範囲
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.cursor/rules/ai-workflow.mdc`
+- `docs/harness/setup.md`
+- `docs/decisions.md`
+
+## 取り消し手順
+
+1. 本PRを `git revert` で戻す
+2. 各ファイルから本Decisionに対応する追記節を除去
+3. 本 Decision Log の Status を Superseded へ変更
+
+`git revert` で完全に戻せる（可逆）。
+
+## 見直す条件
+
+- Issue外変更の見逃し（独断実装→撤回）が再発した場合 → 境界定義の見直し
+- 過剰停止（Issue内詳細まで毎回停止）が観測された場合 → 具体例の剪定
+
+## 次アクション
+
+- [x] ChatGPT による要件レビュー（[#5114152763](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114152763) request-changes → [#5114231564](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114231564) approve）
+- [x] Codex による技術レビュー（[#5114309408](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114309408) request-changes → [#5114380333](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114380333) approve）
+- [x] Codex PM最終判断（[#5114462900](https://github.com/kikujizo/ai-harness/pull/118#issuecomment-5114462900) `PM_VERDICT: approve risk=high gate=human_approval`）
+- [ ] 人間による merge 判断（発効点・`gate=human_approval`）

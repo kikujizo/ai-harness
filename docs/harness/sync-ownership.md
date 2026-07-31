@@ -26,6 +26,7 @@
 - `docs/harness/`（本ファイルを含む）
 - `docs/templates.md`
 - `docs/criteria/`
+- `harness/checks/`（Issue #122: `issue-manifest-diff` 判定本体。`.github/` は対象外のまま repo-owned）
 - `setup-links.bat` / `setup-links.sh`
 
 リポジトリ固有の追記が必要な場合は、正本を直接いじらず

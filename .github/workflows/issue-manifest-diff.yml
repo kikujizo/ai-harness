@@ -1,0 +1,100 @@
+# Issue #122: PR実差分とIssue本文の固定manifestを機械照合し、独立レビュー前に
+# manifest外・不足・入力不正をnonzeroで停止する。
+#
+# 権威ある判定はbase branch上のcheckerで行う（PR head側のプログラム・test・workflowは実行しない）。
+# `pull_request`（`pull_request_target`ではない）を使うことで、GitHub Actionsの既定動作として
+# ワークフロー定義自体もbase側のバージョンで実行され、forkからのPRがワークフローを
+# 改変して自己検査を無力化することを防ぐ。
+#
+# branch protection設定自体は変更しない。fail/blockedは本Issueの運用契約上の
+# レビュー・merge停止であり、GitHubの強制マージ阻止ではない。
+#
+# 「Related Issue: #<n>」行の抽出・検証はこのworkflowの責務。checker本体
+# （harness/checks/issue-manifest-diff.cjs）はIssue番号を受け取るだけで、
+# PR本文の形式は解釈しない。
+
+name: Issue manifest diff
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: issue-manifest-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch (checker本体はPR headでなくbase側を使う)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Fetch PR head commit
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/pull/${PR_NUMBER}/head"
+
+      - name: Extract "Related Issue" line from PR body
+        id: related_issue
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          MATCH_COUNT="$(printf '%s\n' "${PR_BODY}" | grep -cE '^Related Issue: #[1-9][0-9]*$' || true)"
+
+          if [[ "${MATCH_COUNT}" -eq 0 ]]; then
+            {
+              echo "ISSUE_MANIFEST_DIFF"
+              echo "result=blocked"
+              echo "stop_reason=related_issue_missing"
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if [[ "${MATCH_COUNT}" -gt 1 ]]; then
+            {
+              echo "ISSUE_MANIFEST_DIFF"
+              echo "result=blocked"
+              echo "stop_reason=related_issue_ambiguous"
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          ISSUE_NUMBER="$(printf '%s\n' "${PR_BODY}" | grep -E '^Related Issue: #[1-9][0-9]*$' | sed -E 's/^Related Issue: #//')"
+          echo "issue_number=${ISSUE_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run issue-manifest-diff checker (base branch上のcheckerをread-only実行)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.related_issue.outputs.issue_number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          node harness/checks/issue-manifest-diff.cjs \
+            --repo "${TARGET_REPO}" \
+            --issue "${ISSUE_NUMBER}" \
+            --head "${HEAD_SHA}" | tee -a "$GITHUB_STEP_SUMMARY"

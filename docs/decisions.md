@@ -3081,3 +3081,120 @@ Related PRs: #125
 - [ ] Codex技術・差分レビュー
 - [ ] 対象PRを明示した人間の発効点approve/deny
 - [ ] approve後、AIによるmerge実行
+
+---
+
+# Decision: Issue外設計変更のPR実差分をmanifest照合で機械停止する（issue-manifest-diff）
+
+Date: 2026-07-31
+Status: Proposed
+Related Issues: #122, #120
+Related PRs: (作成中)
+
+## 決定事項
+
+Issue本文に固定manifest（`issue-change-manifest/v1`）を1件だけ記載し、固定`base_sha`からPR headまでの
+全tracked fileの`add|modify|delete`実差分（renameは`delete+add`へ正規化）と完全一致するかを
+Node.js標準機能のみのcheckerで機械照合する。不一致・入力不正は`pass|fail|blocked`契約で
+nonzero終了させ、独立レビュー前に停止できる状態にする。
+
+## 背景・課題
+
+親提案 #120 で新設した「Issue外の設計変更を実装前に提案へ分離するルール」が、導入当日に
+ai-dev-workflow PR #169 で破られた（`docs/decisions.md`の許可範囲外に既存エントリの更新が混入）。
+現状はIssue文章とPR差分を人手で比較しており、機械的な最初の壁がなかった。
+
+## 採用する方針
+
+- `harness/checks/issue-manifest-diff.cjs`（新規・Node.js標準機能のみ）でmanifest抽出・schema検証・
+  git diffの正規化・比較を行う。CLI契約はIssue本文が定義する`--repo --issue --head`のみ
+- `.github/workflows/issue-manifest-diff.yml`（新規）が`pull_request`（`opened/synchronize/reopened/edited`）で
+  base branch上のcheckerをread-only実行する。PR head側のプログラム・test・workflowは実行しない
+- `docs/harness/sync-ownership.md`に`harness/checks/`をharness-ownedとして追加（`.github/`はrepo-ownedのまま変更しない）
+- `harness/checks/issue-manifest-diff.test.cjs`（新規）は`node:test`のみを使い、実git fixture
+  （`git init`→実コミット・rename・mode変更・symlink/submodule相当のcacheinfo操作）で
+  正常系・異常系を再現する。テスト不能をskip・終了コード0にしない
+
+## 採用しない方針 / 却下した代替案
+
+- **CLIに`--pr`フラグを追加し、checker自身がPR本文の`Related Issue: #<n>`行を解析する2モード設計**:
+  Issue本文が定義するCLI契約は`--repo --issue --head`のみであり、`--pr`はIssue外の独自仕様判断に
+  当たるため却下。advisor相談（2026-07-31）でも同じ指摘を受けた。related-issue行の抽出・検証は
+  `.github/workflows/issue-manifest-diff.yml`側の責務とし、確定したissue番号だけをcheckerへ渡す
+- **rename/copy検出を自前で再実装する**: `git diff --no-renames`（rename検出無効化。`-C`/`--find-copies`も
+  付与しない）を使えば、rename→delete+add、copy→add(+別途modify)がgitの標準出力としてそのまま
+  Issue本文の正規化規則と一致するため、自前実装は不要と判断し却下
+- **外部npm packageでの引数解析・YAML/JSON検証**: 「Node.js標準機能だけで実装し、外部npm packageを
+  追加しない」の確定事項に反するため却下。`fetch`はNode組み込みのためpackage追加に当たらない
+
+## 判断理由
+
+- Issue本文が定義していないCLI拒否・依存追加は「実装せずIssueへ返す」対象であり、実装判断で
+  勝手に拡張しないことを優先した
+- `git diff --no-renames --name-status -z`はIssue本文の差分正規化規則（rename→delete+add、
+  copy→add＋別途modify、mode/symlink/submodule変更→modify）とそのまま一致し、追加ロジックなしで
+  正しく実現できることをローカルの実git fixtureで確認済み
+- 実git fixtureテストにより、AC4が要求する正常系・異常系（exact match、余分な変更、不足変更、
+  add/modify/delete/rename、generated file、manifest欠落・重複・不正JSON、不正base、非ancestor）を
+  すべて再現し、`node --test`で24件全通過を確認した
+
+## 実装判断（Issue本文が明示していない詳細・独立レビュー対象として明記）
+
+Issue本文はすべてのエッジケースを一意に定めていない。以下は実装時に確定させた判断であり、
+独立レビュー（ChatGPT要件・Codex技術）で意図的に照合してもらう対象とする。
+
+1. **glob文字の定義**: manifest pathの禁止規則「globを禁止」に対し、`*?[]{}`を禁止文字集合とした
+2. **manifest markerの異常系の割り振り**: start/end markerが「両方0件」は`manifest_missing`、
+   それ以外の不正な組み合わせ（複数件・片方欠落・順序逆転）はすべて`manifest_ambiguous`とした
+3. **stop_reasonの優先順位**: 同一PRで「余分な変更」と「不足変更」が両方観測された場合、
+   `stop_reason=diff_not_in_manifest`を優先する（manifest外ファイルの混入の方が危険度が高いため）。
+   両方の行（`unexpected_change=`・`missing_change=`）は出力に残す
+4. **実差分側の重複pathガード**: 「manifestと実差分の双方を重複排除せず、重複があれば入力不正として
+   停止する」という規則のうち、実差分側で重複が観測された場合（通常のgit diffでは発生しない）は
+   専用enumがないため`checker_internal_error`にマップした
+5. **related-issue行の抽出責務**: `.github/workflows/issue-manifest-diff.yml`側に置き、
+   checker本体（`--repo --issue --head`契約）には持たせない
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- **カテゴリ③に該当**（`.github/workflows`の新設とharness-owned配布範囲の変更）。`risk=high gate=human_approval`
+- 実装・テスト・PR作成・独立レビュー（ChatGPT要件・Codex技術）はAI工程として進める。merge発効点で
+  人間のapprove/denyを必須とする（今回の承認範囲はIssue #122コメントに明記のとおり実装・PR作成まで）
+- 初回導入PRはbase branchにcheckerがまだ存在しないため、本checker自身による機械検査の対象外。
+  通常テストと独立レビューで補完する（Issue本文に明記済みの既知の限界）
+- branch protection設定自体は変更しないため、fail/blockedは運用契約上のレビュー・merge停止であり、
+  GitHubの強制マージ阻止ではない
+
+## 影響範囲
+
+- `harness/checks/issue-manifest-diff.cjs`（新規）
+- `harness/checks/issue-manifest-diff.test.cjs`（新規）
+- `.github/workflows/issue-manifest-diff.yml`（新規）
+- `docs/harness/sync-ownership.md`
+- 本 Decision Log
+
+## 取り消し手順
+
+1. 実装PRを`git revert`する
+2. `.github/workflows/issue-manifest-diff.yml`を削除する
+3. `harness/checks/issue-manifest-diff.*`を削除する
+4. `docs/harness/sync-ownership.md`から`harness/checks/`分類を戻す
+5. 本Decision LogのStatusを`Superseded`へ更新する
+
+`git revert`で完全に戻せる（可逆）。ただし、誤って`pass`と判定した期間中にmanifest外変更が
+mergeされていた場合、その下流影響は本PRのrevertだけでは取り消せない（Issue本文に明記済み）。
+
+## 見直す条件
+
+- 初回導入PR自体の機械的阻止、またはGitHub上の強制阻止（branch protection required check化）が
+  必要になった場合 → 別Checkpointで再設計
+- 適用先リポジトリ（ai-dev-workflowなど）への配線が必要になった場合 → 別Checkpointとして扱う
+  （Issue本文の仮定に明記済み）
+- 上記「実装判断」5項目のいずれかに独立レビューから修正要求が入った場合 → 該当箇所を修正し本エントリを更新
+
+## 次アクション
+
+- [ ] Claude Codeによる実装・テスト・PR作成（本エントリ）
+- [ ] ChatGPTによる要件レビュー
+- [ ] Codexによる技術レビュー
+- [ ] 人間によるmerge判断（発効点・`gate=human_approval`）

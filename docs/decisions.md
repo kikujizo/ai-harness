@@ -3229,7 +3229,7 @@ mergeされていた場合、その下流影響は本PRのrevertだけでは取�
 Date: 2026-08-01
 Status: Proposed
 Related Issues: #123
-Related PRs: (未作成)
+Related PRs: #127
 
 ## 決定事項
 

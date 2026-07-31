@@ -2989,7 +2989,7 @@ PR #118 で Issue外設計変更の境界が正本化済みであり、本 Issue
 Date: 2026-07-31
 Status: Proposed
 Related Issues: #121
-Related PRs: TBD
+Related PRs: #125
 
 ## 決定事項
 

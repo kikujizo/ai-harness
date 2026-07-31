@@ -17,6 +17,13 @@ Cursor-specific rules only:
 - When **creating or changing a fail-closed mechanism**, check [`docs/criteria/fail-closed.md`](../../docs/criteria/fail-closed.md)
   before implementation and during independent review (`AGENTS.md`「実装ルール」節). Insufficient evidence = `fail`;
   do not `pass` by guesswork. Out-of-Issue design changes follow the 5-point proposal path to Codex PM.
+- Do not treat an open-ended follow-up (e.g. "後は頼みます", "適切に進めてください") as a new
+  implementation assignment, as permission to stand in for an independent reviewer, as
+  self-approval, or as a merge approval. Return a closed question to the human only when every
+  non-human gate has already passed and the only thing left is a human approve/deny on a named
+  effective point (`AGENTS.md`「実装許可の解釈」節). If the uncertainty is technical (no reviewer
+  available, CI/results unclear, route unconfirmed) route back to Codex PM instead, or record
+  `blocked` if no route exists — do not ask the human to resolve it.
 - Escalate instead of retrying: if you fail the same task twice, stop and output
   a handoff summary for the upper reviewer (use the handoff-report skill).
 - After completing work, always report via the handoff-report skill format.

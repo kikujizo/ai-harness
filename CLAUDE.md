@@ -77,4 +77,7 @@ fail-closed 機構の新設・安全契約変更時は、実装前とレビュ�
 カテゴリ③（権限・パイプライン・正本・AI設定）に触れる変更は、専用ブランチで実装してよい（事前承認不要）。
 ただし発効点（merge・設定反映）で人間のapprove/denyを求める（推奨表記: `gate=human_approval`。
 実装AIと独立したレビュー＋Decision Log記録＋approve後のAIによるmerge実行。詳細は `AGENTS.md` verdict 節）。
+「後は頼みます」等の対象物・操作・権限段階を特定しない包括表現を、新規実装割当・独立レビューの代行・
+self-approve・merge許可へ拡張解釈しない。権限確認をclosed questionで人間へ返してよい条件と、
+技術的不確実性をAI PM再ルートまたは`blocked`へ戻す境界は、`AGENTS.md`「実装許可の解釈」節に従う。
 この絶対ルールの機械的な裏付けは `.claude/settings.json`（deny/ask設定）。設計解説は `docs/harness/roles/claude-code.md`。

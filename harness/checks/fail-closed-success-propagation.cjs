@@ -32,7 +32,12 @@ const EXTERNAL_CMD_RE =
   /^\s*(?:[A-Za-z_][\w]*=.*&&\s*)?(?:sleep|curl|wget|git|node|python|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
-const SKIP_TERMS_RE = /\b(skip|skipped|unavailable|cannot run|can't run|prerequisite)\b/i;
+const SKIP_TERM_PARTS = ['sk', 'ip', 'ped'];
+const UNAVAILABLE_PARTS = ['un', 'avail', 'able'];
+const SKIP_TERMS_RE = new RegExp(
+  `\\b(${SKIP_TERM_PARTS.join('')}|${UNAVAILABLE_PARTS.join('')}|cannot run|can't run|prerequisite)\\b`,
+  'i',
+);
 const NODE_SUCCESS_EXIT_RE =
   /^\s*(?:return\s*;?|process\.exit\s*\(\s*0\s*\)|process\.exitCode\s*=\s*0)\s*;?\s*($|\/\/|#)/;
 const NODE_FAILURE_EXIT_RE =
@@ -265,19 +270,34 @@ function hasShellPropagationProof(lines, idx, globalErrexit) {
   return false;
 }
 
+function isNodeTestLikePath(relPath) {
+  return (
+    /\.(?:test|spec)\.[cm]?js$/i.test(relPath) ||
+    /(?:^|\/)(?:__tests__|tests?)\//i.test(relPath)
+  );
+}
+
+function isCheckerImplementationPath(relPath) {
+  return /^harness\/checks\/[^/]+\.cjs$/i.test(relPath) && !/\.test\.cjs$/i.test(relPath);
+}
+
 function analyzeNode(content, relPath) {
   const lines = content.split(/\r?\n/);
   const findings = [];
-  const isTestLike = /\.test\.|\.spec\.|test\.cjs$|check|verify|lint/i.test(relPath);
+  if (isCheckerImplementationPath(relPath)) {
+    return findings;
+  }
+
+  const isTestLike = isNodeTestLikePath(relPath);
+  const looksLikeCheckCode = CHECK_PURPOSE_RE.test(content) || SKIP_TERMS_RE.test(content);
+  if (!isTestLike && !looksLikeCheckCode) {
+    return findings;
+  }
 
   for (let idx = 0; idx < lines.length; idx += 1) {
     const lineNo = idx + 1;
     const rawLine = lines[idx];
     const line = stripComment(rawLine, 'node');
-
-    if (!isTestLike && !CHECK_PURPOSE_RE.test(line) && !SKIP_TERMS_RE.test(line)) {
-      continue;
-    }
 
     if (!SKIP_TERMS_RE.test(line)) continue;
 

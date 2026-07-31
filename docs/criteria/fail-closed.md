@@ -48,6 +48,17 @@ next_action=continue|return_to_pm|blocked
 
 **source**: [ai-dev-workflow Issue #123](https://github.com/kikujizo/ai-dev-workflow/issues/123)（非0終了の伝播、cleanup 対象の安全確認）
 
+#### 静的 checker（`fail-closed-success-propagation`）の適用範囲と限界
+
+Issue #123（ai-harness）で導入する `harness/checks/fail-closed-success-propagation.cjs` は、基準1（`success-propagation`）の**既知パターン**だけを機械検出する補助装置である。次を必ず守る。
+
+- 本 checker は fail-closed 基準全体の**意味的証明**ではない。SP001〜SP004 は導入直後に実際に発生した迂回とその周辺の既知形に限定する
+- 静的に判定できない対象は個別 finding を `unknown` とし、`unknown` が1件でもあれば PR 全体を `blocked`（nonzero）とする
+- checker の `pass` だけで基準1を自動的に `pass` 扱いしない。動的 test・要件レビュー・技術レビューは引き続き必要
+- 基準2〜8の機械チェックは本 checker の対象外
+- inline ignore・allowlist・warning-only 経路は導入しない
+- PR 上の権威ある判定は base repository の default branch 上の Workflow と checker を使い、PR head 側の checker・script・test・Workflow を実行しない
+
 ---
 
 ### 2. `identity-root` — identity / root の正本

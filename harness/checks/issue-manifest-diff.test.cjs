@@ -692,6 +692,120 @@ test('validatePathRule: "." "..", 空文字, glob文字, 先頭スラッシュ�
   assert.equal(checker.validatePathRule('a/b.txt'), true);
 });
 
+test('validatePathRule: バックスラッシュ区切り・Windowsドライブ形式を拒否する', () => {
+  assert.equal(checker.validatePathRule('docs\\decisions.md'), false);
+  assert.equal(checker.validatePathRule('C:\\repo\\file.txt'), false);
+  assert.equal(checker.validatePathRule('C:/file.txt'), false);
+  assert.equal(checker.validatePathRule('d:/file.txt'), false);
+  assert.equal(checker.validatePathRule('docs/decisions.md'), true);
+});
+
+test('manifest pathがバックスラッシュ区切りはblocked/manifest_schema_invalid', async () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'a.txt', 'a\n', 'base');
+    const body = manifestBody({
+      schema: 'issue-change-manifest/v1',
+      base_sha: baseSha,
+      changes: [{ op: 'modify', path: 'docs\\decisions.md' }],
+    });
+
+    const result = await checker.runChecker({
+      repo: 'kikujizo/ai-harness',
+      issue: '122',
+      head: baseSha,
+      cwd: dir,
+      fetchIssueBody: fetcherFor(body),
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(result.lines, ['result=blocked', 'stop_reason=manifest_schema_invalid']);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('manifest pathがWindowsドライブ形式（C:\\...）はblocked/manifest_schema_invalid', async () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'a.txt', 'a\n', 'base');
+    const body = manifestBody({
+      schema: 'issue-change-manifest/v1',
+      base_sha: baseSha,
+      changes: [{ op: 'modify', path: 'C:\\repo\\file.txt' }],
+    });
+
+    const result = await checker.runChecker({
+      repo: 'kikujizo/ai-harness',
+      issue: '122',
+      head: baseSha,
+      cwd: dir,
+      fetchIssueBody: fetcherFor(body),
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.deepEqual(result.lines, ['result=blocked', 'stop_reason=manifest_schema_invalid']);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('compareBytes: UTF-8 byte順で比較する（UTF-16コード単位順とは逆転するケース）', () => {
+  const bmpPrivateUse = String.fromCodePoint(0xe000); // UTF-8 3byte (先頭byte 0xEE)
+  const astralEmoji = String.fromCodePoint(0x1f600); // UTF-8 4byte・サロゲートペア（先頭byte 0xF0）
+  const a = `a-${bmpPrivateUse}-file.txt`;
+  const b = `a-${astralEmoji}-file.txt`;
+
+  // JS標準の文字列比較（UTF-16コード単位順）ではbがaより小さいと判定される
+  // （サロゲート上位0xD83Dが0xE000より小さいため）。byte順とは逆。
+  assert.equal(a < b, false);
+  // compareBytesはUTF-8 byte順（0xEE < 0xF0）でaが先になる。
+  assert.equal(checker.compareBytes(a, b), -1);
+  assert.deepEqual([b, a].sort(checker.compareBytes), [a, b]);
+});
+
+test('unexpected_change/missing_changeの出力行はbyte順でsortされる（非ASCIIファイル名）', async () => {
+  const dir = makeRepo();
+  try {
+    const bmpPrivateUse = String.fromCodePoint(0xe000);
+    const astralEmoji = String.fromCodePoint(0x1f600);
+    const nameWithBmp = `a-${bmpPrivateUse}-file.txt`;
+    const nameWithAstral = `a-${astralEmoji}-file.txt`;
+
+    const baseSha = writeAndCommit(dir, 'kept.txt', 'kept\n', 'base');
+    // 実差分側にbyte順で先になるはずのnameWithBmpと、後になるはずのnameWithAstralを
+    // 両方manifest外の余分な変更として発生させ、出力順を確認する。
+    fs.writeFileSync(path.join(dir, nameWithAstral), 'x\n');
+    fs.writeFileSync(path.join(dir, nameWithBmp), 'x\n');
+    git(['add', '-A'], dir);
+    git(['commit', '-q', '-m', 'add non-ascii files'], dir);
+    const headSha = git(['rev-parse', 'HEAD'], dir);
+
+    const manifest = {
+      schema: 'issue-change-manifest/v1',
+      base_sha: baseSha,
+      changes: [{ op: 'modify', path: 'kept.txt' }],
+    };
+
+    const result = await checker.runChecker({
+      repo: 'kikujizo/ai-harness',
+      issue: '122',
+      head: headSha,
+      cwd: dir,
+      fetchIssueBody: fetcherFor(manifestBody(manifest)),
+    });
+
+    assert.equal(result.exitCode, 1);
+    const unexpectedLines = result.lines.filter((line) => line.startsWith('unexpected_change='));
+    assert.deepEqual(unexpectedLines, [
+      `unexpected_change=${nameWithBmp}:add`,
+      `unexpected_change=${nameWithAstral}:add`,
+    ]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test('toChangeMap: 同一pathの重複はStopResult(checker_internal_error)', () => {
   assert.throws(
     () =>

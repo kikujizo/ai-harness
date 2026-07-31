@@ -3089,7 +3089,7 @@ Related PRs: #125
 Date: 2026-07-31
 Status: Proposed
 Related Issues: #122, #120
-Related PRs: (作成中)
+Related PRs: #124
 
 ## 決定事項
 
@@ -3108,8 +3108,14 @@ ai-dev-workflow PR #169 で破られた（`docs/decisions.md`の許可範囲外�
 
 - `harness/checks/issue-manifest-diff.cjs`（新規・Node.js標準機能のみ）でmanifest抽出・schema検証・
   git diffの正規化・比較を行う。CLI契約はIssue本文が定義する`--repo --issue --head`のみ
-- `.github/workflows/issue-manifest-diff.yml`（新規）が`pull_request`（`opened/synchronize/reopened/edited`）で
-  base branch上のcheckerをread-only実行する。PR head側のプログラム・test・workflowは実行しない
+- `.github/workflows/issue-manifest-diff.yml`（新規）が`pull_request_target`（`opened/synchronize/reopened/edited`）で
+  base branch上のcheckerをread-only実行する。PR head側のプログラム・test・workflowは実行しない。
+  `pull_request`ではなく`pull_request_target`を使うのは、GitHub Actionsの仕様上`pull_request`は
+  ワークフローファイル自体がPRのmerge commit版（PR側の変更を含む版）で実行され、PRが`.yml`自身を
+  改変してcheckerの呼び出し・終了判定を無力化できてしまうため（Codex技術レビューで指摘・修正）。
+  `pull_request_target`はワークフローファイルをbase repositoryのdefault branch側から取得するため
+  PR側の`.yml`改変の影響を受けない。PR headの内容は`git diff`比較用のデータとしてのみ扱い、
+  PR head側のファイルはcheckout・実行しない（`permissions`も読み取り専用のみに限定する）
 - `docs/harness/sync-ownership.md`に`harness/checks/`をharness-ownedとして追加（`.github/`はrepo-ownedのまま変更しない）
 - `harness/checks/issue-manifest-diff.test.cjs`（新規）は`node:test`のみを使い、実git fixture
   （`git init`→実コミット・rename・mode変更・symlink/submodule相当のcacheinfo操作）で
@@ -3154,6 +3160,13 @@ Issue本文はすべてのエッジケースを一意に定めていない。以
    専用enumがないため`checker_internal_error`にマップした
 5. **related-issue行の抽出責務**: `.github/workflows/issue-manifest-diff.yml`側に置き、
    checker本体（`--repo --issue --head`契約）には持たせない
+6. **root相対pathの厳密検査**: Issue本文「pathはリポジトリルート相対、`/`区切り」に対し、
+   バックスラッシュ区切り（`docs\decisions.md`）とWindowsドライブ形式（`C:\...`・`C:/...`）も
+   `manifest_schema_invalid`として拒否する（ChatGPT要件レビューで欠落を指摘・修正）
+7. **出力行のsort順**: 「path一覧はbyte順でsortして比較する」に対し、`unexpected_change=`・
+   `missing_change=`の出力行はUTF-8 byte列（`Buffer.compare`）でsortする。JS標準の文字列比較
+   （UTF-16コード単位順）はサロゲートペア（絵文字等）を含むとbyte順と逆転するため使用しない
+   （ChatGPT要件レビューで指摘・修正）
 
 ## リスク（不可逆4カテゴリの該当有無）
 
@@ -3190,11 +3203,21 @@ mergeされていた場合、その下流影響は本PRのrevertだけでは取�
   必要になった場合 → 別Checkpointで再設計
 - 適用先リポジトリ（ai-dev-workflowなど）への配線が必要になった場合 → 別Checkpointとして扱う
   （Issue本文の仮定に明記済み）
-- 上記「実装判断」5項目のいずれかに独立レビューから修正要求が入った場合 → 該当箇所を修正し本エントリを更新
+- 上記「実装判断」7項目のいずれかに独立レビューから修正要求が入った場合 → 該当箇所を修正し本エントリを更新
+
+## レビュー記録
+
+| 項目 | 結果 | 証跡 |
+|---|---|---|
+| ChatGPT要件レビュー（1回目） | request-changes risk=high（AC1: pathのバックスラッシュ・Windowsドライブ拒否漏れ、詳細仕様: byte順sort未実装） | [PRコメント](https://github.com/kikujizo/ai-harness/pull/124) |
+| Codex技術レビュー（1回目） | request-changes risk=high（AC5: `pull_request`はワークフロー定義自体がPR側で改変可能なため権威ある判定にならない） | [#5143007038](https://github.com/kikujizo/ai-harness/pull/124#issuecomment-5143007038) |
+| 対応 | 上記2件を修正（`pull_request_target`へ変更、`validatePathRule`にバックスラッシュ・ドライブ形式拒否を追加、`compareBytes`でUTF-8 byte順sortに変更）。実装判断6・7として本エントリへ追記、テスト追加、`node --test`で29件全通過を再確認 | 本PR追加commit |
+| 再レビュー | 依頼中 | (未確定) |
+| merge | 未実施 | - |
 
 ## 次アクション
 
-- [ ] Claude Codeによる実装・テスト・PR作成（本エントリ）
-- [ ] ChatGPTによる要件レビュー
-- [ ] Codexによる技術レビュー
+- [x] Claude Codeによる実装・テスト・PR作成（本エントリ）
+- [ ] ChatGPTによる要件レビュー（1回目request-changes→修正済み→再レビュー依頼中）
+- [ ] Codexによる技術レビュー（1回目request-changes→修正済み→再レビュー依頼中）
 - [ ] 人間によるmerge判断（発効点・`gate=human_approval`）

@@ -2,9 +2,21 @@
 # manifest外・不足・入力不正をnonzeroで停止する。
 #
 # 権威ある判定はbase branch上のcheckerで行う（PR head側のプログラム・test・workflowは実行しない）。
-# `pull_request`（`pull_request_target`ではない）を使うことで、GitHub Actionsの既定動作として
-# ワークフロー定義自体もbase側のバージョンで実行され、forkからのPRがワークフローを
-# 改変して自己検査を無力化することを防ぐ。
+#
+# `pull_request_target`を使う（`pull_request`ではない）。GitHub Actionsの仕様上、
+# `pull_request`はワークフローファイル自体がPRのmerge commit版（＝PR側の変更を含む版）で
+# 実行されるため、PRがこの.ymlファイル自身を改変してcheckerの呼び出し・終了判定を
+# 無力化できてしまう。`pull_request_target`はワークフローファイルをbase repositoryの
+# default branch側から取得するため、PR側の.yml改変はこのジョブの実行内容に影響しない。
+# （出典: https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target）
+#
+# `pull_request_target`はデフォルトで書き込み可能なGITHUB_TOKENを発行しうるため、
+# 以下の不変条件を厳守する。
+#   - PR headの内容は`git diff`比較のための「データ」としてのみ扱う（SHA値・tree比較）。
+#   - PR head側のファイルを絶対に checkout / require / exec しない
+#     （`Fetch PR head commit`はcommit objectをローカルの参照可能領域へ持ってくるだけで、
+#     作業ツリーへは展開しない。これを変更する場合は必ずこの不変条件を再確認すること）
+#   - `permissions:`を最小権限（read-only）に保つ。書き込み権限を追加しない
 #
 # branch protection設定自体は変更しない。fail/blockedは本Issueの運用契約上の
 # レビュー・merge停止であり、GitHubの強制マージ阻止ではない。
@@ -16,7 +28,7 @@
 name: Issue manifest diff
 
 on:
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - synchronize
@@ -42,7 +54,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
 
-      - name: Fetch PR head commit
+      - name: Fetch PR head commit (checkoutはしない。tree比較のためのgit objectのみ取得)
         shell: bash
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

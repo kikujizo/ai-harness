@@ -7,6 +7,7 @@
 // `.github/workflows/issue-manifest-diff.yml` 側で行い、決定済みのissue番号だけを渡す。
 
 const { execFileSync } = require('node:child_process');
+const { Buffer } = require('node:buffer');
 
 const RESULT_HEADER = 'ISSUE_MANIFEST_DIFF';
 const VALID_OPS = new Set(['add', 'modify', 'delete']);
@@ -16,6 +17,10 @@ const END_MARKER = '<!-- issue-change-manifest:v1:end -->';
 // Issue本文の禁止規則「. / .. / 空文字 / glob / 重複path」のうち、globは文字集合として
 // 固定する必要がある。ここでは代表的なglob特殊文字を禁止対象とする（実装判断・PR本文に明記）。
 const GLOB_CHARS_RE = /[*?[\]{}]/;
+// Issue本文の「pathはリポジトリルート相対、`/`区切り」規則より、バックスラッシュ区切りや
+// Windowsドライブ形式（`C:\...` 等）はroot相対pathとして無効とする。
+const BACKSLASH_RE = /\\/;
+const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 
 class UsageError extends Error {}
 
@@ -106,6 +111,8 @@ function validatePathRule(path) {
   if (typeof path !== 'string' || path.length === 0) return false;
   if (path.startsWith('/') || path.endsWith('/')) return false;
   if (GLOB_CHARS_RE.test(path)) return false;
+  if (BACKSLASH_RE.test(path)) return false;
+  if (WINDOWS_DRIVE_RE.test(path)) return false;
   const segments = path.split('/');
   for (const segment of segments) {
     if (segment === '' || segment === '.' || segment === '..') return false;
@@ -252,14 +259,21 @@ function toChangeMap(changes) {
   return map;
 }
 
+function compareBytes(a, b) {
+  // Issue本文「path一覧はbyte順でsortして比較する」に対応。JS標準の文字列比較は
+  // UTF-16コード単位順であり、サロゲートペア（絵文字等）を含むとUTF-8のbyte順と
+  // 逆転しうるため、UTF-8エンコード後のbyte列で比較する。
+  return Buffer.from(a, 'utf8').compare(Buffer.from(b, 'utf8'));
+}
+
 function compareChanges(manifestChanges, actualChangeMap) {
   const manifestKeys = manifestChanges.map(({ op, path }) => `${path}:${op}`);
   const actualKeys = [...actualChangeMap.entries()].map(([path, op]) => `${path}:${op}`);
   const manifestKeySet = new Set(manifestKeys);
   const actualKeySet = new Set(actualKeys);
 
-  const unexpected = [...actualKeySet].filter((key) => !manifestKeySet.has(key)).sort();
-  const missing = [...manifestKeySet].filter((key) => !actualKeySet.has(key)).sort();
+  const unexpected = [...actualKeySet].filter((key) => !manifestKeySet.has(key)).sort(compareBytes);
+  const missing = [...manifestKeySet].filter((key) => !actualKeySet.has(key)).sort(compareBytes);
   return { unexpected, missing };
 }
 
@@ -376,6 +390,7 @@ module.exports = {
   computeActualChanges,
   toChangeMap,
   compareChanges,
+  compareBytes,
   resolveCommit,
   isAncestor,
   parseArgs,

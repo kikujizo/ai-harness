@@ -506,3 +506,165 @@ test('analyzeNode unit: throw 後は fail ではなく unknown/未検出', () =>
   );
   assert.equal(findings.length, 0);
 });
+
+test('AC3 fail: nameなし複数行 run: | の || true は SP004', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          npm test || true
+`,
+      'multiline workflow suppress',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_shell_success_suppression'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 fail: - id: test の continue-on-error は SP004', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: test
+        continue-on-error: true
+        run: echo run
+`,
+      'id step suppress',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_continue_on_error'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: test用途の外部actionは SP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run tests
+        uses: vendor/test-action@v1
+`,
+      'delegated action',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_delegated_failure_contract_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC2 blocked: if ! 分岐の bare return は伝播証明にならない', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/verify.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/verify.sh',
+      `#!/bin/bash
+verify() {
+  if ! npm test; then
+    echo failed
+    return
+  fi
+}
+verify
+`,
+      'bare return proof',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 fail: 別分岐の throw は skip 分岐の failure 証明に使わない', () => {
+  const dir = makeRepo();
+  try {
+    const status = ['sk', 'ipped'].join('');
+    const reason = ['un', 'available'].join('');
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+function verify() {
+  if (!tool) {
+    console.log('${status}: ${reason}');
+    return;
+  }
+  throw new Error('later failure');
+}
+verify();
+`,
+      'cross branch throw',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('自checkerは path 除外せず、自己誤検出しない', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const checkerPath = path.join(__dirname, 'fail-closed-success-propagation.cjs');
+  const content = fs.readFileSync(checkerPath, 'utf8');
+  const findings = checker.analyzeNode(content, 'harness/checks/fail-closed-success-propagation.cjs');
+  assert.equal(findings.length, 0);
+});
+
+test('hasIfNotFailureStop unit: bare return は failure 停止ではない', () => {
+  const lines = ['if ! npm test; then', '  echo failed', '  return', 'fi'];
+  assert.equal(checker.hasIfNotFailureStop(lines, 0), false);
+});

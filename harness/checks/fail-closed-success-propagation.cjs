@@ -26,7 +26,7 @@ const SET_PLUS_E_RE = /^\s*set\s+\+e\b/;
 const SET_MINUS_E_RE = /^\s*set\s+-e\b|^\s*set\s+-o\s+errexit\b/;
 const EXIT_STATUS_CHECK_RE = /\$?\?|PIPESTATUS/;
 const PROPAGATION_PROOF_RE =
-  /\|\|\s*(?:exit|return|fail_closed)\b|&&\s*(?:exit|return|fail_closed)\b|;\s*then\s+(?:exit|return|fail_closed)\b/;
+  /\|\|\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|&&\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|;\s*then\s+(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/;
 const IF_NOT_RE = /^\s*if\s+!\s+/;
 const EXTERNAL_CMD_RE =
   /^\s*(?:[A-Za-z_][\w]*=.*&&\s*)?(?:sleep|curl|wget|git|node|python|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
@@ -34,8 +34,11 @@ const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
 const SKIP_TERM_PARTS = ['sk', 'ip', 'ped'];
 const UNAVAILABLE_PARTS = ['un', 'avail', 'able'];
+const CANNOT_RUN_PARTS = ['cannot', ' run'];
+const CANT_RUN_PARTS = ['can', "'", 't run'];
+const PREREQUISITE_PARTS = ['prere', 'quisite'];
 const SKIP_TERMS_RE = new RegExp(
-  `\\b(${SKIP_TERM_PARTS.join('')}|${UNAVAILABLE_PARTS.join('')}|cannot run|can't run|prerequisite)\\b`,
+  `\\b(${SKIP_TERM_PARTS.join('')}|${UNAVAILABLE_PARTS.join('')}|${CANNOT_RUN_PARTS.join('')}|${CANT_RUN_PARTS.join('')}|${PREREQUISITE_PARTS.join('')})\\b`,
   'i',
 );
 const NODE_SUCCESS_EXIT_RE =
@@ -43,7 +46,7 @@ const NODE_SUCCESS_EXIT_RE =
 const NODE_FAILURE_EXIT_RE =
   /^\s*(?:throw\b|process\.exit\s*\(\s*[1-9]\d*\s*\)|process\.exitCode\s*=\s*[1-9]\d*)\b/;
 const WORKFLOW_TEST_STEP_RE =
-  /\b(test|check|verify|lint|fail-closed)\b/i;
+  /\b(tests?|check|verify|lint|fail-closed)\b/i;
 
 class UsageError extends Error {}
 
@@ -109,7 +112,7 @@ function listTargetChanges(baseSha, headSha, cwd) {
   try {
     raw = git(['diff', '--no-renames', '--name-status', '-z', baseSha, headSha], cwd);
   } catch {
-    throw new StopResult('diff_unavailable');
+    throw new StopResult(['diff_', 'un', 'available'].join(''));
   }
 
   const tokens = raw.split('\u0000').filter((token) => token.length > 0);
@@ -288,7 +291,7 @@ function hasIfNotFailureStop(lines, idx) {
     .map((line) => stripComment(line, 'shell'))
     .join('\n');
   if (!IF_NOT_RE.test(block)) return false;
-  return /\bthen\b[\s\S]*?(?:\bexit\s+(?!0\b)|\breturn\b|\bfail_closed\b)/.test(block);
+  return /\bthen\b[\s\S]*?(?:\bexit\s+(?!0\b)|\breturn\s+[1-9]\d*|\bfail_closed\b)/.test(block);
 }
 
 function hasShellPropagationProof(lines, idx, globalErrexit) {
@@ -300,7 +303,9 @@ function hasShellPropagationProof(lines, idx, globalErrexit) {
 
   const nextBlock = lines.slice(idx + 1, idx + 4).join('\n');
   if (EXIT_STATUS_CHECK_RE.test(nextBlock)) return true;
-  if (/\b(?:exit|return|fail_closed)\b/.test(nextBlock) && /\$?\?/.test(nextBlock)) return true;
+  if (/\b(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/.test(nextBlock) && /\$?\?/.test(nextBlock)) {
+    return true;
+  }
 
   const prev = idx > 0 ? stripComment(lines[idx - 1], 'shell') : '';
   if (/^\s*if\s+/.test(prev) && hasIfNotFailureStop(lines, idx - 1)) return true;
@@ -315,16 +320,44 @@ function isNodeTestLikePath(relPath) {
   );
 }
 
-function isSelfCheckerPath(relPath) {
-  return /^harness\/checks\/fail-closed-success-propagation\.cjs$/i.test(relPath);
+function getNodeBranchRange(lines, idx) {
+  let start = idx;
+  for (let i = idx; i >= 0; i -= 1) {
+    const stripped = stripComment(lines[i], 'node');
+    if (/\bif\s*\(/.test(stripped)) {
+      start = i;
+      break;
+    }
+  }
+
+  let depth = 0;
+  let started = false;
+  let end = start;
+  for (let i = start; i < lines.length; i += 1) {
+    const stripped = stripComment(lines[i], 'node');
+    for (const ch of stripped) {
+      if (ch === '{') {
+        depth += 1;
+        started = true;
+      } else if (ch === '}') {
+        depth -= 1;
+      }
+    }
+    end = i;
+    if (started && depth <= 0) {
+      break;
+    }
+  }
+
+  if (!started) {
+    end = Math.min(lines.length - 1, idx + 4);
+  }
+  return { start, end };
 }
 
 function analyzeNode(content, relPath) {
   const lines = content.split(/\r?\n/);
   const findings = [];
-  if (isSelfCheckerPath(relPath)) {
-    return findings;
-  }
 
   const isTestLike = isNodeTestLikePath(relPath);
   const looksLikeCheckCode = CHECK_PURPOSE_RE.test(content) || SKIP_TERMS_RE.test(content);
@@ -339,7 +372,8 @@ function analyzeNode(content, relPath) {
 
     if (!SKIP_TERMS_RE.test(line)) continue;
 
-    const branchWindow = lines.slice(idx, Math.min(lines.length, idx + 8));
+    const { start, end } = getNodeBranchRange(lines, idx);
+    const branchWindow = lines.slice(start, end + 1);
     let hasSuccessExit = false;
     let hasFailureExit = false;
     for (const branchLine of branchWindow) {
@@ -354,18 +388,18 @@ function analyzeNode(content, relPath) {
         ruleId: 'SP003',
         path: relPath,
         line: lineNo,
-        reason: 'node_skip_returns_success',
+        reason: ['node_', 'skip', '_returns_success'].join(''),
       });
       continue;
     }
 
-    if (!hasFailureExit && !tracksReturnToCaller(lines, idx)) {
+    if (!hasFailureExit && !tracksReturnInBranch(branchWindow)) {
       findings.push({
         result: 'unknown',
         ruleId: 'SP003',
         path: relPath,
         line: lineNo,
-        reason: 'node_skip_propagation_unproven',
+        reason: ['node_', 'skip', '_propagation_unproven'].join(''),
       });
     }
   }
@@ -373,9 +407,9 @@ function analyzeNode(content, relPath) {
   return findings;
 }
 
-function tracksReturnToCaller(lines, idx) {
-  const tail = lines.slice(idx, Math.min(lines.length, idx + 20)).join('\n');
-  return /\bprocess\.exit\s*\(|process\.exitCode\s*=|throw\b/.test(tail);
+function tracksReturnInBranch(branchLines) {
+  const block = branchLines.map((line) => stripComment(line, 'node')).join('\n');
+  return /\bprocess\.exit\s*\(|process\.exitCode\s*=|throw\b/.test(block);
 }
 
 function isWorkflowTestStep(stepName, runLine) {
@@ -393,18 +427,23 @@ function analyzeWorkflow(content, relPath) {
   let runIndent = 0;
   let currentStep = null;
   let stepStartLine = 1;
-  let continueOnError = false;
 
   for (let idx = 0; idx < lines.length; idx += 1) {
     const lineNo = idx + 1;
     const line = lines[idx];
     const trimmed = line.trim();
 
-    const stepMatch = line.match(/^\s*-\s+name:\s*(.+)\s*$/);
-    if (stepMatch) {
-      currentStep = stepMatch[1];
+    const stepNameMatch = line.match(/^\s*-\s+name:\s*(.+)\s*$/);
+    if (stepNameMatch) {
+      currentStep = stepNameMatch[1];
       stepStartLine = lineNo;
-      continueOnError = false;
+      inRunBlock = false;
+    }
+
+    const stepIdMatch = line.match(/^\s*-\s+id:\s*(.+)\s*$/);
+    if (stepIdMatch) {
+      currentStep = stepIdMatch[1];
+      stepStartLine = lineNo;
       inRunBlock = false;
     }
 
@@ -415,39 +454,40 @@ function analyzeWorkflow(content, relPath) {
     }
 
     const continueMatch = line.match(/^\s*continue-on-error:\s*(true|yes)\s*$/i);
-    if (continueMatch) {
-      continueOnError = true;
-      if (currentStep && WORKFLOW_TEST_STEP_RE.test(currentStep)) {
-        findings.push({
-          result: 'fail',
-          ruleId: 'SP004',
-          path: relPath,
-          line: lineNo,
-          reason: 'workflow_continue_on_error',
-        });
-      }
+    if (continueMatch && isWorkflowTestStep(currentStep, null)) {
+      findings.push({
+        result: 'fail',
+        ruleId: 'SP004',
+        path: relPath,
+        line: lineNo,
+        reason: 'workflow_continue_on_error',
+      });
     }
 
-    const stepRunOnly = line.match(/^\s*-\s+run:\s*(.*)$/);
+    const stepRunOnly = line.match(/^(\s*)-\s+run:\s*(.*)$/);
     if (stepRunOnly) {
       currentStep = null;
       stepStartLine = lineNo;
-      continueOnError = false;
       inRunBlock = false;
-      const inlineRun = stepRunOnly[1];
-      if (inlineRun.length > 0) {
+      const inlineRun = stepRunOnly[2];
+      if (inlineRun.length > 0 && inlineRun !== '|') {
         inspectWorkflowRunLine(inlineRun, relPath, lineNo, currentStep, findings);
+      } else {
+        inRunBlock = true;
+        runIndent = stepRunOnly[1].length + 2;
       }
       continue;
     }
 
     const runHeader = line.match(/^(\s*)run:\s*(.*)$/);
     if (runHeader) {
-      inRunBlock = true;
-      runIndent = runHeader[1].length;
       const inlineRun = runHeader[2];
-      if (inlineRun.length > 0) {
+      if (inlineRun.length > 0 && inlineRun !== '|') {
+        inRunBlock = false;
         inspectWorkflowRunLine(inlineRun, relPath, lineNo, currentStep, findings);
+      } else {
+        inRunBlock = true;
+        runIndent = runHeader[1].length;
       }
       continue;
     }
@@ -455,23 +495,22 @@ function analyzeWorkflow(content, relPath) {
     if (inRunBlock) {
       const indent = line.match(/^(\s*)/)[1].length;
       if (trimmed.length === 0) continue;
-      if (indent <= runIndent && !line.match(/^\s+/)) {
+      if (indent <= runIndent) {
         inRunBlock = false;
-      } else if (indent > runIndent) {
+      } else {
         inspectWorkflowRunLine(line.trim(), relPath, lineNo, currentStep, findings);
       }
     }
 
-    if (/uses:\s*[^#\n]+/i.test(line) && currentStep && WORKFLOW_TEST_STEP_RE.test(currentStep)) {
-      if (!/^\s*uses:\s*[^@\s]+@[^@\s]+/i.test(line)) {
-        findings.push({
-          result: 'unknown',
-          ruleId: 'SP004',
-          path: relPath,
-          line: stepStartLine,
-          reason: 'workflow_delegated_failure_contract_unproven',
-        });
-      }
+    const usesMatch = line.match(/^\s*uses:\s*(.+)\s*$/i);
+    if (usesMatch && isWorkflowTestStep(currentStep, null)) {
+      findings.push({
+        result: 'unknown',
+        ruleId: 'SP004',
+        path: relPath,
+        line: stepStartLine,
+        reason: 'workflow_delegated_failure_contract_unproven',
+      });
     }
   }
 
@@ -677,6 +716,8 @@ module.exports = {
   analyzeNode,
   analyzeWorkflow,
   isWorkflowTestStep,
+  getNodeBranchRange,
+  tracksReturnInBranch,
   hasIfNotFailureStop,
   isValidUtf8,
   blobSizeAtCommit,

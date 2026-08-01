@@ -39,7 +39,17 @@ function cleanup(dir) {
 }
 
 function runOnRepo(dir, baseSha, headSha) {
-  return checker.runChecker({ base: baseSha, head: headSha, cwd: dir });
+  try {
+    return checker.runChecker({ base: baseSha, head: headSha, cwd: dir });
+  } catch (err) {
+    if (err instanceof checker.StopResult) {
+      return {
+        exitCode: 1,
+        lines: ['result=blocked', `stop_reason=${err.stopReason}`, ...err.extraLines],
+      };
+    }
+    throw err;
+  }
 }
 
 function fixtureExplicitPropagationShell() {
@@ -73,6 +83,49 @@ function fixturePr157NodeBypass() {
     'runShellTest();',
     '',
   ].join('\n');
+}
+
+function fixturePromiseResolveBypass() {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['tool ', 'un', 'available'].join('');
+  return [
+    "'use strict';",
+    'function verifyTool() {',
+    '  if (!process.env.TOOL) {',
+    `    console.log('${status}: ${reason}');`,
+    '    return Promise.resolve();',
+    '  }',
+    '  process.exit(1);',
+    '}',
+    'verifyTool();',
+    '',
+  ].join('\n');
+}
+
+function fixtureCheckerHarnessBypass() {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['bash ', 'un', 'available'].join('');
+  return [
+    "'use strict';",
+    'function runVerify() {',
+    '  if (!process.env.HAS_BASH) {',
+    `    console.log('${status}: ${reason}');`,
+    '    return;',
+    '  }',
+    '  process.exit(1);',
+    '}',
+    'runVerify();',
+    '',
+  ].join('\n');
+}
+
+function writeAndCommitBinary(dir, relPath, buffer, message) {
+  const fullPath = path.join(dir, relPath);
+  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  fs.writeFileSync(fullPath, buffer);
+  git(['add', relPath], dir);
+  git(['commit', '-q', '-m', message], dir);
+  return git(['rev-parse', 'HEAD'], dir);
 }
 
 function fixtureGeneratedBypassJs() {
@@ -291,6 +344,158 @@ test('analyzeShell unit: set -e 下の外部コマンドは pass 候補', () => 
   const pause = ['sl', 'eep', ' 5'].join('');
   const findings = checker.analyzeShell(`#!/bin/bash\nset -e\n${pause}\n`, 'unit.sh');
   assert.equal(findings.length, 0);
+});
+
+test('AC3 fail: nameなしWorkflow step の || true は SP004', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm test || true
+`,
+      'unnamed workflow suppress',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_shell_success_suppression'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 fail: harness/checks の check用途コードも SP003 対象', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example-verify.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example-verify.cjs',
+      fixtureCheckerHarnessBypass(),
+      'checker harness bypass',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 fail: return Promise.resolve() は SP003', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      fixturePromiseResolveBypass(),
+      'promise resolve bypass',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC2 blocked: if ! だけでは伝播証明にならない', () => {
+  const dir = makeRepo();
+  try {
+    const pause = ['sl', 'eep', ' 5'].join('');
+    const baseSha = writeAndCommit(dir, 'scripts/ifnot.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/ifnot.sh',
+      `#!/bin/bash
+if ! ${pause}; then
+  echo failed
+fi
+`,
+      'if not without stop',
+    );
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('blocked: 不正UTF-8は unsupported_encoding', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/ok.sh', '#!/bin/bash\n', 'base');
+    const invalidUtf8 = Buffer.from([0xff, 0xfe, 0xfd, 0x0a]);
+    const headSha = writeAndCommitBinary(dir, 'scripts/bad.sh', invalidUtf8, 'invalid utf8');
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('stop_reason=unsupported_encoding'));
+    assert.ok(result.lines.includes('reason=unsupported_encoding'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('blocked: 上限超過は target_file_too_large', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/ok.sh', '#!/bin/bash\n', 'base');
+    const oversized = Buffer.alloc(512 * 1024 + 1, 0x61);
+    const headSha = writeAndCommitBinary(dir, 'scripts/large.sh', oversized, 'too large');
+
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('stop_reason=target_file_too_large'));
+    assert.ok(result.lines.includes('reason=target_file_too_large'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('analyzeShell unit: if ! だけでは SP002 proof にならない', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const findings = checker.analyzeShell(
+    `#!/bin/bash\nif ! ${pause}; then\n  echo failed\nfi\n`,
+    'unit.sh',
+  );
+  assert.ok(findings.some((finding) => finding.ruleId === 'SP002'));
+});
+
+test('analyzeNode unit: Promise.resolve は skip-success として fail', () => {
+  const missing = ['un', 'available'].join('');
+  const findings = checker.analyzeNode(
+    `if (!tool) {\n  console.log('skipped: ${missing}');\n  return Promise.resolve();\n}\n`,
+    'harness/checks/example-verify.cjs',
+  );
+  assert.ok(findings.some((finding) => finding.reason === 'node_skip_returns_success'));
+});
+
+test('isValidUtf8 unit: 不正シーケンスを拒否', () => {
+  assert.equal(checker.isValidUtf8(Buffer.from([0xff, 0xfe, 0xfd])), false);
+  assert.equal(checker.isValidUtf8(Buffer.from('ok\n', 'utf8')), true);
 });
 
 test('analyzeNode unit: throw 後は fail ではなく unknown/未検出', () => {

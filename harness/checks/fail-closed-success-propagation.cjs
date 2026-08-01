@@ -39,7 +39,7 @@ const SKIP_TERMS_RE = new RegExp(
   'i',
 );
 const NODE_SUCCESS_EXIT_RE =
-  /^\s*(?:return\s*;?|process\.exit\s*\(\s*0\s*\)|process\.exitCode\s*=\s*0)\s*;?\s*($|\/\/|#)/;
+  /^\s*(?:return\s*;?|return\s+Promise\.resolve\s*\(|process\.exit\s*\(\s*0\s*\)|process\.exitCode\s*=\s*0)/;
 const NODE_FAILURE_EXIT_RE =
   /^\s*(?:throw\b|process\.exit\s*\(\s*[1-9]\d*\s*\)|process\.exitCode\s*=\s*[1-9]\d*)\b/;
 const WORKFLOW_TEST_STEP_RE =
@@ -137,16 +137,46 @@ function hasTargetExtension(relPath) {
   return TARGET_EXTENSIONS.has(ext);
 }
 
+function blobSizeAtCommit(commitSha, relPath, cwd) {
+  try {
+    const sizeText = git(['cat-file', '-s', `${commitSha}:${relPath}`], cwd).trim();
+    const size = Number.parseInt(sizeText, 10);
+    return Number.isFinite(size) ? size : null;
+  } catch {
+    return null;
+  }
+}
+
+function isValidUtf8(buffer) {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readBlobAtCommit(commitSha, relPath, cwd) {
+  const blobSize = blobSizeAtCommit(commitSha, relPath, cwd);
+  if (blobSize === null) {
+    return { kind: 'missing' };
+  }
+  if (blobSize > MAX_FILE_BYTES) {
+    return { kind: 'too_large' };
+  }
+
   let raw;
   try {
     raw = execFileSync('git', ['show', `${commitSha}:${relPath}`], {
       cwd,
       encoding: 'buffer',
-      maxBuffer: MAX_FILE_BYTES + 1,
+      maxBuffer: MAX_FILE_BYTES + 4096,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-  } catch {
+  } catch (err) {
+    if (err && (err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' || /maxBuffer/i.test(String(err.message)))) {
+      return { kind: 'too_large' };
+    }
     return { kind: 'missing' };
   }
 
@@ -156,11 +186,10 @@ function readBlobAtCommit(commitSha, relPath, cwd) {
   if (raw.includes(0)) {
     return { kind: 'binary' };
   }
-  try {
-    return { kind: 'text', content: raw.toString('utf8') };
-  } catch {
+  if (!isValidUtf8(raw)) {
     return { kind: 'encoding' };
   }
+  return { kind: 'text', content: raw.toString('utf8') };
 }
 
 function stripComment(line, kind) {
@@ -253,11 +282,20 @@ function analyzeShell(content, relPath) {
   return findings;
 }
 
+function hasIfNotFailureStop(lines, idx) {
+  const block = lines
+    .slice(idx, Math.min(lines.length, idx + 8))
+    .map((line) => stripComment(line, 'shell'))
+    .join('\n');
+  if (!IF_NOT_RE.test(block)) return false;
+  return /\bthen\b[\s\S]*?(?:\bexit\s+(?!0\b)|\breturn\b|\bfail_closed\b)/.test(block);
+}
+
 function hasShellPropagationProof(lines, idx, globalErrexit) {
   const line = stripComment(lines[idx], 'shell');
   if (globalErrexit) return true;
   if (PROPAGATION_PROOF_RE.test(line)) return true;
-  if (IF_NOT_RE.test(line)) return true;
+  if (hasIfNotFailureStop(lines, idx)) return true;
   if (EXIT_STATUS_CHECK_RE.test(line)) return true;
 
   const nextBlock = lines.slice(idx + 1, idx + 4).join('\n');
@@ -265,7 +303,7 @@ function hasShellPropagationProof(lines, idx, globalErrexit) {
   if (/\b(?:exit|return|fail_closed)\b/.test(nextBlock) && /\$?\?/.test(nextBlock)) return true;
 
   const prev = idx > 0 ? stripComment(lines[idx - 1], 'shell') : '';
-  if (/^\s*if\s+/.test(prev) || IF_NOT_RE.test(prev)) return true;
+  if (/^\s*if\s+/.test(prev) && hasIfNotFailureStop(lines, idx - 1)) return true;
 
   return false;
 }
@@ -277,14 +315,14 @@ function isNodeTestLikePath(relPath) {
   );
 }
 
-function isCheckerImplementationPath(relPath) {
-  return /^harness\/checks\/[^/]+\.cjs$/i.test(relPath) && !/\.test\.cjs$/i.test(relPath);
+function isSelfCheckerPath(relPath) {
+  return /^harness\/checks\/fail-closed-success-propagation\.cjs$/i.test(relPath);
 }
 
 function analyzeNode(content, relPath) {
   const lines = content.split(/\r?\n/);
   const findings = [];
-  if (isCheckerImplementationPath(relPath)) {
+  if (isSelfCheckerPath(relPath)) {
     return findings;
   }
 
@@ -340,6 +378,14 @@ function tracksReturnToCaller(lines, idx) {
   return /\bprocess\.exit\s*\(|process\.exitCode\s*=|throw\b/.test(tail);
 }
 
+function isWorkflowTestStep(stepName, runLine) {
+  if (stepName && WORKFLOW_TEST_STEP_RE.test(stepName)) return true;
+  if (runLine && (WORKFLOW_TEST_STEP_RE.test(runLine) || CHECK_PURPOSE_RE.test(runLine))) {
+    return true;
+  }
+  return false;
+}
+
 function analyzeWorkflow(content, relPath) {
   const lines = content.split(/\r?\n/);
   const findings = [];
@@ -382,6 +428,19 @@ function analyzeWorkflow(content, relPath) {
       }
     }
 
+    const stepRunOnly = line.match(/^\s*-\s+run:\s*(.*)$/);
+    if (stepRunOnly) {
+      currentStep = null;
+      stepStartLine = lineNo;
+      continueOnError = false;
+      inRunBlock = false;
+      const inlineRun = stepRunOnly[1];
+      if (inlineRun.length > 0) {
+        inspectWorkflowRunLine(inlineRun, relPath, lineNo, currentStep, findings);
+      }
+      continue;
+    }
+
     const runHeader = line.match(/^(\s*)run:\s*(.*)$/);
     if (runHeader) {
       inRunBlock = true;
@@ -420,7 +479,7 @@ function analyzeWorkflow(content, relPath) {
 }
 
 function inspectWorkflowRunLine(runLine, relPath, lineNo, stepName, findings) {
-  if (!stepName || !WORKFLOW_TEST_STEP_RE.test(stepName)) return;
+  if (!isWorkflowTestStep(stepName, runLine)) return;
   if (CHECK_PURPOSE_RE.test(runLine) && SP001_SUPPRESS_RE.test(runLine)) {
     findings.push({
       result: 'fail',
@@ -617,6 +676,11 @@ module.exports = {
   analyzeShell,
   analyzeNode,
   analyzeWorkflow,
+  isWorkflowTestStep,
+  hasIfNotFailureStop,
+  isValidUtf8,
+  blobSizeAtCommit,
+  readBlobAtCommit,
   listTargetChanges,
   hasTargetExtension,
   pickOverallResult,

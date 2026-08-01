@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 'use strict';
 
-// Issue #123: 変更された shell / Node test / Workflow について、既知の success-propagation
-// 迂回と静的に成否伝播を証明できない箇所を機械検出する。
+// Issue #123: 変更された shell / Node test / GitHub Workflow について、既知の
+// success-propagation 迂回と静的に成否伝播を証明できない箇所を機械検出する。
 // CLI契約: --base <commit_sha> --head <commit_sha>
+//
+// 構造: 各言語の extractor が候補(候補=判定対象1件)だけを抽出し、classifier が
+// 候補ごとに fail > unknown > pass を一度だけ決定し、aggregator が重複排除・
+// 全体結果・primary findingを決定する（Issue #123 固定構文v3の候補モデル）。
+// 候補を経由しない直接判定経路は持たない。
 
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
@@ -30,13 +35,16 @@ const BARE_RETURN_RE = /^\s*return\s*($|[#;])/;
 const SIMPLE_NODE_CONDITION_RE =
   /^(?:!)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$|^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*(?:===|!==|==|!=)\s*(?:true|false|null|undefined|\d+)$/;
 const EXIT_STATUS_CHECK_RE = /\$?\?|PIPESTATUS/;
-const PROPAGATION_PROOF_RE =
-  /\|\|\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|;\s*then\s+(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/;
+// 証明として使えるのは positive integer の exit/return だけ（`exit nope` 等は証明にならない）。
+const FIXED_PROPAGATION_PROOF_RE =
+  /\|\|\s*(?:exit\s+[1-9]\d*|return\s+[1-9]\d*)\b|;\s*then\s+(?:exit\s+[1-9]\d*|return\s+[1-9]\d*)\b/;
+const FAIL_CLOSED_CALL_RE = /\|\|\s*fail_closed\b|;\s*then\s+fail_closed\b/;
 const FLAT_IF_MAX_MEANINGFUL = 8;
 const ERREXIT_CONTRACT_MAX_MEANINGFUL = 3;
 const IF_NOT_RE = /^\s*if\s+!\s+/;
+const SHELL_BLOCK_KEYWORD_RE = /\b(?:if|then|elif|for|while|until|case|function)\b/;
 const EXTERNAL_CMD_RE =
-  /^\s*(?:[A-Za-z_][\w]*=.*&&\s*)?(?:sleep|curl|wget|git|node|python3?|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
+  /^\s*(?:[A-Za-z_][\w]*=\S*\s+)*(?:sleep|curl|wget|git|node|python3?|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
 const ABSENCE_TERM_PARTS = [
@@ -74,8 +82,8 @@ const NODE_SUCCESS_EXIT_RE =
   /^\s*(?:return\s*;?|return\s+Promise\.resolve\s*\(|process\.exit\s*\(\s*0\s*\)|process\.exitCode\s*=\s*0)/;
 const NODE_FAILURE_EXIT_RE =
   /^\s*(?:throw\b|process\.exit\s*\(\s*[1-9]\d*\s*\)\s*;?|process\.exitCode\s*=\s*[1-9]\d*)\s*;?/;
-const WORKFLOW_TEST_STEP_RE =
-  /\b(tests?|check|verify|lint|fail-closed)\b/i;
+const WORKFLOW_TEST_STEP_RE = /\b(tests?|check|verify|lint|fail-closed)\b/i;
+const WORKFLOW_ALLOWED_STEP_KEYS = ['name', 'id', 'run', 'uses', 'continue-on-error', 'shell'];
 
 class UsageError extends Error {}
 
@@ -312,49 +320,6 @@ function isLoneClosingBraceLine(line, kind) {
   return /^\s*}\s*($|[#;])/.test(stripComment(line, kind));
 }
 
-function isLimitedImplicitReturnIf(lines, ifIdx) {
-  const { start, end } = getNodeFlatIfRange(lines, ifIdx);
-  let hasTermInBlock = false;
-  for (let i = start; i <= end; i += 1) {
-    if (hasAbsenceTerm(lines[i])) {
-      hasTermInBlock = true;
-      break;
-    }
-  }
-  if (!hasTermInBlock) return false;
-  if (!flatIfInteriorIsSimple(lines, start, end)) return false;
-  if (hasElseAfterFlatIf(lines, end)) return false;
-  if (countMeaningfulLines(lines, start, end) > FLAT_IF_MAX_MEANINGFUL) return false;
-
-  const funcBody = getEnclosingFunctionBody(lines, ifIdx);
-  if (!funcBody) {
-    for (let i = 0; i < ifIdx; i += 1) {
-      if (!isMeaningfulLine(lines[i])) continue;
-      const stripped = stripComment(lines[i], 'node');
-      if (/^['"]use strict['"]/.test(stripped.trim())) continue;
-      return false;
-    }
-    for (let i = end + 1; i < lines.length; i += 1) {
-      if (!isMeaningfulLine(lines[i])) continue;
-      if (isLoneClosingBraceLine(lines[i], 'node')) continue;
-      return false;
-    }
-    return true;
-  }
-
-  for (let i = funcBody.bodyStart + 1; i < funcBody.bodyEnd; i += 1) {
-    if (!isMeaningfulLine(lines[i])) continue;
-    if (isLoneClosingBraceLine(lines[i], 'node')) continue;
-    if (i >= start && i <= end) continue;
-    if (i < start) return false;
-    const stripped = stripComment(lines[i], 'node');
-    if (NODE_FAILURE_EXIT_RE.test(stripped)) continue;
-    return false;
-  }
-
-  return true;
-}
-
 function stripComment(line, kind) {
   if (kind === 'shell') {
     const hash = line.indexOf('#');
@@ -367,99 +332,67 @@ function stripComment(line, kind) {
   return line;
 }
 
-function analyzeShell(content, relPath) {
-  const lines = content.split(/\r?\n/);
-  const findings = [];
-  let errexitInContract = false;
-  let errexitDisabled = false;
-  let meaningfulBeforeCommand = 0;
+// ---------------------------------------------------------------------------
+// SP001 / SP002: shell — 候補抽出
+// ---------------------------------------------------------------------------
 
-  for (let idx = 0; idx < lines.length; idx += 1) {
-    const lineNo = idx + 1;
-    const rawLine = lines[idx];
-    const line = stripComment(rawLine, 'shell').trimEnd();
-    if (line.trim().length === 0) continue;
-    if (isShebangLine(line)) continue;
+function collectConfirmedFailClosedNames(lines) {
+  const confirmed = new Set();
+  for (let i = 0; i < lines.length; i += 1) {
+    const stripped = stripComment(lines[i], 'shell');
+    const defMatch =
+      stripped.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{(.*)$/) ||
+      stripped.match(/^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\))?\s*\{(.*)$/);
+    if (!defMatch) continue;
+    const name = defMatch[1];
 
-    if (isMeaningfulLine(rawLine)) {
-      meaningfulBeforeCommand += 1;
-      if (SET_MINUS_E_RE.test(line) && meaningfulBeforeCommand <= ERREXIT_CONTRACT_MAX_MEANINGFUL) {
-        errexitInContract = true;
-        errexitDisabled = false;
+    // defMatch の '{' 直後から文字単位で深さを追跡し、対応する '}' までの
+    // 本文だけを取り出す(複数行にまたがってもよい)。
+    let depth = 1;
+    let bodyText = '';
+    let consumed = false;
+
+    const consumeChars = (text) => {
+      for (const ch of text) {
+        if (consumed) break;
+        if (ch === '{') {
+          depth += 1;
+        } else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            consumed = true;
+            break;
+          }
+        }
+        bodyText += ch;
       }
-    }
-    if (SET_PLUS_E_RE.test(line)) {
-      errexitDisabled = true;
-      errexitInContract = false;
-    }
+    };
 
-    if (CHECK_PURPOSE_RE.test(line) && SP001_SUPPRESS_RE.test(line)) {
-      findings.push({
-        result: 'fail',
-        ruleId: 'SP001',
-        path: relPath,
-        line: lineNo,
-        reason: 'shell_success_suppression',
-      });
-      continue;
+    consumeChars(defMatch[2]);
+    let j = i;
+    while (!consumed && j + 1 < lines.length) {
+      j += 1;
+      bodyText += '\n';
+      consumeChars(stripComment(lines[j], 'shell'));
     }
+    if (!consumed) continue; // 閉じ括弧未解決は確認不能
 
-    if (BARE_RETURN_RE.test(line)) {
-      findings.push({
-        result: 'unknown',
-        ruleId: 'SP002',
-        path: relPath,
-        line: lineNo,
-        reason: 'shell_failure_propagation_unproven',
-      });
-      continue;
+    const statements = [];
+    for (const stmt of bodyText.split(/[;\n]/)) {
+      const trimmed = stmt.trim();
+      if (trimmed.length > 0) statements.push(trimmed);
     }
-
-    if (UNCONDITIONAL_EXIT0_RE.test(line)) {
-      const window = lines.slice(Math.max(0, idx - 8), idx).join('\n');
-      if (FAILURE_RECORD_RE.test(window)) {
-        findings.push({
-          result: 'fail',
-          ruleId: 'SP001',
-          path: relPath,
-          line: lineNo,
-          reason: 'shell_unconditional_exit0_after_failure_record',
-        });
-        continue;
-      }
+    if (statements.length === 1 && /^(?:exit|return)\s+[1-9]\d*$/.test(statements[0])) {
+      confirmed.add(name);
     }
-
-    if (errexitDisabled && CHECK_PURPOSE_RE.test(line) && !EXIT_STATUS_CHECK_RE.test(line)) {
-      const lookahead = lines.slice(idx + 1, idx + 4).join('\n');
-      if (!EXIT_STATUS_CHECK_RE.test(lookahead) && !PROPAGATION_PROOF_RE.test(line)) {
-        findings.push({
-          result: 'fail',
-          ruleId: 'SP001',
-          path: relPath,
-          line: lineNo,
-          reason: 'shell_set_plus_e_without_exit_check',
-        });
-        continue;
-      }
-    }
-
-    if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
-    if (!EXTERNAL_CMD_RE.test(line) && !/^\s*[A-Za-z_][\w-]*\s+/.test(line)) continue;
-
-    if (hasShellPropagationProof(lines, idx, errexitInContract && !errexitDisabled)) {
-      continue;
-    }
-
-    findings.push({
-      result: 'unknown',
-      ruleId: 'SP002',
-      path: relPath,
-      line: lineNo,
-      reason: 'shell_failure_propagation_unproven',
-    });
   }
+  return confirmed;
+}
 
-  return findings;
+function hasShellProofOnLine(line, confirmedFailClosed) {
+  if (FIXED_PROPAGATION_PROOF_RE.test(line)) return true;
+  if (confirmedFailClosed.has('fail_closed') && FAIL_CLOSED_CALL_RE.test(line)) return true;
+  return false;
 }
 
 function findFlatIfNotBlock(lines, idx) {
@@ -491,25 +424,150 @@ function findFlatIfNotBlock(lines, idx) {
   return { ifIdx, fiIdx, meaningful };
 }
 
-function hasIfNotFailureStop(lines, idx) {
+function isShellBlockFlat(lines, startIdx, endIdx) {
+  for (let i = startIdx + 1; i < endIdx; i += 1) {
+    if (!isMeaningfulLine(lines[i])) continue;
+    const stripped = stripComment(lines[i], 'shell');
+    if (SHELL_BLOCK_KEYWORD_RE.test(stripped)) return false;
+    if (/\{\s*($|[#;])/.test(stripped)) return false;
+  }
+  return true;
+}
+
+function hasIfNotFailureStop(lines, idx, confirmedFailClosed = new Set()) {
   const block = findFlatIfNotBlock(lines, idx);
   if (!block) return false;
-  for (let i = block.ifIdx; i < block.fiIdx; i += 1) {
-    const stripped = stripComment(lines[i], 'shell');
-    if (/^\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/.test(stripped)) {
-      return true;
+  if (!isShellBlockFlat(lines, block.ifIdx, block.fiIdx)) return false;
+
+  let lastIdx = -1;
+  for (let i = block.fiIdx - 1; i > block.ifIdx; i -= 1) {
+    if (isMeaningfulLine(lines[i])) {
+      lastIdx = i;
+      break;
     }
   }
+  if (lastIdx === -1) return false;
+
+  const stripped = stripComment(lines[lastIdx], 'shell');
+  if (/^\s*exit\s+[1-9]\d*\s*($|[#;])/.test(stripped)) return true;
+  if (/^\s*return\s+[1-9]\d*\s*($|[#;])/.test(stripped)) return true;
+  if (confirmedFailClosed.has('fail_closed') && /^\s*fail_closed\s*($|[#;])/.test(stripped)) return true;
   return false;
 }
 
-function hasShellPropagationProof(lines, idx, errexitInContract) {
-  const line = stripComment(lines[idx], 'shell');
-  if (errexitInContract) return true;
-  if (PROPAGATION_PROOF_RE.test(line)) return true;
-  if (hasIfNotFailureStop(lines, idx)) return true;
-  return false;
+function extractShellCandidates(content, relPath) {
+  const lines = content.split(/\r?\n/);
+  const candidates = [];
+  const confirmedFailClosed = collectConfirmedFailClosedNames(lines);
+
+  let errexitInContract = false;
+  let errexitDisabled = false;
+  let meaningfulBeforeCommand = 0;
+
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const lineNo = idx + 1;
+    const rawLine = lines[idx];
+    const line = stripComment(rawLine, 'shell').trimEnd();
+    if (line.trim().length === 0) continue;
+    if (isShebangLine(line)) continue;
+
+    if (isMeaningfulLine(rawLine)) {
+      meaningfulBeforeCommand += 1;
+      if (SET_MINUS_E_RE.test(line) && meaningfulBeforeCommand <= ERREXIT_CONTRACT_MAX_MEANINGFUL) {
+        errexitInContract = true;
+        errexitDisabled = false;
+      }
+    }
+    if (SET_PLUS_E_RE.test(line)) {
+      errexitDisabled = true;
+      errexitInContract = false;
+    }
+
+    if (CHECK_PURPOSE_RE.test(line) && SP001_SUPPRESS_RE.test(line)) {
+      candidates.push({
+        kind: 'fixed',
+        result: 'fail',
+        ruleId: 'SP001',
+        line: lineNo,
+        reason: 'shell_success_suppression',
+      });
+      continue;
+    }
+
+    if (BARE_RETURN_RE.test(line)) {
+      candidates.push({
+        kind: 'fixed',
+        result: 'unknown',
+        ruleId: 'SP002',
+        line: lineNo,
+        reason: 'shell_failure_propagation_unproven',
+      });
+      continue;
+    }
+
+    if (UNCONDITIONAL_EXIT0_RE.test(line)) {
+      const window = lines.slice(Math.max(0, idx - 8), idx).join('\n');
+      if (FAILURE_RECORD_RE.test(window)) {
+        candidates.push({
+          kind: 'fixed',
+          result: 'fail',
+          ruleId: 'SP001',
+          line: lineNo,
+          reason: 'shell_unconditional_exit0_after_failure_record',
+        });
+        continue;
+      }
+    }
+
+    if (errexitDisabled && CHECK_PURPOSE_RE.test(line) && !EXIT_STATUS_CHECK_RE.test(line)) {
+      const lookahead = lines.slice(idx + 1, idx + 4).join('\n');
+      if (!EXIT_STATUS_CHECK_RE.test(lookahead) && !hasShellProofOnLine(line, confirmedFailClosed)) {
+        candidates.push({
+          kind: 'fixed',
+          result: 'fail',
+          ruleId: 'SP001',
+          line: lineNo,
+          reason: 'shell_set_plus_e_without_exit_check',
+        });
+        continue;
+      }
+    }
+
+    if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
+    if (!EXTERNAL_CMD_RE.test(line) && !/^\s*[A-Za-z_][\w-]*\s+/.test(line)) continue;
+
+    candidates.push({
+      kind: 'target_command',
+      line: lineNo,
+      hasProofOnLine: hasShellProofOnLine(line, confirmedFailClosed),
+      errexitProven: errexitInContract && !errexitDisabled,
+      ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
+    });
+  }
+
+  return candidates.map((c) => Object.assign({}, c, { path: relPath }));
 }
+
+function classifyShellCandidate(candidate) {
+  if (candidate.kind === 'fixed') {
+    return { result: candidate.result, ruleId: candidate.ruleId, reason: candidate.reason };
+  }
+  if (candidate.kind === 'target_command') {
+    if (candidate.hasProofOnLine || candidate.errexitProven || candidate.ifNotProven) {
+      return null;
+    }
+    return {
+      result: 'unknown',
+      ruleId: 'SP002',
+      reason: 'shell_failure_propagation_unproven',
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// SP003: Node.js — 候補抽出
+// ---------------------------------------------------------------------------
 
 function isNodeTestLikePath(relPath) {
   return (
@@ -576,255 +634,163 @@ function extractIfCondition(codeView) {
   return match ? match[1] : null;
 }
 
-function detectLimitedImplicitReturn(lines, relPath) {
-  const findings = [];
-  for (let idx = 0; idx < lines.length; idx += 1) {
-    const codeView = buildCodeView(stripComment(lines[idx], 'node'));
-    if (!/\bfunction\b/.test(codeView)) continue;
+// 「限定implicit return」ゲート: if-block の外側（前後）に他の意味のある行が
+// あってはならない。allowTrailingFailureExit=true のときだけ、if-block の後に
+// 続く明示的failure終了（throw / process.exit(n>=1) / process.exitCode=n>=1）を
+// 例外として許容する。hasSuccessExit（if内に明示的な成功終了がある）候補だけが
+// この例外を使ってよく、implicitな候補（if内に何の終了文もない）は例外なしで
+// 判定する。
+function isLimitedImplicitReturnIfCore(lines, ifIdx, allowTrailingFailureExit) {
+  const { start, end } = getNodeFlatIfRange(lines, ifIdx);
+  const funcBody = getEnclosingFunctionBody(lines, ifIdx);
 
-    let bodyStart = -1;
-    let bodyEnd = -1;
-    let depth = 0;
-    for (let i = idx; i < lines.length; i += 1) {
-      const view = buildCodeView(stripComment(lines[i], 'node'));
-      for (const ch of view) {
-        if (ch === '{') {
-          depth += 1;
-          if (bodyStart === -1) bodyStart = i;
-        } else if (ch === '}') {
-          depth -= 1;
-          if (depth === 0) {
-            bodyEnd = i;
-            break;
-          }
-        }
-      }
-      if (bodyEnd !== -1) break;
-    }
-    if (bodyStart === -1 || bodyEnd === -1) continue;
-
-    const meaningful = [];
-    for (let i = bodyStart + 1; i < bodyEnd; i += 1) {
-      if (isMeaningfulLine(lines[i])) meaningful.push(i);
-    }
-    if (meaningful.length === 0) continue;
-
-    const ifIdx = meaningful[0];
-    const ifCodeView = buildCodeView(stripComment(lines[ifIdx], 'node'));
-    if (!/\bif\s*\(/.test(ifCodeView)) continue;
-
-    const { start, end } = getNodeFlatIfRange(lines, ifIdx);
-    let hasTermInBlock = false;
-    for (let i = start; i <= end; i += 1) {
-      if (hasAbsenceTerm(lines[i])) {
-        hasTermInBlock = true;
-        break;
-      }
-    }
-    if (!hasTermInBlock) continue;
-    if (!isLimitedImplicitReturnIf(lines, ifIdx)) continue;
-
-    let hasSuccessExit = false;
-    let hasFailureExit = false;
-    for (let i = start; i <= end; i += 1) {
+  if (!funcBody) {
+    for (let i = 0; i < start; i += 1) {
+      if (!isMeaningfulLine(lines[i])) continue;
       const stripped = stripComment(lines[i], 'node');
-      if (NODE_SUCCESS_EXIT_RE.test(stripped)) hasSuccessExit = true;
-      if (NODE_FAILURE_EXIT_RE.test(stripped)) hasFailureExit = true;
+      if (/^['"]use strict['"]/.test(stripped.trim())) continue;
+      return false;
     }
-    if (hasSuccessExit && !hasFailureExit) {
-      findings.push({
-        result: 'fail',
-        ruleId: 'SP003',
-        path: relPath,
-        line: ifIdx + 1,
-        reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
-      });
-    } else if (!hasSuccessExit && !hasFailureExit && countMeaningfulLines(lines, start, end) <= FLAT_IF_MAX_MEANINGFUL) {
-      findings.push({
-        result: 'fail',
-        ruleId: 'SP003',
-        path: relPath,
-        line: ifIdx + 1,
-        reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
-      });
-    }
-  }
-  return findings;
-}
-
-function getNodeBranchRange(lines, idx) {
-  let start = idx;
-  for (let i = idx; i >= 0; i -= 1) {
-    const stripped = stripComment(lines[i], 'node');
-    if (/\bif\s*\(/.test(stripped)) {
-      start = i;
-      break;
-    }
-  }
-
-  let depth = 0;
-  let started = false;
-  let end = start;
-  for (let i = start; i < lines.length; i += 1) {
-    const stripped = stripComment(lines[i], 'node');
-    for (const ch of stripped) {
-      if (ch === '{') {
-        depth += 1;
-        started = true;
-      } else if (ch === '}') {
-        depth -= 1;
+    for (let i = end + 1; i < lines.length; i += 1) {
+      if (!isMeaningfulLine(lines[i])) continue;
+      if (isLoneClosingBraceLine(lines[i], 'node')) continue;
+      if (allowTrailingFailureExit) {
+        const stripped = stripComment(lines[i], 'node');
+        if (NODE_FAILURE_EXIT_RE.test(stripped)) continue;
       }
+      return false;
     }
-    end = i;
-    if (started && depth <= 0) {
-      break;
-    }
+    return true;
   }
 
-  if (!started) {
-    end = Math.min(lines.length - 1, idx + 4);
+  for (let i = funcBody.bodyStart + 1; i < funcBody.bodyEnd; i += 1) {
+    if (!isMeaningfulLine(lines[i])) continue;
+    if (isLoneClosingBraceLine(lines[i], 'node')) continue;
+    if (i >= start && i <= end) continue;
+    if (i < start) return false;
+    if (allowTrailingFailureExit) {
+      const stripped = stripComment(lines[i], 'node');
+      if (NODE_FAILURE_EXIT_RE.test(stripped)) continue;
+    }
+    return false;
   }
-  return { start, end };
+  return true;
 }
 
-function analyzeNode(content, relPath) {
+function isLimitedImplicitReturnIf(lines, ifIdx) {
+  return isLimitedImplicitReturnIfCore(lines, ifIdx, true);
+}
+
+function isLimitedImplicitReturnIfStrict(lines, ifIdx) {
+  return isLimitedImplicitReturnIfCore(lines, ifIdx, false);
+}
+
+function buildNodeIfCandidate(lines, ifIdx, relPath) {
+  const ifCodeView = buildCodeView(stripComment(lines[ifIdx], 'node'));
+  const condition = extractIfCondition(ifCodeView);
+  const { start, end } = getNodeFlatIfRange(lines, ifIdx);
+  const meaningfulCount = countMeaningfulLines(lines, start, end);
+  const conditionComplex = condition !== null && !isSimpleNodeCondition(condition);
+  const interiorSimple = flatIfInteriorIsSimple(lines, start, end);
+  const hasElse = hasElseAfterFlatIf(lines, end);
+
+  const branchWindow = lines.slice(start, end + 1);
+  let hasSuccessExit = false;
+  let hasFailureExit = false;
+  for (const branchLine of branchWindow) {
+    const stripped = stripComment(branchLine, 'node');
+    if (NODE_SUCCESS_EXIT_RE.test(stripped)) hasSuccessExit = true;
+    if (NODE_FAILURE_EXIT_RE.test(stripped)) hasFailureExit = true;
+  }
+
+  return {
+    kind: 'node_if_absence',
+    path: relPath,
+    line: ifIdx + 1,
+    meaningfulCount,
+    conditionComplex,
+    interiorSimple,
+    hasElse,
+    hasSuccessExit,
+    hasFailureExit,
+    looseOk: isLimitedImplicitReturnIf(lines, ifIdx),
+    strictOk: isLimitedImplicitReturnIfStrict(lines, ifIdx),
+  };
+}
+
+function extractNodeCandidates(content, relPath) {
   const lines = content.split(/\r?\n/);
-  const findings = [];
+  const candidates = [];
 
   const isTestLike = isNodeTestLikePath(relPath);
-  const looksLikeCheckCode =
-    CHECK_PURPOSE_RE.test(content) || lines.some((line) => hasAbsenceTerm(line));
+  const looksLikeCheckCode = CHECK_PURPOSE_RE.test(content);
   if (!isTestLike && !looksLikeCheckCode) {
-    return findings;
+    return candidates;
   }
 
-  findings.push(...detectLimitedImplicitReturn(lines, relPath));
+  const seenIfIdx = new Set();
 
   for (let idx = 0; idx < lines.length; idx += 1) {
-    const lineNo = idx + 1;
-    const rawLine = lines[idx];
-    const line = stripComment(rawLine, 'node');
-    const codeView = buildCodeView(line);
-
-    if (!hasAbsenceTerm(rawLine)) continue;
+    if (!hasAbsenceTerm(lines[idx])) continue;
 
     let ifIdx = idx;
+    const codeView = buildCodeView(stripComment(lines[idx], 'node'));
     if (!/\bif\s*\(/.test(codeView)) {
+      let found = -1;
       for (let back = idx; back >= Math.max(0, idx - 6); back -= 1) {
         const backView = buildCodeView(stripComment(lines[back], 'node'));
         if (/\bif\s*\(/.test(backView)) {
-          ifIdx = back;
+          found = back;
           break;
         }
       }
+      if (found === -1) continue;
+      ifIdx = found;
     }
 
-    const ifCodeView = buildCodeView(stripComment(lines[ifIdx], 'node'));
-    const condition = extractIfCondition(ifCodeView);
-    const { start, end } = getNodeFlatIfRange(lines, ifIdx);
-    const meaningfulCount = countMeaningfulLines(lines, start, end);
-    if (meaningfulCount > FLAT_IF_MAX_MEANINGFUL) {
-      findings.push({
-        result: 'unknown',
-        ruleId: 'SP003',
-        path: relPath,
-        line: lineNo,
-        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
-      });
-      continue;
-    }
+    if (seenIfIdx.has(ifIdx)) continue;
+    seenIfIdx.add(ifIdx);
 
-    const branchWindow = lines.slice(start, end + 1);
-
-    if (condition && !isSimpleNodeCondition(condition)) {
-      findings.push({
-        result: 'unknown',
-        ruleId: 'SP003',
-        path: relPath,
-        line: lineNo,
-        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
-      });
-      continue;
-    }
-
-    if (!flatIfInteriorIsSimple(lines, start, end) || hasElseAfterFlatIf(lines, end)) {
-      findings.push({
-        result: 'unknown',
-        ruleId: 'SP003',
-        path: relPath,
-        line: lineNo,
-        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
-      });
-      continue;
-    }
-
-    let hasSuccessExit = false;
-    let hasFailureExit = false;
-    for (const branchLine of branchWindow) {
-      const stripped = stripComment(branchLine, 'node');
-      if (NODE_SUCCESS_EXIT_RE.test(stripped)) hasSuccessExit = true;
-      if (NODE_FAILURE_EXIT_RE.test(stripped)) hasFailureExit = true;
-    }
-
-    if (hasSuccessExit && !hasFailureExit) {
-      if (!isLimitedImplicitReturnIf(lines, ifIdx)) {
-        findings.push({
-          result: 'unknown',
-          ruleId: 'SP003',
-          path: relPath,
-          line: lineNo,
-          reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
-        });
-        continue;
-      }
-      findings.push({
-        result: 'fail',
-        ruleId: 'SP003',
-        path: relPath,
-        line: lineNo,
-        reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
-      });
-      continue;
-    }
-
-    if (!hasFailureExit && !tracksReturnInBranch(branchWindow)) {
-      if (!hasSuccessExit && isLimitedImplicitReturnIf(lines, ifIdx)) {
-        findings.push({
-          result: 'fail',
-          ruleId: 'SP003',
-          path: relPath,
-          line: lineNo,
-          reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
-        });
-        continue;
-      }
-      findings.push({
-        result: 'unknown',
-        ruleId: 'SP003',
-        path: relPath,
-        line: lineNo,
-        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
-      });
-    }
+    candidates.push(buildNodeIfCandidate(lines, ifIdx, relPath));
   }
 
-  return findings;
+  return candidates;
 }
 
-function tracksReturnInBranch(branchLines) {
-  const block = branchLines.map((line) => stripComment(line, 'node')).join('\n');
-  return /\bprocess\.exit\s*\(|process\.exitCode\s*=|throw\b/.test(block);
+function classifyNodeCandidate(c) {
+  if (c.meaningfulCount > FLAT_IF_MAX_MEANINGFUL) {
+    return { result: 'unknown', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join('') };
+  }
+  if (c.conditionComplex) {
+    return { result: 'unknown', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join('') };
+  }
+  if (!c.interiorSimple || c.hasElse) {
+    return { result: 'unknown', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join('') };
+  }
+  if (c.hasSuccessExit) {
+    if (c.looseOk) {
+      return { result: 'fail', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_returns_success'].join('') };
+    }
+    return { result: 'unknown', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join('') };
+  }
+  if (c.hasFailureExit) {
+    return null;
+  }
+  if (c.strictOk) {
+    return { result: 'fail', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_returns_success'].join('') };
+  }
+  return { result: 'unknown', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join('') };
 }
 
-function isWorkflowTestStep(stepName, runLine, usesLine) {
-  if (stepName && WORKFLOW_TEST_STEP_RE.test(stepName)) return true;
-  if (runLine && (WORKFLOW_TEST_STEP_RE.test(runLine) || CHECK_PURPOSE_RE.test(runLine))) {
-    return true;
-  }
-  if (usesLine && (WORKFLOW_TEST_STEP_RE.test(usesLine) || CHECK_PURPOSE_RE.test(usesLine))) {
-    return true;
-  }
-  return false;
+// ---------------------------------------------------------------------------
+// SP004: Workflow / action YAML — 候補抽出
+// ---------------------------------------------------------------------------
+
+function isWorkflowScopePath(relPath) {
+  return (
+    /(?:^|\/)\.github\/workflows\/[^/]+\.ya?ml$/i.test(relPath) ||
+    /(?:^|\/)action\.ya?ml$/i.test(relPath)
+  );
 }
 
 function noteStepKey(block, seenKeys, key) {
@@ -832,6 +798,13 @@ function noteStepKey(block, seenKeys, key) {
     block.hasDuplicateKey = true;
   }
   seenKeys.add(key);
+}
+
+function markAnchorAliasIfPresent(block, line) {
+  if (/:\s*&[A-Za-z0-9_]+\s*$/.test(line)) block.hasAnchorAlias = true;
+  if (/:\s*\*[A-Za-z0-9_]+\s*$/.test(line)) block.hasAnchorAlias = true;
+  if (/^\s*<<:\s*\*[A-Za-z0-9_]+/.test(line)) block.hasAnchorAlias = true;
+  if (/^\s*-\s*\*[A-Za-z0-9_]+\s*$/.test(line)) block.hasAnchorAlias = true;
 }
 
 function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, runBodyIndent) {
@@ -847,6 +820,7 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
     hasFoldedRun: false,
     hasChompingRun: false,
     hasExpression: false,
+    hasAnchorAlias: false,
   };
 
   const seenKeys = new Set();
@@ -854,6 +828,7 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
   const listLine = lines[startIdx];
   const listInlineRun = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*(.+)$`));
   if (listInlineRun) {
+    noteStepKey(block, seenKeys, 'run');
     const value = listInlineRun[1].trim();
     if (value === '|' || value === '|-' || value === '|+') {
       if (value === '|-' || value === '|+') block.hasChompingRun = true;
@@ -867,6 +842,7 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
     new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*\\|(?:-\\+)?\\s*$`),
   );
   if (listInlineBlock) {
+    noteStepKey(block, seenKeys, 'run');
     for (let j = startIdx + 1; j < endIdx; j += 1) {
       const bodyLine = lines[j];
       const bodyIndent = lineIndent(bodyLine);
@@ -900,6 +876,8 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
   );
   if (listInlineContinue) block.continueOnError = true;
 
+  markAnchorAliasIfPresent(block, listLine);
+
   for (let i = startIdx; i < endIdx; i += 1) {
     const line = lines[i];
     const indent = lineIndent(line);
@@ -916,6 +894,7 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
 
     if (/\$\{\{/.test(line)) block.hasExpression = true;
     if (/^\t/.test(line)) block.hasDisallowedKey = true;
+    if (i !== startIdx) markAnchorAliasIfPresent(block, line);
 
     const nameMatch = line.match(new RegExp(`^\\s{${stepKeyIndent}}name:\\s*(.+)\\s*$`));
     if (nameMatch) block.name = nameMatch[1];
@@ -963,7 +942,7 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
     if (keyMatch) {
       const key = keyMatch[1];
       noteStepKey(block, seenKeys, key);
-      if (!['name', 'id', 'run', 'uses', 'continue-on-error', 'shell'].includes(key)) {
+      if (!WORKFLOW_ALLOWED_STEP_KEYS.includes(key)) {
         block.hasDisallowedKey = true;
       }
     }
@@ -1086,7 +1065,8 @@ function jobHasDynamicMatrix(jobLines) {
   return false;
 }
 
-function evaluateJobLevelWorkflow(lines, relPath, findings) {
+function extractJobLevelCandidates(lines, relPath) {
+  const candidates = [];
   for (let i = 0; i < lines.length; i += 1) {
     const jobMatch = lines[i].match(/^  ([A-Za-z_][A-Za-z0-9_-]*):\s*$/);
     if (!jobMatch) continue;
@@ -1107,98 +1087,170 @@ function evaluateJobLevelWorkflow(lines, relPath, findings) {
     if (!jobHasTestPurpose(jobLines)) continue;
 
     if (jobLines.some((jobLine) => /^    uses:\s/.test(jobLine))) {
-      findings.push({
-        result: 'unknown',
-        ruleId: 'SP004',
-        path: relPath,
-        line: i + 1,
-        reason: 'workflow_reusable_job_unproven',
-      });
+      candidates.push({ kind: 'workflow_job_reusable', path: relPath, line: i + 1 });
     }
-
     if (jobHasDynamicMatrix(jobLines)) {
-      findings.push({
-        result: 'unknown',
-        ruleId: 'SP004',
-        path: relPath,
-        line: i + 1,
-        reason: 'workflow_dynamic_matrix_unproven',
-      });
+      candidates.push({ kind: 'workflow_job_matrix', path: relPath, line: i + 1 });
     }
   }
+  return candidates;
 }
 
-function evaluateStepBlock(block, relPath, findings) {
-  const stepName = block.name || block.id;
+function isWorkflowTestStep(name, id, runText, usesText) {
+  if (name && WORKFLOW_TEST_STEP_RE.test(name)) return true;
+  if (id && WORKFLOW_TEST_STEP_RE.test(id)) return true;
+  if (runText && (WORKFLOW_TEST_STEP_RE.test(runText) || CHECK_PURPOSE_RE.test(runText))) return true;
+  if (usesText && (WORKFLOW_TEST_STEP_RE.test(usesText) || CHECK_PURPOSE_RE.test(usesText))) return true;
+  return false;
+}
+
+function buildWorkflowStepCandidate(block, relPath) {
   const runText = block.runLines.map((entry) => entry.text).join('\n');
-  const isTestStep = isWorkflowTestStep(stepName, runText, block.uses);
+  const isTestStep = isWorkflowTestStep(block.name, block.id, runText, block.uses);
+  const suppressed = block.runLines.some(
+    (entry) => CHECK_PURPOSE_RE.test(entry.text) && SP001_SUPPRESS_RE.test(entry.text),
+  );
 
-  if (!isTestStep) return;
-
-  if (block.hasDisallowedKey || block.hasDuplicateKey || block.hasFoldedRun || block.hasChompingRun || block.hasExpression) {
-    findings.push({
-      result: 'unknown',
-      ruleId: 'SP004',
-      path: relPath,
-      line: block.startLine,
-      reason: 'workflow_structure_unsupported',
-    });
-    return;
-  }
-
-  if (block.continueOnError) {
-    findings.push({
-      result: 'fail',
-      ruleId: 'SP004',
-      path: relPath,
-      line: block.startLine,
-      reason: 'workflow_continue_on_error',
-    });
-  }
-
-  if (block.uses) {
-    findings.push({
-      result: 'unknown',
-      ruleId: 'SP004',
-      path: relPath,
-      line: block.startLine,
-      reason: 'workflow_delegated_failure_contract_unproven',
-    });
-  }
-
-  for (const runEntry of block.runLines) {
-    inspectWorkflowRunLine(runEntry.text, relPath, runEntry.lineNo, stepName, findings);
-  }
+  return {
+    kind: 'workflow_step',
+    path: relPath,
+    line: block.startLine,
+    isTestStep,
+    hasStructuralIssue:
+      block.hasDisallowedKey ||
+      block.hasDuplicateKey ||
+      block.hasFoldedRun ||
+      block.hasChompingRun ||
+      block.hasExpression ||
+      block.hasAnchorAlias,
+    continueOnError: block.continueOnError,
+    hasUses: Boolean(block.uses),
+    suppressed,
+  };
 }
 
-function analyzeWorkflow(content, relPath) {
+function extractWorkflowCandidates(content, relPath) {
+  if (!isWorkflowScopePath(relPath)) return [];
+
   const lines = content.split(/\r?\n/);
-  const findings = [];
   const isAction = /(?:^|\/)action\.ya?ml$/i.test(relPath);
+  const candidates = [];
 
   const stepBlocks = isAction ? collectCompositeStepBlocks(lines) : collectWorkflowStepBlocks(lines);
   for (const entry of stepBlocks) {
-    evaluateStepBlock(entry.block, relPath, findings);
+    candidates.push(buildWorkflowStepCandidate(entry.block, relPath));
   }
 
   if (!isAction) {
-    evaluateJobLevelWorkflow(lines, relPath, findings);
+    candidates.push(...extractJobLevelCandidates(lines, relPath));
   }
 
+  return candidates;
+}
+
+function classifyWorkflowStepCandidate(c) {
+  if (!c.isTestStep) return null;
+
+  if (c.continueOnError || c.suppressed) {
+    return {
+      result: 'fail',
+      ruleId: 'SP004',
+      reason: c.continueOnError ? 'workflow_continue_on_error' : 'workflow_shell_success_suppression',
+    };
+  }
+  if (c.hasStructuralIssue) {
+    return { result: 'unknown', ruleId: 'SP004', reason: 'workflow_structure_unsupported' };
+  }
+  if (c.hasUses) {
+    return { result: 'unknown', ruleId: 'SP004', reason: 'workflow_delegated_failure_contract_unproven' };
+  }
+  return null;
+}
+
+function classifyWorkflowCandidate(c) {
+  if (c.kind === 'workflow_step') return classifyWorkflowStepCandidate(c);
+  if (c.kind === 'workflow_job_reusable') {
+    return { result: 'unknown', ruleId: 'SP004', reason: 'workflow_reusable_job_unproven' };
+  }
+  if (c.kind === 'workflow_job_matrix') {
+    return { result: 'unknown', ruleId: 'SP004', reason: 'workflow_dynamic_matrix_unproven' };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// aggregator: 候補 → finding
+// ---------------------------------------------------------------------------
+
+function aggregateCandidates(candidates, classifyFn, relPath) {
+  const findings = [];
+  for (const candidate of candidates) {
+    const verdict = classifyFn(candidate);
+    if (!verdict) continue;
+    findings.push({
+      result: verdict.result,
+      ruleId: verdict.ruleId,
+      path: candidate.path || relPath,
+      line: candidate.line,
+      reason: verdict.reason,
+    });
+  }
   return findings;
 }
 
-function inspectWorkflowRunLine(runLine, relPath, lineNo, stepName, findings) {
-  if (!isWorkflowTestStep(stepName, runLine)) return;
-  if (CHECK_PURPOSE_RE.test(runLine) && SP001_SUPPRESS_RE.test(runLine)) {
-    findings.push({
-      result: 'fail',
-      ruleId: 'SP004',
-      path: relPath,
-      line: lineNo,
-      reason: 'workflow_shell_success_suppression',
-    });
+function analyzeShell(content, relPath) {
+  const candidates = extractShellCandidates(content, relPath);
+  return aggregateCandidates(candidates, classifyShellCandidate, relPath);
+}
+
+function analyzeNode(content, relPath) {
+  const candidates = extractNodeCandidates(content, relPath);
+  return aggregateCandidates(candidates, classifyNodeCandidate, relPath);
+}
+
+function analyzeWorkflow(content, relPath) {
+  const candidates = extractWorkflowCandidates(content, relPath);
+  return aggregateCandidates(candidates, classifyWorkflowCandidate, relPath);
+}
+
+function tracksReturnInBranch(branchLines) {
+  const block = branchLines.map((line) => stripComment(line, 'node')).join('\n');
+  return /\bprocess\.exit\s*\(|process\.exitCode\s*=|throw\b/.test(block);
+}
+
+function getNodeBranchRange(lines, idx) {
+  let start = idx;
+  for (let i = idx; i >= 0; i -= 1) {
+    const stripped = stripComment(lines[i], 'node');
+    if (/\bif\s*\(/.test(stripped)) {
+      start = i;
+      break;
+    }
   }
+
+  let depth = 0;
+  let started = false;
+  let end = start;
+  for (let i = start; i < lines.length; i += 1) {
+    const stripped = stripComment(lines[i], 'node');
+    for (const ch of stripped) {
+      if (ch === '{') {
+        depth += 1;
+        started = true;
+      } else if (ch === '}') {
+        depth -= 1;
+      }
+    }
+    end = i;
+    if (started && depth <= 0) {
+      break;
+    }
+  }
+
+  if (!started) {
+    end = Math.min(lines.length - 1, idx + 4);
+  }
+  return { start, end };
 }
 
 function analyzeFile(relPath, content) {
@@ -1421,6 +1473,11 @@ module.exports = {
   isSimpleNodeCondition,
   getEnclosingFunctionBody,
   isLimitedImplicitReturnIf,
+  isLimitedImplicitReturnIfStrict,
   isLoneClosingBraceLine,
+  extractShellCandidates,
+  extractNodeCandidates,
+  extractWorkflowCandidates,
+  isWorkflowScopePath,
   RESULT_HEADER,
 };

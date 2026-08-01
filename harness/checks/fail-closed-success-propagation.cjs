@@ -34,7 +34,7 @@ const PROPAGATION_PROOF_RE =
   /\|\|\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|&&\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|;\s*then\s+(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/;
 const IF_NOT_RE = /^\s*if\s+!\s+/;
 const EXTERNAL_CMD_RE =
-  /^\s*(?:[A-Za-z_][\w]*=.*&&\s*)?(?:sleep|curl|wget|git|node|python|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
+  /^\s*(?:[A-Za-z_][\w]*=.*&&\s*)?(?:sleep|curl|wget|git|node|python3?|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
 const SKIP_TERM_PARTS = ['sk', 'ip', 'ped'];
@@ -49,7 +49,7 @@ const SKIP_TERMS_RE = new RegExp(
 const NODE_SUCCESS_EXIT_RE =
   /^\s*(?:return\s*;?|return\s+Promise\.resolve\s*\(|process\.exit\s*\(\s*0\s*\)|process\.exitCode\s*=\s*0)/;
 const NODE_FAILURE_EXIT_RE =
-  /^\s*(?:throw\b|process\.exit\s*\(\s*[1-9]\d*\s*\)|process\.exitCode\s*=\s*[1-9]\d*)\b/;
+  /^\s*(?:throw\b|process\.exit\s*\(\s*[1-9]\d*\s*\)\s*;?|process\.exitCode\s*=\s*[1-9]\d*)\s*;?/;
 const WORKFLOW_TEST_STEP_RE =
   /\b(tests?|check|verify|lint|fail-closed)\b/i;
 
@@ -234,7 +234,68 @@ function absenceTermOutsideStrings(line) {
 
 function isSimpleNodeCondition(conditionText) {
   const normalized = conditionText.trim().replace(/\s+/g, ' ');
+  if (/[()]/.test(normalized)) return false;
   return SIMPLE_NODE_CONDITION_RE.test(normalized);
+}
+
+function getEnclosingFunctionBody(lines, idx) {
+  let funcLine = -1;
+  for (let i = idx; i >= 0; i -= 1) {
+    const codeView = buildCodeView(stripComment(lines[i], 'node'));
+    if (/\bfunction\b/.test(codeView)) {
+      funcLine = i;
+      break;
+    }
+  }
+  if (funcLine === -1) return null;
+
+  let bodyStart = -1;
+  let bodyEnd = -1;
+  let depth = 0;
+  for (let i = funcLine; i < lines.length; i += 1) {
+    const view = buildCodeView(stripComment(lines[i], 'node'));
+    for (const ch of view) {
+      if (ch === '{') {
+        depth += 1;
+        if (bodyStart === -1) bodyStart = i;
+      } else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          bodyEnd = i;
+          break;
+        }
+      }
+    }
+    if (bodyEnd !== -1) break;
+  }
+  if (bodyStart === -1 || bodyEnd === -1) return null;
+  return { funcLine, bodyStart, bodyEnd };
+}
+
+function isOnlyFlatIfInFunctionBody(lines, ifStart, ifEnd, bodyStart, bodyEnd) {
+  for (let i = bodyStart + 1; i < bodyEnd; i += 1) {
+    if (!isMeaningfulLine(lines[i])) continue;
+    if (i < ifStart || i > ifEnd) return false;
+  }
+  return true;
+}
+
+function isComplexImplicitReturnContext(lines, ifIdx, ifStart, ifEnd) {
+  const funcBody = getEnclosingFunctionBody(lines, ifIdx);
+  if (!funcBody) return false;
+
+  for (let i = funcBody.bodyStart + 1; i < ifStart; i += 1) {
+    if (isMeaningfulLine(lines[i])) return true;
+  }
+
+  for (let i = ifEnd + 1; i < funcBody.bodyEnd; i += 1) {
+    if (!isMeaningfulLine(lines[i])) continue;
+    const stripped = stripComment(lines[i], 'node');
+    if (NODE_FAILURE_EXIT_RE.test(stripped)) continue;
+    return true;
+  }
+
+  return false;
 }
 
 function stripComment(line, kind) {
@@ -606,6 +667,16 @@ function analyzeNode(content, relPath) {
     }
 
     if (hasSuccessExit && !hasFailureExit) {
+      if (isComplexImplicitReturnContext(lines, ifIdx, start, end)) {
+        findings.push({
+          result: 'unknown',
+          ruleId: 'SP003',
+          path: relPath,
+          line: lineNo,
+          reason: ['node_', 'skip', '_propagation_unproven'].join(''),
+        });
+        continue;
+      }
       findings.push({
         result: 'fail',
         ruleId: 'SP003',
@@ -1151,5 +1222,7 @@ module.exports = {
   hasAbsenceTerm,
   absenceTermOutsideStrings,
   isSimpleNodeCondition,
+  getEnclosingFunctionBody,
+  isComplexImplicitReturnContext,
   RESULT_HEADER,
 };

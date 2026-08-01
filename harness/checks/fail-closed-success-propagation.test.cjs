@@ -887,6 +887,75 @@ test('AC3 pass: gift/different/classify 識別子は禁止token非該当', () =>
   assert.equal(findings.length, 0);
 });
 
+test('AC3 pass: 文字列内の if は禁止token非該当', () => {
+  const status = ['sk', 'ipped'].join('');
+  const findings = checker.analyzeNode(
+    `if (!tool) {\n  console.log('${status} if note');\n  process.exit(1);\n}\n`,
+    'harness/checks/example.test.cjs',
+  );
+  assert.equal(findings.length, 0);
+});
+
+test('AC3 blocked: function call condition は SP003 unknown', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['tool ', 'un', 'available'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+if (!isReady()) {
+  console.log('${status}: ${reason}');
+  process.exit(1);
+}
+`,
+      'function call condition',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(!result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: 複雑implicit return は SP003 unknown', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['bash ', 'un', 'available'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+function runShellTest() {
+  prepare();
+  if (!process.env.HAS_BASH) {
+    console.log('${status}: ${reason}');
+    return;
+  }
+  process.exit(1);
+}
+runShellTest();
+`,
+      'complex implicit return',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(result.lines.includes('reason=node_skip_propagation_unproven'));
+    assert.ok(!result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test('AC3 blocked: reusable workflow job uses は SP004 unknown', () => {
   const dir = makeRepo();
   try {

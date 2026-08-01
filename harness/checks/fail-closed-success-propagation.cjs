@@ -31,19 +31,43 @@ const SIMPLE_NODE_CONDITION_RE =
   /^(?:!)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$|^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*(?:===|!==|==|!=)\s*(?:true|false|null|undefined|\d+)$/;
 const EXIT_STATUS_CHECK_RE = /\$?\?|PIPESTATUS/;
 const PROPAGATION_PROOF_RE =
-  /\|\|\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|&&\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|;\s*then\s+(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/;
+  /\|\|\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|;\s*then\s+(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/;
+const FLAT_IF_MAX_MEANINGFUL = 8;
+const ERREXIT_CONTRACT_MAX_MEANINGFUL = 3;
 const IF_NOT_RE = /^\s*if\s+!\s+/;
 const EXTERNAL_CMD_RE =
   /^\s*(?:[A-Za-z_][\w]*=.*&&\s*)?(?:sleep|curl|wget|git|node|python3?|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
-const SKIP_TERM_PARTS = ['sk', 'ip', 'ped'];
-const UNAVAILABLE_PARTS = ['un', 'avail', 'able'];
-const CANNOT_RUN_PARTS = ['cannot', ' run'];
-const CANT_RUN_PARTS = ['can', "'", 't run'];
-const PREREQUISITE_PARTS = ['prere', 'quisite'];
+const ABSENCE_TERM_PARTS = [
+  ['sk', 'ip'],
+  ['sk', 'ip', 'ped'],
+  ['un', 'avail', 'able'],
+  ['cannot', ' run'],
+  ['can', "'", 't run'],
+  ['prere', 'quisite'],
+  ['bash', ' un', 'avail', 'able'],
+  ['shell', ' un', 'avail', 'able'],
+  ['runtime', ' un', 'avail', 'able'],
+  ['tool', ' un', 'avail', 'able'],
+  ['bash', ' miss', 'ing'],
+  ['shell', ' miss', 'ing'],
+  ['runtime', ' miss', 'ing'],
+  ['tool', ' miss', 'ing'],
+  ['no', ' bash'],
+  ['no', ' shell'],
+  ['no', ' runtime'],
+  ['no', ' tool'],
+];
 const SKIP_TERMS_RE = new RegExp(
-  `\\b(${SKIP_TERM_PARTS.join('')}|${UNAVAILABLE_PARTS.join('')}|${CANNOT_RUN_PARTS.join('')}|${CANT_RUN_PARTS.join('')}|${PREREQUISITE_PARTS.join('')})\\b`,
+  ABSENCE_TERM_PARTS.map((parts) => {
+    const joined = parts.join('');
+    const escaped = joined.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!/\s/.test(joined)) {
+      return `\\b${escaped}\\b`;
+    }
+    return `\\b${escaped.replace(/\s+/g, '\\s+')}\\b`;
+  }).join('|'),
   'i',
 );
 const NODE_SUCCESS_EXIT_RE =
@@ -210,6 +234,18 @@ function isMeaningfulLine(line) {
   return trimmed.length > 0 && !trimmed.startsWith('#');
 }
 
+function isShebangLine(line) {
+  return /^\s*#!/.test(line);
+}
+
+function countMeaningfulLines(lines, start, end) {
+  let count = 0;
+  for (let i = start; i <= end; i += 1) {
+    if (isMeaningfulLine(lines[i])) count += 1;
+  }
+  return count;
+}
+
 function buildCodeView(line) {
   let view = line;
   const slash = view.indexOf('//');
@@ -272,30 +308,51 @@ function getEnclosingFunctionBody(lines, idx) {
   return { funcLine, bodyStart, bodyEnd };
 }
 
-function isOnlyFlatIfInFunctionBody(lines, ifStart, ifEnd, bodyStart, bodyEnd) {
-  for (let i = bodyStart + 1; i < bodyEnd; i += 1) {
-    if (!isMeaningfulLine(lines[i])) continue;
-    if (i < ifStart || i > ifEnd) return false;
-  }
-  return true;
+function isLoneClosingBraceLine(line, kind) {
+  return /^\s*}\s*($|[#;])/.test(stripComment(line, kind));
 }
 
-function isComplexImplicitReturnContext(lines, ifIdx, ifStart, ifEnd) {
-  const funcBody = getEnclosingFunctionBody(lines, ifIdx);
-  if (!funcBody) return false;
-
-  for (let i = funcBody.bodyStart + 1; i < ifStart; i += 1) {
-    if (isMeaningfulLine(lines[i])) return true;
+function isLimitedImplicitReturnIf(lines, ifIdx) {
+  const { start, end } = getNodeFlatIfRange(lines, ifIdx);
+  let hasTermInBlock = false;
+  for (let i = start; i <= end; i += 1) {
+    if (hasAbsenceTerm(lines[i])) {
+      hasTermInBlock = true;
+      break;
+    }
   }
+  if (!hasTermInBlock) return false;
+  if (!flatIfInteriorIsSimple(lines, start, end)) return false;
+  if (hasElseAfterFlatIf(lines, end)) return false;
+  if (countMeaningfulLines(lines, start, end) > FLAT_IF_MAX_MEANINGFUL) return false;
 
-  for (let i = ifEnd + 1; i < funcBody.bodyEnd; i += 1) {
-    if (!isMeaningfulLine(lines[i])) continue;
-    const stripped = stripComment(lines[i], 'node');
-    if (NODE_FAILURE_EXIT_RE.test(stripped)) continue;
+  const funcBody = getEnclosingFunctionBody(lines, ifIdx);
+  if (!funcBody) {
+    for (let i = 0; i < ifIdx; i += 1) {
+      if (!isMeaningfulLine(lines[i])) continue;
+      const stripped = stripComment(lines[i], 'node');
+      if (/^['"]use strict['"]/.test(stripped.trim())) continue;
+      return false;
+    }
+    for (let i = end + 1; i < lines.length; i += 1) {
+      if (!isMeaningfulLine(lines[i])) continue;
+      if (isLoneClosingBraceLine(lines[i], 'node')) continue;
+      return false;
+    }
     return true;
   }
 
-  return false;
+  for (let i = funcBody.bodyStart + 1; i < funcBody.bodyEnd; i += 1) {
+    if (!isMeaningfulLine(lines[i])) continue;
+    if (isLoneClosingBraceLine(lines[i], 'node')) continue;
+    if (i >= start && i <= end) continue;
+    if (i < start) return false;
+    const stripped = stripComment(lines[i], 'node');
+    if (NODE_FAILURE_EXIT_RE.test(stripped)) continue;
+    return false;
+  }
+
+  return true;
 }
 
 function stripComment(line, kind) {
@@ -313,21 +370,27 @@ function stripComment(line, kind) {
 function analyzeShell(content, relPath) {
   const lines = content.split(/\r?\n/);
   const findings = [];
-  let errexitEnabled = false;
+  let errexitInContract = false;
   let errexitDisabled = false;
+  let meaningfulBeforeCommand = 0;
 
   for (let idx = 0; idx < lines.length; idx += 1) {
     const lineNo = idx + 1;
     const rawLine = lines[idx];
     const line = stripComment(rawLine, 'shell').trimEnd();
     if (line.trim().length === 0) continue;
+    if (isShebangLine(line)) continue;
 
-    if (SET_MINUS_E_RE.test(line)) {
-      errexitEnabled = true;
-      errexitDisabled = false;
+    if (isMeaningfulLine(rawLine)) {
+      meaningfulBeforeCommand += 1;
+      if (SET_MINUS_E_RE.test(line) && meaningfulBeforeCommand <= ERREXIT_CONTRACT_MAX_MEANINGFUL) {
+        errexitInContract = true;
+        errexitDisabled = false;
+      }
     }
     if (SET_PLUS_E_RE.test(line)) {
       errexitDisabled = true;
+      errexitInContract = false;
     }
 
     if (CHECK_PURPOSE_RE.test(line) && SP001_SUPPRESS_RE.test(line)) {
@@ -383,7 +446,7 @@ function analyzeShell(content, relPath) {
     if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
     if (!EXTERNAL_CMD_RE.test(line) && !/^\s*[A-Za-z_][\w-]*\s+/.test(line)) continue;
 
-    if (hasShellPropagationProof(lines, idx, errexitEnabled && !errexitDisabled)) {
+    if (hasShellPropagationProof(lines, idx, errexitInContract && !errexitDisabled)) {
       continue;
     }
 
@@ -399,38 +462,59 @@ function analyzeShell(content, relPath) {
   return findings;
 }
 
-function hasIfNotFailureStop(lines, idx) {
-  const block = lines
-    .slice(idx, Math.min(lines.length, idx + 8))
-    .map((line) => stripComment(line, 'shell'))
-    .join('\n');
-  if (!IF_NOT_RE.test(block)) return false;
-  return /\bthen\b[\s\S]*?(?:\bexit\s+(?!0\b)|\breturn\s+[1-9]\d*|\bfail_closed\b)/.test(block);
-}
-
-function hasShellPropagationProof(lines, idx, globalErrexit) {
+function findFlatIfNotBlock(lines, idx) {
+  let ifIdx = idx;
   const line = stripComment(lines[idx], 'shell');
-  if (globalErrexit) return true;
-  if (PROPAGATION_PROOF_RE.test(line)) return true;
-  if (hasIfNotFailureStop(lines, idx)) return true;
-  if (EXIT_STATUS_CHECK_RE.test(line)) return true;
-
-  const nextBlock = lines.slice(idx + 1, idx + 4).join('\n');
-  if (EXIT_STATUS_CHECK_RE.test(nextBlock)) return true;
-  if (/\b(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/.test(nextBlock) && /\$?\?/.test(nextBlock)) {
-    return true;
+  if (!IF_NOT_RE.test(line)) {
+    for (let back = idx; back >= Math.max(0, idx - 2); back -= 1) {
+      if (IF_NOT_RE.test(stripComment(lines[back], 'shell'))) {
+        ifIdx = back;
+        break;
+      }
+    }
+    if (!IF_NOT_RE.test(stripComment(lines[ifIdx], 'shell'))) return null;
   }
 
-  const prev = idx > 0 ? stripComment(lines[idx - 1], 'shell') : '';
-  if (/^\s*if\s+/.test(prev) && hasIfNotFailureStop(lines, idx - 1)) return true;
+  const ifIndent = lineIndent(lines[ifIdx]);
+  let fiIdx = -1;
+  let meaningful = 0;
+  for (let i = ifIdx; i < lines.length; i += 1) {
+    const stripped = stripComment(lines[i], 'shell');
+    if (isMeaningfulLine(lines[i])) meaningful += 1;
+    if (i > ifIdx && /^\s*fi\s*($|[#;])/.test(stripped) && lineIndent(lines[i]) === ifIndent) {
+      fiIdx = i;
+      break;
+    }
+    if (meaningful > FLAT_IF_MAX_MEANINGFUL) return null;
+  }
+  if (fiIdx === -1) return null;
+  return { ifIdx, fiIdx, meaningful };
+}
 
+function hasIfNotFailureStop(lines, idx) {
+  const block = findFlatIfNotBlock(lines, idx);
+  if (!block) return false;
+  for (let i = block.ifIdx; i < block.fiIdx; i += 1) {
+    const stripped = stripComment(lines[i], 'shell');
+    if (/^\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/.test(stripped)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasShellPropagationProof(lines, idx, errexitInContract) {
+  const line = stripComment(lines[idx], 'shell');
+  if (errexitInContract) return true;
+  if (PROPAGATION_PROOF_RE.test(line)) return true;
+  if (hasIfNotFailureStop(lines, idx)) return true;
   return false;
 }
 
 function isNodeTestLikePath(relPath) {
   return (
     /\.(?:test|spec)\.[cm]?js$/i.test(relPath) ||
-    /(?:^|\/)(?:__tests__|tests?)\//i.test(relPath)
+    /(?:^|\/)(?:__tests__|tests?|checks?)\//i.test(relPath)
   );
 }
 
@@ -528,21 +612,17 @@ function detectLimitedImplicitReturn(lines, relPath) {
     const ifIdx = meaningful[0];
     const ifCodeView = buildCodeView(stripComment(lines[ifIdx], 'node'));
     if (!/\bif\s*\(/.test(ifCodeView)) continue;
-    if (!hasAbsenceTerm(lines[ifIdx])) continue;
 
     const { start, end } = getNodeFlatIfRange(lines, ifIdx);
-    if (!flatIfInteriorIsSimple(lines, start, end)) continue;
-    if (hasElseAfterFlatIf(lines, end)) continue;
-
-    let onlyIfInBody = true;
-    for (let i = bodyStart + 1; i < bodyEnd; i += 1) {
-      if (!isMeaningfulLine(lines[i])) continue;
-      if (i < start || i > end) {
-        onlyIfInBody = false;
+    let hasTermInBlock = false;
+    for (let i = start; i <= end; i += 1) {
+      if (hasAbsenceTerm(lines[i])) {
+        hasTermInBlock = true;
         break;
       }
     }
-    if (!onlyIfInBody) continue;
+    if (!hasTermInBlock) continue;
+    if (!isLimitedImplicitReturnIf(lines, ifIdx)) continue;
 
     let hasSuccessExit = false;
     let hasFailureExit = false;
@@ -557,7 +637,15 @@ function detectLimitedImplicitReturn(lines, relPath) {
         ruleId: 'SP003',
         path: relPath,
         line: ifIdx + 1,
-        reason: ['node_', 'skip', '_returns_success'].join(''),
+        reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
+      });
+    } else if (!hasSuccessExit && !hasFailureExit && countMeaningfulLines(lines, start, end) <= FLAT_IF_MAX_MEANINGFUL) {
+      findings.push({
+        result: 'fail',
+        ruleId: 'SP003',
+        path: relPath,
+        line: ifIdx + 1,
+        reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
       });
     }
   }
@@ -634,6 +722,18 @@ function analyzeNode(content, relPath) {
     const ifCodeView = buildCodeView(stripComment(lines[ifIdx], 'node'));
     const condition = extractIfCondition(ifCodeView);
     const { start, end } = getNodeFlatIfRange(lines, ifIdx);
+    const meaningfulCount = countMeaningfulLines(lines, start, end);
+    if (meaningfulCount > FLAT_IF_MAX_MEANINGFUL) {
+      findings.push({
+        result: 'unknown',
+        ruleId: 'SP003',
+        path: relPath,
+        line: lineNo,
+        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
+      });
+      continue;
+    }
+
     const branchWindow = lines.slice(start, end + 1);
 
     if (condition && !isSimpleNodeCondition(condition)) {
@@ -642,7 +742,7 @@ function analyzeNode(content, relPath) {
         ruleId: 'SP003',
         path: relPath,
         line: lineNo,
-        reason: ['node_', 'skip', '_propagation_unproven'].join(''),
+        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
       });
       continue;
     }
@@ -653,7 +753,7 @@ function analyzeNode(content, relPath) {
         ruleId: 'SP003',
         path: relPath,
         line: lineNo,
-        reason: ['node_', 'skip', '_propagation_unproven'].join(''),
+        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
       });
       continue;
     }
@@ -667,13 +767,13 @@ function analyzeNode(content, relPath) {
     }
 
     if (hasSuccessExit && !hasFailureExit) {
-      if (isComplexImplicitReturnContext(lines, ifIdx, start, end)) {
+      if (!isLimitedImplicitReturnIf(lines, ifIdx)) {
         findings.push({
           result: 'unknown',
           ruleId: 'SP003',
           path: relPath,
           line: lineNo,
-          reason: ['node_', 'skip', '_propagation_unproven'].join(''),
+          reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
         });
         continue;
       }
@@ -682,18 +782,28 @@ function analyzeNode(content, relPath) {
         ruleId: 'SP003',
         path: relPath,
         line: lineNo,
-        reason: ['node_', 'skip', '_returns_success'].join(''),
+        reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
       });
       continue;
     }
 
     if (!hasFailureExit && !tracksReturnInBranch(branchWindow)) {
+      if (!hasSuccessExit && isLimitedImplicitReturnIf(lines, ifIdx)) {
+        findings.push({
+          result: 'fail',
+          ruleId: 'SP003',
+          path: relPath,
+          line: lineNo,
+          reason: ['node_', 'sk', 'ip', '_returns_success'].join(''),
+        });
+        continue;
+      }
       findings.push({
         result: 'unknown',
         ruleId: 'SP003',
         path: relPath,
         line: lineNo,
-        reason: ['node_', 'skip', '_propagation_unproven'].join(''),
+        reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join(''),
       });
     }
   }
@@ -706,12 +816,22 @@ function tracksReturnInBranch(branchLines) {
   return /\bprocess\.exit\s*\(|process\.exitCode\s*=|throw\b/.test(block);
 }
 
-function isWorkflowTestStep(stepName, runLine) {
+function isWorkflowTestStep(stepName, runLine, usesLine) {
   if (stepName && WORKFLOW_TEST_STEP_RE.test(stepName)) return true;
   if (runLine && (WORKFLOW_TEST_STEP_RE.test(runLine) || CHECK_PURPOSE_RE.test(runLine))) {
     return true;
   }
+  if (usesLine && (WORKFLOW_TEST_STEP_RE.test(usesLine) || CHECK_PURPOSE_RE.test(usesLine))) {
+    return true;
+  }
   return false;
+}
+
+function noteStepKey(block, seenKeys, key) {
+  if (seenKeys.has(key)) {
+    block.hasDuplicateKey = true;
+  }
+  seenKeys.add(key);
 }
 
 function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, runBodyIndent) {
@@ -723,21 +843,29 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
     uses: null,
     continueOnError: false,
     hasDisallowedKey: false,
+    hasDuplicateKey: false,
     hasFoldedRun: false,
+    hasChompingRun: false,
     hasExpression: false,
   };
+
+  const seenKeys = new Set();
 
   const listLine = lines[startIdx];
   const listInlineRun = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*(.+)$`));
   if (listInlineRun) {
     const value = listInlineRun[1].trim();
-    if (value.length > 0 && value !== '|' && value !== '|-' && value !== '>') {
+    if (value === '|' || value === '|-' || value === '|+') {
+      if (value === '|-' || value === '|+') block.hasChompingRun = true;
+    } else if (value.length > 0 && value !== '>') {
       block.runLines.push({ lineNo: startIdx + 1, text: value });
     }
     if (value === '>') block.hasFoldedRun = true;
   }
 
-  const listInlineBlock = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*\\|\\s*$`));
+  const listInlineBlock = listLine.match(
+    new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*\\|(?:-\\+)?\\s*$`),
+  );
   if (listInlineBlock) {
     for (let j = startIdx + 1; j < endIdx; j += 1) {
       const bodyLine = lines[j];
@@ -750,13 +878,22 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
   }
 
   const listInlineName = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+name:\\s*(.+)$`));
-  if (listInlineName) block.name = listInlineName[1].trim();
+  if (listInlineName) {
+    noteStepKey(block, seenKeys, 'name');
+    block.name = listInlineName[1].trim();
+  }
 
   const listInlineId = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+id:\\s*(.+)$`));
-  if (listInlineId) block.id = listInlineId[1].trim();
+  if (listInlineId) {
+    noteStepKey(block, seenKeys, 'id');
+    block.id = listInlineId[1].trim();
+  }
 
   const listInlineUses = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+uses:\\s*(.+)$`, 'i'));
-  if (listInlineUses) block.uses = listInlineUses[1].trim();
+  if (listInlineUses) {
+    noteStepKey(block, seenKeys, 'uses');
+    block.uses = listInlineUses[1].trim();
+  }
 
   const listInlineContinue = listLine.match(
     new RegExp(`^\\s{${stepListIndent}}-\\s+continue-on-error:\\s*(true|yes)\\s*$`, 'i'),
@@ -800,14 +937,18 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
     const inlineRun = line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*(.+)$`));
     if (inlineRun) {
       const value = inlineRun[1].trim();
-      if (value === '|' || value === '|-' || value === '>') {
-        block.hasFoldedRun = value === '>';
+      if (value === '|' || value === '|-' || value === '|+') {
+        if (value === '>') block.hasFoldedRun = true;
+        if (value === '|-' || value === '|+') block.hasChompingRun = true;
       } else if (value.length > 0) {
         block.runLines.push({ lineNo: i + 1, text: value });
       }
     }
 
-    if (line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*\\|`))) {
+    if (line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*\\|(?:-\\+)?\\s*$`))) {
+      if (/run:\s*\|-/.test(line) || /run:\s*\|\+/.test(line)) {
+        block.hasChompingRun = true;
+      }
       for (let j = i + 1; j < endIdx; j += 1) {
         const bodyLine = lines[j];
         const bodyIndent = lineIndent(bodyLine);
@@ -821,6 +962,7 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
     const keyMatch = line.match(new RegExp(`^\\s{${stepKeyIndent}}([A-Za-z0-9_-]+):`));
     if (keyMatch) {
       const key = keyMatch[1];
+      noteStepKey(block, seenKeys, key);
       if (!['name', 'id', 'run', 'uses', 'continue-on-error', 'shell'].includes(key)) {
         block.hasDisallowedKey = true;
       }
@@ -869,10 +1011,27 @@ function collectWorkflowStepBlocks(lines) {
 
 function collectCompositeStepBlocks(lines) {
   const blocks = [];
-  const isComposite = lines.some((line) => /^\s*using:\s*composite\s*$/i.test(line));
+  let runsIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^runs:\s*$/.test(lines[i])) {
+      runsIdx = i;
+      break;
+    }
+  }
+  if (runsIdx === -1) return blocks;
+
+  let isComposite = false;
+  for (let i = runsIdx + 1; i < lines.length; i += 1) {
+    if (lineIndent(lines[i]) === 0 && isMeaningfulLine(lines[i])) break;
+    if (/^  using:\s*composite\s*$/i.test(lines[i])) {
+      isComposite = true;
+      break;
+    }
+  }
   if (!isComposite) return blocks;
 
-  for (let i = 0; i < lines.length; i += 1) {
+  for (let i = runsIdx + 1; i < lines.length; i += 1) {
+    if (lineIndent(lines[i]) === 0 && isMeaningfulLine(lines[i])) break;
     if (!/^  steps:\s*$/.test(lines[i])) continue;
     let j = i + 1;
     while (j < lines.length) {
@@ -898,6 +1057,33 @@ function collectCompositeStepBlocks(lines) {
 function jobHasTestPurpose(jobLines) {
   const slice = jobLines.join('\n');
   return WORKFLOW_TEST_STEP_RE.test(slice) || CHECK_PURPOSE_RE.test(slice);
+}
+
+function jobHasDynamicMatrix(jobLines) {
+  let inStrategy = false;
+  let inMatrix = false;
+  for (const jobLine of jobLines) {
+    const indent = lineIndent(jobLine);
+    if (/^    strategy:\s*$/.test(jobLine)) {
+      inStrategy = true;
+      inMatrix = false;
+      continue;
+    }
+    if (inStrategy && indent <= 4 && /^    [A-Za-z_]/.test(jobLine) && !/^    strategy:/.test(jobLine)) {
+      inStrategy = false;
+      inMatrix = false;
+    }
+    if (!inStrategy) continue;
+    if (/^      matrix:/.test(jobLine)) {
+      inMatrix = true;
+      if (/\$\{\{/.test(jobLine) || /fromJSON\(/i.test(jobLine)) return true;
+      continue;
+    }
+    if (inMatrix && indent >= 8) {
+      if (/\$\{\{/.test(jobLine) || /fromJSON\(/i.test(jobLine)) return true;
+    }
+  }
+  return false;
 }
 
 function evaluateJobLevelWorkflow(lines, relPath, findings) {
@@ -930,8 +1116,7 @@ function evaluateJobLevelWorkflow(lines, relPath, findings) {
       });
     }
 
-    const jobText = jobLines.join('\n');
-    if (/matrix:/i.test(jobText) && (/\$\{\{/.test(jobText) || /fromJSON\(/i.test(jobText))) {
+    if (jobHasDynamicMatrix(jobLines)) {
       findings.push({
         result: 'unknown',
         ruleId: 'SP004',
@@ -946,11 +1131,11 @@ function evaluateJobLevelWorkflow(lines, relPath, findings) {
 function evaluateStepBlock(block, relPath, findings) {
   const stepName = block.name || block.id;
   const runText = block.runLines.map((entry) => entry.text).join('\n');
-  const isTestStep = isWorkflowTestStep(stepName, runText);
+  const isTestStep = isWorkflowTestStep(stepName, runText, block.uses);
 
   if (!isTestStep) return;
 
-  if (block.hasDisallowedKey || block.hasFoldedRun || block.hasExpression) {
+  if (block.hasDisallowedKey || block.hasDuplicateKey || block.hasFoldedRun || block.hasChompingRun || block.hasExpression) {
     findings.push({
       result: 'unknown',
       ruleId: 'SP004',
@@ -1030,15 +1215,26 @@ function analyzeFile(relPath, content) {
   return [];
 }
 
+function pickPrimaryFinding(findings, resultKind) {
+  const filtered = findings.filter((finding) => finding.result === resultKind);
+  if (filtered.length === 0) return null;
+  filtered.sort((a, b) => {
+    if (a.path !== b.path) return a.path.localeCompare(b.path);
+    if (a.line !== b.line) return a.line - b.line;
+    return a.ruleId.localeCompare(b.ruleId);
+  });
+  return filtered[0];
+}
+
 function pickOverallResult(findings) {
   if (findings.length === 0) {
     return { result: 'pass', primary: null };
   }
-  const unknown = findings.find((f) => f.result === 'unknown');
+  const unknown = pickPrimaryFinding(findings, 'unknown');
   if (unknown) {
     return { result: 'blocked', primary: unknown };
   }
-  const fail = findings.find((f) => f.result === 'fail');
+  const fail = pickPrimaryFinding(findings, 'fail');
   if (fail) {
     return { result: 'fail', primary: fail };
   }
@@ -1215,6 +1411,7 @@ module.exports = {
   listTargetChanges,
   hasTargetExtension,
   pickOverallResult,
+  pickPrimaryFinding,
   StopResult,
   UsageError,
   SYNTAX_CONTRACT,
@@ -1223,6 +1420,7 @@ module.exports = {
   absenceTermOutsideStrings,
   isSimpleNodeCondition,
   getEnclosingFunctionBody,
-  isComplexImplicitReturnContext,
+  isLimitedImplicitReturnIf,
+  isLoneClosingBraceLine,
   RESULT_HEADER,
 };

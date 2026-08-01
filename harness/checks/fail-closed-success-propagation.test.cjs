@@ -485,9 +485,10 @@ test('analyzeShell unit: if ! だけでは SP002 proof にならない', () => {
 });
 
 test('analyzeNode unit: Promise.resolve は skip-success として fail', () => {
-  const missing = ['un', 'available'].join('');
+  const status = ['sk', 'ipped'].join('');
+  const missing = ['un', 'avail', 'able'].join('');
   const findings = checker.analyzeNode(
-    `if (!tool) {\n  console.log('skipped: ${missing}');\n  return Promise.resolve();\n}\n`,
+    `if (!tool) {\n  console.log('${status}: ${missing}');\n  return Promise.resolve();\n}\n`,
     'harness/checks/example-verify.cjs',
   );
   assert.ok(findings.some((finding) => finding.reason === 'node_skip_returns_success'));
@@ -667,4 +668,432 @@ test('自checkerは path 除外せず、自己誤検出しない', () => {
 test('hasIfNotFailureStop unit: bare return は failure 停止ではない', () => {
   const lines = ['if ! npm test; then', '  echo failed', '  return', 'fi'];
   assert.equal(checker.hasIfNotFailureStop(lines, 0), false);
+});
+
+test('AC2: npm test || true は SP001 のみ（SP002=0）', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/check.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/check.sh',
+      '#!/bin/bash\nnpm test || true\n',
+      'suppress only sp001',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+    assert.ok(result.lines.includes('fail_count=1'));
+    assert.ok(result.lines.includes('unknown_count=0'));
+    assert.ok(!result.lines.some((line) => line.includes('rule_id=SP002')));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC2 pass候補: set -o errexit', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/errexit.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/errexit.sh',
+      `#!/bin/bash\nset -o errexit\n${pause}\n`,
+      'errexit pass',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC2 pass候補: || exit 1', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/exit1.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/exit1.sh',
+      '#!/bin/bash\nnpm test || exit 1\n',
+      'explicit exit 1',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC2 fail: 限定implicit return は SP003', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['bash ', 'un', 'available'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+function runShellTest() {
+  if (!process.env.HAS_BASH) {
+    console.log('${status}: ${reason}');
+    return;
+  }
+}
+runShellTest();
+`,
+      'limited implicit return',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC1: deleteのみは applicable=false', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/remove.sh', '#!/bin/bash\necho x\n', 'base');
+    git(['rm', 'scripts/remove.sh'], dir);
+    git(['commit', '-q', '-m', 'delete only'], dir);
+    const headSha = git(['rev-parse', 'HEAD'], dir);
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('applicable=false'));
+    assert.ok(result.lines.includes('checked_file_count=0'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: fi後の bare return は SP002 unknown', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/fi-return.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/fi-return.sh',
+      `#!/bin/bash
+if ! ${pause}; then
+  exit 1
+fi
+return
+`,
+      'return after fi',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: Node if/else は SP003 unknown', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['tool ', 'un', 'available'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+if (!process.env.TOOL) {
+  console.log('${status}: ${reason}');
+  process.exit(1);
+} else {
+  process.exit(0);
+}
+`,
+      'if else unknown',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: 複雑condition && は SP003 unknown', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['runtime ', 'un', 'available'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+if (!ready && missing) {
+  console.log('${status}: ${reason}');
+  process.exit(1);
+}
+`,
+      'complex condition',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: optional chaining condition は SP003 unknown', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['tool ', 'un', 'available'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+if (foo?.bar) {
+  console.log('${status}: ${reason}');
+  process.exit(1);
+}
+`,
+      'optional chaining',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 pass: gift/different/classify 識別子は禁止token非該当', () => {
+  const findings = checker.analyzeNode(
+    `const gift = 1;\nconst different = 2;\nconst classify = 3;\nif (gift === 0) { process.exit(1); }\n`,
+    'harness/checks/example.test.cjs',
+  );
+  assert.equal(findings.length, 0);
+});
+
+test('AC3 blocked: reusable workflow job uses は SP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    uses: org/reusable@test
+    steps:
+      - run: echo noop
+`,
+      'reusable job',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_reusable_job_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: dynamic matrix は SP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: \${{ fromJSON('["a","b"]') }}
+    steps:
+      - name: Run tests
+        run: npm test
+`,
+      'dynamic matrix',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_dynamic_matrix_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: uses先行 step は SP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vendor/test-action@v1
+        name: Run tests
+`,
+      'uses before name',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 blocked: run: > は SP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run tests
+        run: >
+          npm test
+`,
+      'folded run',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_structure_unsupported'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 pass: Workflow scope外 list は候補ゼロ', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+permissions:
+  - name: test
+    value: read
+`,
+      'scope outside steps',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC3 fail: composite runs.steps continue-on-error は SP004', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'action.yml', 'name: x\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'action.yml',
+      `name: test-action
+runs:
+  using: composite
+  steps:
+    - name: Run unit test
+      continue-on-error: true
+      run: npm test
+`,
+      'composite suppress',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC4: 出力に syntax_contract 行を含む', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'README.md', '# readme\n', 'base');
+    const headSha = baseSha;
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.ok(result.lines.includes(`syntax_contract=${checker.SYNTAX_CONTRACT}`));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('AC4: PR差分自己検査で test.cjs が誤検出されない', () => {
+  const dir = makeRepo();
+  try {
+    const checkerPath = path.join(__dirname, 'fail-closed-success-propagation.cjs');
+    const testPath = path.join(__dirname, 'fail-closed-success-propagation.test.cjs');
+    const workflowPath = path.join(
+      __dirname,
+      '..',
+      '..',
+      '.github',
+      'workflows',
+      'fail-closed-success-propagation.yml',
+    );
+    const baseSha = writeAndCommit(dir, 'README.md', '# readme\n', 'base');
+    writeAndCommit(dir, 'harness/checks/fail-closed-success-propagation.cjs', fs.readFileSync(checkerPath, 'utf8'), 'checker');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/fail-closed-success-propagation.test.cjs',
+      fs.readFileSync(testPath, 'utf8'),
+      'tests',
+    );
+    writeAndCommit(
+      dir,
+      '.github/workflows/fail-closed-success-propagation.yml',
+      fs.readFileSync(workflowPath, 'utf8'),
+      'workflow',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+    assert.ok(result.lines.includes(`syntax_contract=${checker.SYNTAX_CONTRACT}`));
+  } finally {
+    cleanup(dir);
+  }
 });

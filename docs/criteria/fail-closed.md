@@ -50,14 +50,18 @@ next_action=continue|return_to_pm|blocked
 
 #### 静的 checker（`fail-closed-success-propagation`）の適用範囲と限界
 
-Issue #123（ai-harness）で導入する `harness/checks/fail-closed-success-propagation.cjs` は、基準1（`success-propagation`）の**既知パターン**だけを機械検出する補助装置である。次を必ず守る。
+Issue #123（ai-harness）で導入する `harness/checks/fail-closed-success-propagation.cjs` は、基準1（`success-propagation`）の**既知パターン**だけを機械検出する補助装置である。固定構文契約は `syntax_contract=success-propagation-fixed/v1`（checker 出力に必ず含む）。次を必ず守る。
 
-- 本 checker は fail-closed 基準全体の**意味的証明**ではない。SP001〜SP004 は導入直後に実際に発生した迂回とその周辺の既知形に限定する
-- 静的に判定できない対象は個別 finding を `unknown` とし、`unknown` が1件でもあれば PR 全体を `blocked`（nonzero）とする
+- 本 checker は fail-closed 基準全体の**意味的証明**ではない。SP001〜SP004 は固定構文契約に列挙した既知形に限定し、AST・汎用 YAML parser・一般的 caller 追跡は別設計とする
+- shell の同一 `TARGET_COMMAND` 候補は SP001 を先に評価し、SP001 が `fail` のとき同一候補へ SP002 `unknown` を重複付与しない（例: `npm test || true` は SP001 `fail` 1件のみ）
+- Node.js は `raw_view`（ABSENCE_TERM）と `code_view`（構造・禁止 token）を分離する。文字列内の `if`、識別子 `gift` / `different` / `classify` は禁止 token 非該当。対応可能 condition 外（call / `&&` / `?.` / else 等）は `unknown`
+- GitHub Workflow は `jobs.<job-id>.steps` のみ、composite action は `runs.using: composite` 配下 `runs.steps` のみを step 候補とする。job-level reusable `uses:`、dynamic matrix、用途一致 step の `uses:`、`run: >`、`continue-on-error`、scope 外 list は候補ゼロまたは `unknown` / `fail`（契約どおり）
+- 静的に判定できない対象は個別 finding を `unknown` とし、`unknown` が1件でも PR 全体を `blocked`（nonzero）とする。`fail` と `unknown` が併存するときは `unknown` 優先
 - checker の `pass` だけで基準1を自動的に `pass` 扱いしない。動的 test・要件レビュー・技術レビューは引き続き必要
 - 基準2〜8の機械チェックは本 checker の対象外
 - inline ignore・allowlist・warning-only 経路は導入しない
-- PR 上の権威ある判定は base repository の default branch 上の Workflow と checker を使い、PR head 側の checker・script・test・Workflow を実行しない
+- PR 上の権威ある判定は base repository の default branch 上の Workflow と checker を使い、PR head 側の checker・script・test・Workflow を checkout / require / exec しない
+- 取り消しは実装 PR の revert → Workflow/checker 削除 → 本節の差し戻し → Decision Log を `Superseded` へ更新（詳細は Decision Log）
 
 ---
 

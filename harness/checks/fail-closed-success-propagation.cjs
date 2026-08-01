@@ -9,6 +9,7 @@ const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
 const RESULT_HEADER = 'SUCCESS_PROPAGATION_STATIC';
+const SYNTAX_CONTRACT = 'success-propagation-fixed/v1';
 const BASE_SHA_RE = /^[0-9a-f]{40}$/;
 const TARGET_EXTENSIONS = new Set(['.sh', '.bash', '.js', '.cjs', '.mjs', '.yml', '.yaml']);
 const MAX_FILE_BYTES = 512 * 1024;
@@ -23,7 +24,11 @@ const UNCONDITIONAL_EXIT0_RE = /^\s*exit\s+0\s*($|[#;])/;
 const FAILURE_RECORD_RE =
   /\b([A-Z][A-Z0-9_]*_(?:EXIT|PASS|FAIL|STATUS)|LOCAL_E2E_PASS|POC_KEY_GATE_PASS)\s*=\s*(?:false|1|[^0\s]|\$?\?)/i;
 const SET_PLUS_E_RE = /^\s*set\s+\+e\b/;
-const SET_MINUS_E_RE = /^\s*set\s+-e\b|^\s*set\s+-o\s+errexit\b/;
+const SET_MINUS_E_RE =
+  /^\s*set\s+-e\b|^\s*set\s+-eu\b|^\s*set\s+-euo\s+pipefail\b|^\s*set\s+-o\s+errexit\b/;
+const BARE_RETURN_RE = /^\s*return\s*($|[#;])/;
+const SIMPLE_NODE_CONDITION_RE =
+  /^(?:!)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$|^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\s*(?:===|!==|==|!=)\s*(?:true|false|null|undefined|\d+)$/;
 const EXIT_STATUS_CHECK_RE = /\$?\?|PIPESTATUS/;
 const PROPAGATION_PROOF_RE =
   /\|\|\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|&&\s*(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b|;\s*then\s+(?:exit\s+(?!0\b)|return\s+[1-9]\d*|fail_closed)\b/;
@@ -195,6 +200,43 @@ function readBlobAtCommit(commitSha, relPath, cwd) {
   return { kind: 'text', content: raw.toString('utf8') };
 }
 
+function lineIndent(line) {
+  const match = line.match(/^(\s*)/);
+  return match ? match[1].length : 0;
+}
+
+function isMeaningfulLine(line) {
+  const trimmed = line.trim();
+  return trimmed.length > 0 && !trimmed.startsWith('#');
+}
+
+function buildCodeView(line) {
+  let view = line;
+  const slash = view.indexOf('//');
+  if (slash !== -1) {
+    view = view.slice(0, slash) + ' '.repeat(view.length - slash);
+  }
+  view = view.replace(/'(?:[^'\\]|\\.)*'/g, (match) => ' '.repeat(match.length));
+  view = view.replace(/"(?:[^"\\]|\\.)*"/g, (match) => ' '.repeat(match.length));
+  view = view.replace(/`[^`\\$]*`/g, (match) => ' '.repeat(match.length));
+  return view;
+}
+
+function hasAbsenceTerm(line) {
+  return SKIP_TERMS_RE.test(stripComment(line, 'node'));
+}
+
+function absenceTermOutsideStrings(line) {
+  const raw = stripComment(line, 'node');
+  if (!SKIP_TERMS_RE.test(raw)) return false;
+  return SKIP_TERMS_RE.test(buildCodeView(raw));
+}
+
+function isSimpleNodeCondition(conditionText) {
+  const normalized = conditionText.trim().replace(/\s+/g, ' ');
+  return SIMPLE_NODE_CONDITION_RE.test(normalized);
+}
+
 function stripComment(line, kind) {
   if (kind === 'shell') {
     const hash = line.indexOf('#');
@@ -234,6 +276,17 @@ function analyzeShell(content, relPath) {
         path: relPath,
         line: lineNo,
         reason: 'shell_success_suppression',
+      });
+      continue;
+    }
+
+    if (BARE_RETURN_RE.test(line)) {
+      findings.push({
+        result: 'unknown',
+        ruleId: 'SP002',
+        path: relPath,
+        line: lineNo,
+        reason: 'shell_failure_propagation_unproven',
       });
       continue;
     }
@@ -320,6 +373,136 @@ function isNodeTestLikePath(relPath) {
   );
 }
 
+function getNodeFlatIfRange(lines, ifIdx) {
+  const start = ifIdx;
+  const ifIndent = lineIndent(lines[ifIdx]);
+  let end = ifIdx;
+  let depth = 0;
+  let started = false;
+
+  for (let i = ifIdx; i < lines.length; i += 1) {
+    const codeView = buildCodeView(stripComment(lines[i], 'node'));
+    for (const ch of codeView) {
+      if (ch === '{') {
+        depth += 1;
+        started = true;
+      } else if (ch === '}') {
+        depth -= 1;
+      }
+    }
+    end = i;
+    if (started && depth <= 0) {
+      break;
+    }
+    if (i > ifIdx && lineIndent(lines[i]) < ifIndent && isMeaningfulLine(lines[i])) {
+      end = i - 1;
+      break;
+    }
+  }
+
+  return { start, end };
+}
+
+function hasElseAfterFlatIf(lines, endIdx) {
+  for (let i = endIdx + 1; i < Math.min(lines.length, endIdx + 3); i += 1) {
+    if (!isMeaningfulLine(lines[i])) continue;
+    const codeView = buildCodeView(stripComment(lines[i], 'node'));
+    if (/\belse\b/.test(codeView)) return true;
+    break;
+  }
+  return false;
+}
+
+function flatIfInteriorIsSimple(lines, start, end) {
+  for (let i = start + 1; i < end; i += 1) {
+    if (!isMeaningfulLine(lines[i])) continue;
+    const codeView = buildCodeView(stripComment(lines[i], 'node'));
+    if (/[{}]/.test(codeView)) return false;
+    if (/\b(if|else|switch|for|while|do|try|catch|finally|function|class)\b/.test(codeView)) {
+      return false;
+    }
+    if (/\?|=>/.test(codeView)) return false;
+  }
+  return true;
+}
+
+function extractIfCondition(codeView) {
+  const match = codeView.match(/\bif\s*\(\s*([^)]*)\)/);
+  return match ? match[1] : null;
+}
+
+function detectLimitedImplicitReturn(lines, relPath) {
+  const findings = [];
+  for (let idx = 0; idx < lines.length; idx += 1) {
+    const codeView = buildCodeView(stripComment(lines[idx], 'node'));
+    if (!/\bfunction\b/.test(codeView)) continue;
+
+    let bodyStart = -1;
+    let bodyEnd = -1;
+    let depth = 0;
+    for (let i = idx; i < lines.length; i += 1) {
+      const view = buildCodeView(stripComment(lines[i], 'node'));
+      for (const ch of view) {
+        if (ch === '{') {
+          depth += 1;
+          if (bodyStart === -1) bodyStart = i;
+        } else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            bodyEnd = i;
+            break;
+          }
+        }
+      }
+      if (bodyEnd !== -1) break;
+    }
+    if (bodyStart === -1 || bodyEnd === -1) continue;
+
+    const meaningful = [];
+    for (let i = bodyStart + 1; i < bodyEnd; i += 1) {
+      if (isMeaningfulLine(lines[i])) meaningful.push(i);
+    }
+    if (meaningful.length === 0) continue;
+
+    const ifIdx = meaningful[0];
+    const ifCodeView = buildCodeView(stripComment(lines[ifIdx], 'node'));
+    if (!/\bif\s*\(/.test(ifCodeView)) continue;
+    if (!hasAbsenceTerm(lines[ifIdx])) continue;
+
+    const { start, end } = getNodeFlatIfRange(lines, ifIdx);
+    if (!flatIfInteriorIsSimple(lines, start, end)) continue;
+    if (hasElseAfterFlatIf(lines, end)) continue;
+
+    let onlyIfInBody = true;
+    for (let i = bodyStart + 1; i < bodyEnd; i += 1) {
+      if (!isMeaningfulLine(lines[i])) continue;
+      if (i < start || i > end) {
+        onlyIfInBody = false;
+        break;
+      }
+    }
+    if (!onlyIfInBody) continue;
+
+    let hasSuccessExit = false;
+    let hasFailureExit = false;
+    for (let i = start; i <= end; i += 1) {
+      const stripped = stripComment(lines[i], 'node');
+      if (NODE_SUCCESS_EXIT_RE.test(stripped)) hasSuccessExit = true;
+      if (NODE_FAILURE_EXIT_RE.test(stripped)) hasFailureExit = true;
+    }
+    if (hasSuccessExit && !hasFailureExit) {
+      findings.push({
+        result: 'fail',
+        ruleId: 'SP003',
+        path: relPath,
+        line: ifIdx + 1,
+        reason: ['node_', 'skip', '_returns_success'].join(''),
+      });
+    }
+  }
+  return findings;
+}
+
 function getNodeBranchRange(lines, idx) {
   let start = idx;
   for (let i = idx; i >= 0; i -= 1) {
@@ -360,20 +543,60 @@ function analyzeNode(content, relPath) {
   const findings = [];
 
   const isTestLike = isNodeTestLikePath(relPath);
-  const looksLikeCheckCode = CHECK_PURPOSE_RE.test(content) || SKIP_TERMS_RE.test(content);
+  const looksLikeCheckCode =
+    CHECK_PURPOSE_RE.test(content) || lines.some((line) => hasAbsenceTerm(line));
   if (!isTestLike && !looksLikeCheckCode) {
     return findings;
   }
+
+  findings.push(...detectLimitedImplicitReturn(lines, relPath));
 
   for (let idx = 0; idx < lines.length; idx += 1) {
     const lineNo = idx + 1;
     const rawLine = lines[idx];
     const line = stripComment(rawLine, 'node');
+    const codeView = buildCodeView(line);
 
-    if (!SKIP_TERMS_RE.test(line)) continue;
+    if (!hasAbsenceTerm(rawLine)) continue;
 
-    const { start, end } = getNodeBranchRange(lines, idx);
+    let ifIdx = idx;
+    if (!/\bif\s*\(/.test(codeView)) {
+      for (let back = idx; back >= Math.max(0, idx - 6); back -= 1) {
+        const backView = buildCodeView(stripComment(lines[back], 'node'));
+        if (/\bif\s*\(/.test(backView)) {
+          ifIdx = back;
+          break;
+        }
+      }
+    }
+
+    const ifCodeView = buildCodeView(stripComment(lines[ifIdx], 'node'));
+    const condition = extractIfCondition(ifCodeView);
+    const { start, end } = getNodeFlatIfRange(lines, ifIdx);
     const branchWindow = lines.slice(start, end + 1);
+
+    if (condition && !isSimpleNodeCondition(condition)) {
+      findings.push({
+        result: 'unknown',
+        ruleId: 'SP003',
+        path: relPath,
+        line: lineNo,
+        reason: ['node_', 'skip', '_propagation_unproven'].join(''),
+      });
+      continue;
+    }
+
+    if (!flatIfInteriorIsSimple(lines, start, end) || hasElseAfterFlatIf(lines, end)) {
+      findings.push({
+        result: 'unknown',
+        ruleId: 'SP003',
+        path: relPath,
+        line: lineNo,
+        reason: ['node_', 'skip', '_propagation_unproven'].join(''),
+      });
+      continue;
+    }
+
     let hasSuccessExit = false;
     let hasFailureExit = false;
     for (const branchLine of branchWindow) {
@@ -420,98 +643,290 @@ function isWorkflowTestStep(stepName, runLine) {
   return false;
 }
 
-function analyzeWorkflow(content, relPath) {
-  const lines = content.split(/\r?\n/);
-  const findings = [];
-  let inRunBlock = false;
-  let runIndent = 0;
-  let currentStep = null;
-  let stepStartLine = 1;
+function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, runBodyIndent) {
+  const block = {
+    startLine: startIdx + 1,
+    name: null,
+    id: null,
+    runLines: [],
+    uses: null,
+    continueOnError: false,
+    hasDisallowedKey: false,
+    hasFoldedRun: false,
+    hasExpression: false,
+  };
 
-  for (let idx = 0; idx < lines.length; idx += 1) {
-    const lineNo = idx + 1;
-    const line = lines[idx];
+  const listLine = lines[startIdx];
+  const listInlineRun = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*(.+)$`));
+  if (listInlineRun) {
+    const value = listInlineRun[1].trim();
+    if (value.length > 0 && value !== '|' && value !== '|-' && value !== '>') {
+      block.runLines.push({ lineNo: startIdx + 1, text: value });
+    }
+    if (value === '>') block.hasFoldedRun = true;
+  }
+
+  const listInlineBlock = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*\\|\\s*$`));
+  if (listInlineBlock) {
+    for (let j = startIdx + 1; j < endIdx; j += 1) {
+      const bodyLine = lines[j];
+      const bodyIndent = lineIndent(bodyLine);
+      if (bodyIndent < runBodyIndent && bodyLine.trim().length > 0) break;
+      if (bodyIndent >= runBodyIndent && bodyLine.trim().length > 0) {
+        block.runLines.push({ lineNo: j + 1, text: bodyLine.trim() });
+      }
+    }
+  }
+
+  const listInlineName = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+name:\\s*(.+)$`));
+  if (listInlineName) block.name = listInlineName[1].trim();
+
+  const listInlineId = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+id:\\s*(.+)$`));
+  if (listInlineId) block.id = listInlineId[1].trim();
+
+  const listInlineUses = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+uses:\\s*(.+)$`, 'i'));
+  if (listInlineUses) block.uses = listInlineUses[1].trim();
+
+  const listInlineContinue = listLine.match(
+    new RegExp(`^\\s{${stepListIndent}}-\\s+continue-on-error:\\s*(true|yes)\\s*$`, 'i'),
+  );
+  if (listInlineContinue) block.continueOnError = true;
+
+  for (let i = startIdx; i < endIdx; i += 1) {
+    const line = lines[i];
+    const indent = lineIndent(line);
     const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
 
-    const stepNameMatch = line.match(/^\s*-\s+name:\s*(.+)\s*$/);
-    if (stepNameMatch) {
-      currentStep = stepNameMatch[1];
-      stepStartLine = lineNo;
-      inRunBlock = false;
+    if (indent === stepListIndent && /^-\s+/.test(trimmed) && i !== startIdx) {
+      break;
     }
 
-    const stepIdMatch = line.match(/^\s*-\s+id:\s*(.+)\s*$/);
-    if (stepIdMatch) {
-      currentStep = stepIdMatch[1];
-      stepStartLine = lineNo;
-      inRunBlock = false;
+    if (indent < stepKeyIndent && indent > stepListIndent) {
+      break;
     }
 
-    const idMatch = line.match(/^\s*id:\s*(.+)\s*$/);
-    if (idMatch && !currentStep) {
-      currentStep = idMatch[1];
-      stepStartLine = lineNo;
-    }
+    if (/\$\{\{/.test(line)) block.hasExpression = true;
+    if (/^\t/.test(line)) block.hasDisallowedKey = true;
 
-    const continueMatch = line.match(/^\s*continue-on-error:\s*(true|yes)\s*$/i);
-    if (continueMatch && isWorkflowTestStep(currentStep, null)) {
-      findings.push({
-        result: 'fail',
-        ruleId: 'SP004',
-        path: relPath,
-        line: lineNo,
-        reason: 'workflow_continue_on_error',
-      });
-    }
+    const nameMatch = line.match(new RegExp(`^\\s{${stepKeyIndent}}name:\\s*(.+)\\s*$`));
+    if (nameMatch) block.name = nameMatch[1];
 
-    const stepRunOnly = line.match(/^(\s*)-\s+run:\s*(.*)$/);
-    if (stepRunOnly) {
-      currentStep = null;
-      stepStartLine = lineNo;
-      inRunBlock = false;
-      const inlineRun = stepRunOnly[2];
-      if (inlineRun.length > 0 && inlineRun !== '|') {
-        inspectWorkflowRunLine(inlineRun, relPath, lineNo, currentStep, findings);
-      } else {
-        inRunBlock = true;
-        runIndent = stepRunOnly[1].length + 2;
+    const idMatch = line.match(new RegExp(`^\\s{${stepKeyIndent}}id:\\s*(.+)\\s*$`));
+    if (idMatch) block.id = idMatch[1];
+
+    const usesMatch = line.match(new RegExp(`^\\s{${stepKeyIndent}}uses:\\s*(.+)\\s*$`, 'i'));
+    if (usesMatch) block.uses = usesMatch[1];
+
+    const continueMatch = line.match(
+      new RegExp(`^\\s{${stepKeyIndent}}continue-on-error:\\s*(true|yes)\\s*$`, 'i'),
+    );
+    if (continueMatch) block.continueOnError = true;
+
+    const foldedRun = line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*>`));
+    if (foldedRun) block.hasFoldedRun = true;
+
+    const inlineRun = line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*(.+)$`));
+    if (inlineRun) {
+      const value = inlineRun[1].trim();
+      if (value === '|' || value === '|-' || value === '>') {
+        block.hasFoldedRun = value === '>';
+      } else if (value.length > 0) {
+        block.runLines.push({ lineNo: i + 1, text: value });
       }
+    }
+
+    if (line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*\\|`))) {
+      for (let j = i + 1; j < endIdx; j += 1) {
+        const bodyLine = lines[j];
+        const bodyIndent = lineIndent(bodyLine);
+        if (bodyIndent < runBodyIndent && bodyLine.trim().length > 0) break;
+        if (bodyIndent >= runBodyIndent && bodyLine.trim().length > 0) {
+          block.runLines.push({ lineNo: j + 1, text: bodyLine.trim() });
+        }
+      }
+    }
+
+    const keyMatch = line.match(new RegExp(`^\\s{${stepKeyIndent}}([A-Za-z0-9_-]+):`));
+    if (keyMatch) {
+      const key = keyMatch[1];
+      if (!['name', 'id', 'run', 'uses', 'continue-on-error', 'shell'].includes(key)) {
+        block.hasDisallowedKey = true;
+      }
+    }
+  }
+
+  return block;
+}
+
+function collectWorkflowStepBlocks(lines) {
+  const blocks = [];
+  let inJobs = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^jobs:\s*$/.test(line)) {
+      inJobs = true;
       continue;
     }
+    if (inJobs && lineIndent(line) === 0 && isMeaningfulLine(line)) {
+      inJobs = false;
+    }
+    if (!inJobs) continue;
 
-    const runHeader = line.match(/^(\s*)run:\s*(.*)$/);
-    if (runHeader) {
-      const inlineRun = runHeader[2];
-      if (inlineRun.length > 0 && inlineRun !== '|') {
-        inRunBlock = false;
-        inspectWorkflowRunLine(inlineRun, relPath, lineNo, currentStep, findings);
-      } else {
-        inRunBlock = true;
-        runIndent = runHeader[1].length;
+    if (/^    steps:\s*$/.test(line)) {
+      let j = i + 1;
+      while (j < lines.length) {
+        if (lineIndent(lines[j]) <= 2 && isMeaningfulLine(lines[j])) break;
+        if (/^      -\s/.test(lines[j])) {
+          const block = parseStepBlock(lines, j, lines.length, 6, 8, 10);
+          blocks.push({ scope: 'workflow_step', block });
+          j += 1;
+          while (j < lines.length && !(lineIndent(lines[j]) === 6 && /^-\s/.test(lines[j].trim()))) {
+            if (lineIndent(lines[j]) <= 4 && isMeaningfulLine(lines[j]) && !/^      -\s/.test(lines[j])) {
+              break;
+            }
+            j += 1;
+          }
+          continue;
+        }
+        j += 1;
       }
-      continue;
+    }
+  }
+  return blocks;
+}
+
+function collectCompositeStepBlocks(lines) {
+  const blocks = [];
+  const isComposite = lines.some((line) => /^\s*using:\s*composite\s*$/i.test(line));
+  if (!isComposite) return blocks;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^  steps:\s*$/.test(lines[i])) continue;
+    let j = i + 1;
+    while (j < lines.length) {
+      if (lineIndent(lines[j]) < 2 && isMeaningfulLine(lines[j])) break;
+      if (/^    -\s/.test(lines[j])) {
+        const block = parseStepBlock(lines, j, lines.length, 4, 6, 8);
+        blocks.push({ scope: 'composite_step', block });
+        j += 1;
+        while (j < lines.length && !(lineIndent(lines[j]) === 4 && /^-\s/.test(lines[j].trim()))) {
+          if (lineIndent(lines[j]) <= 2 && isMeaningfulLine(lines[j]) && !/^    -\s/.test(lines[j])) {
+            break;
+          }
+          j += 1;
+        }
+        continue;
+      }
+      j += 1;
+    }
+  }
+  return blocks;
+}
+
+function jobHasTestPurpose(jobLines) {
+  const slice = jobLines.join('\n');
+  return WORKFLOW_TEST_STEP_RE.test(slice) || CHECK_PURPOSE_RE.test(slice);
+}
+
+function evaluateJobLevelWorkflow(lines, relPath, findings) {
+  for (let i = 0; i < lines.length; i += 1) {
+    const jobMatch = lines[i].match(/^  ([A-Za-z_][A-Za-z0-9_-]*):\s*$/);
+    if (!jobMatch) continue;
+
+    let jobEnd = lines.length;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (/^  [A-Za-z_][A-Za-z0-9_-]*:\s*$/.test(lines[j])) {
+        jobEnd = j;
+        break;
+      }
+      if (lineIndent(lines[j]) === 0 && isMeaningfulLine(lines[j])) {
+        jobEnd = j;
+        break;
+      }
     }
 
-    if (inRunBlock) {
-      const indent = line.match(/^(\s*)/)[1].length;
-      if (trimmed.length === 0) continue;
-      if (indent <= runIndent) {
-        inRunBlock = false;
-      } else {
-        inspectWorkflowRunLine(line.trim(), relPath, lineNo, currentStep, findings);
-      }
-    }
+    const jobLines = lines.slice(i, jobEnd);
+    if (!jobHasTestPurpose(jobLines)) continue;
 
-    const usesMatch = line.match(/^\s*uses:\s*(.+)\s*$/i);
-    if (usesMatch && isWorkflowTestStep(currentStep, null)) {
+    if (jobLines.some((jobLine) => /^    uses:\s/.test(jobLine))) {
       findings.push({
         result: 'unknown',
         ruleId: 'SP004',
         path: relPath,
-        line: stepStartLine,
-        reason: 'workflow_delegated_failure_contract_unproven',
+        line: i + 1,
+        reason: 'workflow_reusable_job_unproven',
       });
     }
+
+    const jobText = jobLines.join('\n');
+    if (/matrix:/i.test(jobText) && (/\$\{\{/.test(jobText) || /fromJSON\(/i.test(jobText))) {
+      findings.push({
+        result: 'unknown',
+        ruleId: 'SP004',
+        path: relPath,
+        line: i + 1,
+        reason: 'workflow_dynamic_matrix_unproven',
+      });
+    }
+  }
+}
+
+function evaluateStepBlock(block, relPath, findings) {
+  const stepName = block.name || block.id;
+  const runText = block.runLines.map((entry) => entry.text).join('\n');
+  const isTestStep = isWorkflowTestStep(stepName, runText);
+
+  if (!isTestStep) return;
+
+  if (block.hasDisallowedKey || block.hasFoldedRun || block.hasExpression) {
+    findings.push({
+      result: 'unknown',
+      ruleId: 'SP004',
+      path: relPath,
+      line: block.startLine,
+      reason: 'workflow_structure_unsupported',
+    });
+    return;
+  }
+
+  if (block.continueOnError) {
+    findings.push({
+      result: 'fail',
+      ruleId: 'SP004',
+      path: relPath,
+      line: block.startLine,
+      reason: 'workflow_continue_on_error',
+    });
+  }
+
+  if (block.uses) {
+    findings.push({
+      result: 'unknown',
+      ruleId: 'SP004',
+      path: relPath,
+      line: block.startLine,
+      reason: 'workflow_delegated_failure_contract_unproven',
+    });
+  }
+
+  for (const runEntry of block.runLines) {
+    inspectWorkflowRunLine(runEntry.text, relPath, runEntry.lineNo, stepName, findings);
+  }
+}
+
+function analyzeWorkflow(content, relPath) {
+  const lines = content.split(/\r?\n/);
+  const findings = [];
+  const isAction = /(?:^|\/)action\.ya?ml$/i.test(relPath);
+
+  const stepBlocks = isAction ? collectCompositeStepBlocks(lines) : collectWorkflowStepBlocks(lines);
+  for (const entry of stepBlocks) {
+    evaluateStepBlock(entry.block, relPath, findings);
+  }
+
+  if (!isAction) {
+    evaluateJobLevelWorkflow(lines, relPath, findings);
   }
 
   return findings;
@@ -566,6 +981,10 @@ function printResult(lines) {
   }
 }
 
+function withContract(lines) {
+  return [`syntax_contract=${SYNTAX_CONTRACT}`, ...lines];
+}
+
 function runChecker({ base, head, cwd }) {
   const baseResolved = resolveCommit(base, cwd);
   if (!baseResolved) {
@@ -583,14 +1002,14 @@ function runChecker({ base, head, cwd }) {
   if (targetPaths.length === 0) {
     return {
       exitCode: 0,
-      lines: [
+      lines: withContract([
         'result=pass',
         'applicable=false',
         'checked_file_count=0',
         'fail_count=0',
         'unknown_count=0',
         'stop_reason=none',
-      ],
+      ]),
     };
   }
 
@@ -639,14 +1058,14 @@ function runChecker({ base, head, cwd }) {
   if (overall.result === 'pass') {
     return {
       exitCode: 0,
-      lines: [
+      lines: withContract([
         'result=pass',
         'applicable=true',
         `checked_file_count=${checkedCount}`,
         'fail_count=0',
         'unknown_count=0',
         'stop_reason=none',
-      ],
+      ]),
     };
   }
 
@@ -656,7 +1075,7 @@ function runChecker({ base, head, cwd }) {
 
   return {
     exitCode: 1,
-    lines: [
+    lines: withContract([
       `result=${overall.result}`,
       `rule_id=${primary.ruleId}`,
       `path=${primary.path}`,
@@ -667,7 +1086,7 @@ function runChecker({ base, head, cwd }) {
       `fail_count=${failCount}`,
       `unknown_count=${unknownCount}`,
       `stop_reason=${stopReason}`,
-    ],
+    ]),
   };
 }
 
@@ -694,12 +1113,12 @@ async function main() {
     process.exitCode = exitCode;
   } catch (err) {
     if (err instanceof StopResult) {
-      const lines = ['result=blocked', `stop_reason=${err.stopReason}`, ...err.extraLines];
+      const lines = withContract(['result=blocked', `stop_reason=${err.stopReason}`, ...err.extraLines]);
       printResult(lines);
       process.exitCode = 1;
       return;
     }
-    printResult(['result=blocked', 'stop_reason=checker_internal_error']);
+    printResult(withContract(['result=blocked', 'stop_reason=checker_internal_error']));
     process.exitCode = 1;
   }
 }
@@ -727,5 +1146,10 @@ module.exports = {
   pickOverallResult,
   StopResult,
   UsageError,
+  SYNTAX_CONTRACT,
+  buildCodeView,
+  hasAbsenceTerm,
+  absenceTermOutsideStrings,
+  isSimpleNodeCondition,
   RESULT_HEADER,
 };

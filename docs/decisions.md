@@ -3241,14 +3241,18 @@ Related PRs: #127
 
 ## 採用する方針
 
-- `harness/checks/fail-closed-success-propagation.cjs`（新規）で SP001〜SP004 を既知パターン検出。CLI 契約は `--base <commit_sha> --head <commit_sha>` のみ
-- `harness/checks/fail-closed-success-propagation.test.cjs`（新規）で実 git fixture により AC2 相当（skip-success / 未処理 sleep / 明示的伝播）を再現
+- 固定構文契約 `success-propagation-fixed/v1`（checker 出力 `syntax_contract=...`）で SP001〜SP004 を既知パターン検出。CLI 契約は `--base <commit_sha> --head <commit_sha>` のみ
+- shell 候補同一性: 同一 `TARGET_COMMAND` 開始行は 1 候補。SP001 `fail` 時は SP002 `unknown` を重複付与しない
+- Node.js: `raw_view` / `code_view` 分離、対応可能 condition と限定 implicit return のみ `fail`、それ以外は `unknown`
+- Workflow / composite: `jobs.*.steps` と `runs.steps`（composite）のみ step 候補。job reusable・dynamic matrix・`uses:`・`run: >` は `unknown` または契約どおり `fail`
+- `harness/checks/fail-closed-success-propagation.test.cjs`（新規）で AC1〜AC5 相当を実 git fixture で再現
 - `.github/workflows/fail-closed-success-propagation.yml`（新規）を `pull_request_target`（opened / synchronize / reopened）で発火。base branch 上の checker を read-only 実行
-- `docs/criteria/fail-closed.md` へ checker の適用範囲・`unknown` blocking・checker pass の限界を追記
+- `docs/criteria/fail-closed.md` へ checker の適用範囲・候補同一性・`unknown` blocking・構造解析分離・checker pass の限界を追記
 - 個別 finding は `pass|fail|unknown`、PR 全体は `pass|fail|blocked`。`unknown` が1件でも PR 全体を `blocked` ＋ nonzero
 
 ## 採用しない方針 / 却下した代替案
 
+- **完全な shell / JavaScript / YAML 構文・意味解析（AST 等）を本 PR で導入**: 固定構文 v3 で構造解析を分離し別 Checkpoint へ送るため却下
 - **fail-closed 基準2〜8の機械検査を同一 PR で導入**: 粒度超過のため却下（別 Checkpoint）
 - **inline ignore / allowlist / warning-only 経路**: 迂回経路を増やすため却下
 - **PR head 側 checker の実行**: 信頼境界を破るため却下

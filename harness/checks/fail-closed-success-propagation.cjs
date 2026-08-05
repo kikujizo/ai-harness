@@ -26,8 +26,13 @@ const CHECK_PURPOSE_RE =
   /\b(test|tests|check|verify|lint|fail-closed)\b|npm\s+test|yarn\s+test|pnpm\s+test|node\s+[^\s|;&]*test|bash\s+-n|shellcheck|eslint|jest|mocha|vitest/i;
 const SP001_SUPPRESS_RE = /\|\|\s*(true|:)\s*($|[#;])/;
 const UNCONDITIONAL_EXIT0_RE = /^\s*exit\s+0\s*($|[#;])/;
+// 値側は非ゼロ整数(`1`等)/`false`/`$?`参照だけをfailure値として認める。
+// `[^0\s]`（0でも空白でもない任意の1文字）は`true`のような成功値の1文字目にも
+// 一致してしまい、`CHECK_STATUS=true`を誤ってfailure記録扱いする過剰検出だったため
+// 修正(Issue #123固定構文v3)。
 const FAILURE_RECORD_RE =
-  /\b([A-Z][A-Z0-9_]*_(?:EXIT|PASS|FAIL|STATUS)|LOCAL_E2E_PASS|POC_KEY_GATE_PASS)\s*=\s*(?:false|1|[^0\s]|\$?\?)/i;
+  /\b([A-Z][A-Z0-9_]*_(?:EXIT|PASS|FAIL|STATUS)|LOCAL_E2E_PASS|POC_KEY_GATE_PASS)\s*=\s*(?:false|[1-9]\d*|\$?\?)(?:\s|$|[#;])/i;
+const FAILURE_RECORD_WINDOW_MAX_MEANINGFUL = 3;
 const SET_PLUS_E_RE = /^\s*set\s+\+e\b/;
 const SET_MINUS_E_RE =
   /^\s*set\s+-e\b|^\s*set\s+-eu\b|^\s*set\s+-euo\s+pipefail\b|^\s*set\s+-o\s+errexit\b/;
@@ -39,6 +44,10 @@ const EXIT_STATUS_CHECK_RE = /\$?\?|PIPESTATUS/;
 const FIXED_PROPAGATION_PROOF_RE =
   /\|\|\s*(?:exit\s+[1-9]\d*|return\s+[1-9]\d*)\b|;\s*then\s+(?:exit\s+[1-9]\d*|return\s+[1-9]\d*)\b/;
 const FAIL_CLOSED_CALL_RE = /\|\|\s*fail_closed\b|;\s*then\s+fail_closed\b/;
+// bashのerrexit(`set -e`)は `&&`/`||` list内の非最終commandの失敗を伝播しない既知の仕様が
+// あるため、TARGET_COMMANDが `&&` を含む行にある場合はerrexit契約による証明とみなさない
+// (Issue #123固定構文v3)。
+const AND_AND_RE = /&&/;
 const FLAT_IF_MAX_MEANINGFUL = 8;
 const ERREXIT_CONTRACT_MAX_MEANINGFUL = 3;
 const IF_NOT_RE = /^\s*if\s+!\s+/;
@@ -463,6 +472,33 @@ function computeSetPlusEWindows(lines) {
   return windowByLine;
 }
 
+// failure record(`FOO_STATUS=1`等)検出後、後続の3 meaningful lines(空行・コメント除く
+// 実効行)だけをcontextとする固定窓を前計算する。fi/done/esac/}のいずれかが現れたら
+// 窓を終了する。旧実装は`exit 0`側から直前8物理行を逆走査しており、契約(次の3
+// meaningful linesかつterminatorまで)より広すぎる窓だったため`set +e`窓と同じ
+// 前向き固定窓方式に修正(Issue #123固定構文v3)。
+function computeFailureRecordWindows(lines) {
+  const windowByLine = new Array(lines.length).fill(false);
+  let remaining = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const rawLine = lines[i];
+    if (!isMeaningfulLine(rawLine)) continue;
+    const stripped = stripComment(rawLine, 'shell').trimEnd();
+    if (remaining > 0) {
+      if (SHELL_BLOCK_CLOSE_RE.test(stripped)) {
+        remaining = 0;
+      } else {
+        windowByLine[i] = true;
+        remaining -= 1;
+      }
+    }
+    if (FAILURE_RECORD_RE.test(stripped)) {
+      remaining = FAILURE_RECORD_WINDOW_MAX_MEANINGFUL;
+    }
+  }
+  return windowByLine;
+}
+
 function findFlatIfNotBlock(lines, idx) {
   let ifIdx = idx;
   const line = stripComment(lines[idx], 'shell');
@@ -528,6 +564,7 @@ function extractShellCandidates(content, relPath) {
   const candidates = [];
   const confirmedFailClosed = collectConfirmedFailClosedNames(lines);
   const setPlusEWindows = computeSetPlusEWindows(lines);
+  const failureRecordWindows = computeFailureRecordWindows(lines);
 
   let errexitInContract = false;
   let errexitContractVoided = false;
@@ -574,18 +611,15 @@ function extractShellCandidates(content, relPath) {
       continue;
     }
 
-    if (UNCONDITIONAL_EXIT0_RE.test(line)) {
-      const window = lines.slice(Math.max(0, idx - 8), idx).join('\n');
-      if (FAILURE_RECORD_RE.test(window)) {
-        candidates.push({
-          kind: 'fixed',
-          result: 'fail',
-          ruleId: 'SP001',
-          line: lineNo,
-          reason: 'shell_unconditional_exit0_after_failure_record',
-        });
-        continue;
-      }
+    if (UNCONDITIONAL_EXIT0_RE.test(line) && failureRecordWindows[idx]) {
+      candidates.push({
+        kind: 'fixed',
+        result: 'fail',
+        ruleId: 'SP001',
+        line: lineNo,
+        reason: 'shell_unconditional_exit0_after_failure_record',
+      });
+      continue;
     }
 
     if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
@@ -626,7 +660,7 @@ function extractShellCandidates(content, relPath) {
         kind: 'target_command',
         line: lineNo,
         hasProofOnLine: hasShellProofOnLine(line, confirmedFailClosed),
-        errexitProven: errexitInContract && !errexitContractVoided,
+        errexitProven: errexitInContract && !errexitContractVoided && !AND_AND_RE.test(line),
         ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
       });
       continue;
@@ -835,12 +869,19 @@ function extractNodeCandidates(content, relPath) {
     let ifIdx = idx;
     const codeView = buildCodeView(stripComment(lines[idx], 'node'));
     if (!/\bif\s*\(/.test(codeView)) {
+      // 契約上の上限は「8 meaningful lines」(空行・コメント除く実効行)であり物理行数
+      // ではない。物理行固定(旧6行)だとcomment/空行が多いflat-ifが候補ゼロで
+      // fail-openするため、meaningful line基準の後方探索に修正(Issue #123固定構文v3)。
       let found = -1;
-      for (let back = idx; back >= Math.max(0, idx - 6); back -= 1) {
+      let meaningfulSeen = 0;
+      for (let back = idx; back >= 0 && meaningfulSeen <= FLAT_IF_MAX_MEANINGFUL; back -= 1) {
         const backView = buildCodeView(stripComment(lines[back], 'node'));
         if (/\bif\s*\(/.test(backView)) {
           found = back;
           break;
+        }
+        if (back !== idx && isMeaningfulLine(lines[back])) {
+          meaningfulSeen += 1;
         }
       }
       if (found === -1) continue;
@@ -1152,6 +1193,19 @@ function jobHasTestPurpose(jobLines) {
   return WORKFLOW_TEST_STEP_RE.test(slice) || CHECK_PURPOSE_RE.test(slice);
 }
 
+// collectWorkflowStepBlocksは固定2/4/6-space indentのsteps:構造しか解析できない。
+// 有効なYAMLだが非標準indent(例: 1-space)の場合、stepブロックが1つも収集されず
+// test用途のcontinue-on-error等がそのままfail-open(finding 0)する。固定構文へ
+// 分類不能な形はunknownにする契約のため、フォールバック候補を1件生成する
+// (Issue #123固定構文v3)。
+function jobHasStepsSection(jobLines) {
+  return jobLines.some((jobLine) => /^\s*steps:\s*$/.test(jobLine));
+}
+
+function jobHasStandardStepIndent(jobLines) {
+  return jobLines.some((jobLine) => /^      -\s/.test(jobLine));
+}
+
 function jobHasDynamicMatrix(jobLines) {
   let inStrategy = false;
   let inMatrix = false;
@@ -1200,11 +1254,19 @@ function extractJobLevelCandidates(lines, relPath) {
     const jobLines = lines.slice(i, jobEnd);
     if (!jobHasTestPurpose(jobLines)) continue;
 
-    if (jobLines.some((jobLine) => /^    uses:\s/.test(jobLine))) {
+    const isReusableJob = jobLines.some((jobLine) => /^    uses:\s/.test(jobLine));
+    if (isReusableJob) {
       candidates.push({ kind: 'workflow_job_reusable', path: relPath, line: i + 1 });
     }
     if (jobHasDynamicMatrix(jobLines)) {
       candidates.push({ kind: 'workflow_job_matrix', path: relPath, line: i + 1 });
+    }
+    if (
+      !isReusableJob &&
+      jobHasStepsSection(jobLines) &&
+      !jobHasStandardStepIndent(jobLines)
+    ) {
+      candidates.push({ kind: 'workflow_job_nonstandard_step_indent', path: relPath, line: i + 1 });
     }
   }
   return candidates;
@@ -1288,6 +1350,9 @@ function classifyWorkflowCandidate(c) {
   }
   if (c.kind === 'workflow_job_matrix') {
     return { result: 'unknown', ruleId: 'SP004', reason: 'workflow_dynamic_matrix_unproven' };
+  }
+  if (c.kind === 'workflow_job_nonstandard_step_indent') {
+    return { result: 'unknown', ruleId: 'SP004', reason: 'workflow_nonstandard_step_indent_unproven' };
   }
   return null;
 }

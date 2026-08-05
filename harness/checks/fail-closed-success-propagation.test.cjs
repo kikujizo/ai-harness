@@ -2424,3 +2424,126 @@ jobs:
     cleanup(dir);
   }
 });
+
+test('H1 AC2/AC4: set -e 下で TARGET_COMMAND && echo ok は伝播未証明でSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/and-list.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/and-list.sh',
+      '#!/bin/bash\nset -e\nnpm test && echo ok\necho done\n',
+      'set -e with non-terminal && list',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_failure_propagation_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H2 AC3/AC4: 1-space indent Workflowの continue-on-error は候補ゼロにせずSP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+ test:
+  runs-on: ubuntu-latest
+  steps:
+   - name: Run tests
+     continue-on-error: true
+     run: npm test
+`,
+      'nonstandard 1-space indent workflow',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_nonstandard_step_indent_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H3 AC3: ABSENCE_TERMまで7コメント離れたflat-ifも候補ゼロにせずunknownで捕捉する', () => {
+  const dir = makeRepo();
+  try {
+    const status = ['sk', 'ipped'].join('');
+    const reason = ['tool ', 'un', 'available'].join('');
+    const comments = Array.from({ length: 7 }, (_, i) => `    // note ${i}`).join('\n');
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+function verify() {
+  if (!globalThis.__tool) {
+${comments}
+    console.log('${status}: ${reason}');
+    return;
+  }
+}
+verify();
+`,
+      'absence term far from if via comments',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    // 7コメントを挟んでもifが発見され候補は生成される(fail-openしない)。
+    // meaningful line基準のカウントはコメントも含める既存仕様のため、
+    // FLAT_IF_MAX_MEANINGFULを超えてunknownになるのが契約上正しい。
+    assert.ok(result.lines.includes('reason=node_skip_propagation_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H4a AC2 回帰: CHECK_STATUS=true; exit 0 はfailure記録の誤検知なくpass', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/status-true.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/status-true.sh',
+      '#!/bin/bash\nCHECK_STATUS=true\nexit 0\n',
+      'true value is not a failure record',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+    assert.ok(!result.lines.some((line) => line.includes('shell_unconditional_exit0_after_failure_record')));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H4b AC2: CHECK_STATUS=1直後の無条件exit 0はSP001 fail', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/status-fail.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/status-fail.sh',
+      '#!/bin/bash\nCHECK_STATUS=1\nexit 0\n',
+      'numeric failure record before unconditional exit 0',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+    assert.ok(result.lines.includes('reason=shell_unconditional_exit0_after_failure_record'));
+  } finally {
+    cleanup(dir);
+  }
+});

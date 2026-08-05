@@ -57,8 +57,7 @@ function fixtureExplicitPropagationShell() {
   return [
     '#!/bin/bash',
     'set -e',
-    'fail_closed() { echo "$1" >&2; exit 1; }',
-    `${pause} 2>/dev/null || fail_closed "pause_failed"`,
+    `${pause} 2>/dev/null || exit 1`,
     '',
   ].join('\n');
 }
@@ -2474,7 +2473,7 @@ jobs:
   }
 });
 
-test('H3 AC3: ABSENCE_TERMまで7コメント離れたflat-ifも候補ゼロにせずunknownで捕捉する', () => {
+test('H3 AC3: ABSENCE_TERMまで7コメント離れたflat-ifは//コメントをmeaningfulに数えずSP003 fail', () => {
   const dir = makeRepo();
   try {
     const status = ['sk', 'ipped'].join('');
@@ -2498,12 +2497,10 @@ verify();
     );
     const result = runOnRepo(dir, baseSha, headSha);
     assert.equal(result.exitCode, 1);
-    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('result=fail'));
     assert.ok(result.lines.includes('rule_id=SP003'));
-    // 7コメントを挟んでもifが発見され候補は生成される(fail-openしない)。
-    // meaningful line基準のカウントはコメントも含める既存仕様のため、
-    // FLAT_IF_MAX_MEANINGFULを超えてunknownになるのが契約上正しい。
-    assert.ok(result.lines.includes('reason=node_skip_propagation_unproven'));
+    // Nodeの // comment-only line はmeaningful lineに数えない。
+    assert.ok(result.lines.includes('reason=node_skip_returns_success'));
   } finally {
     cleanup(dir);
   }
@@ -2538,6 +2535,111 @@ test('H4b AC2: CHECK_STATUS=1直後の無条件exit 0はSP001 fail', () => {
       '#!/bin/bash\nCHECK_STATUS=1\nexit 0\n',
       'numeric failure record before unconditional exit 0',
     );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+    assert.ok(result.lines.includes('reason=shell_unconditional_exit0_after_failure_record'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+
+test('H1b AC2/AC4: set -e 下で固定pass/fail形以外の TARGET_COMMAND || echo ok はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/or-list.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/or-list.sh',
+      '#!/bin/bash\nset -e\nnpm test || echo ok\necho done\n',
+      'set -e with unproven || list',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_failure_propagation_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H1c AC2 回帰: TARGET_COMMAND || true はSP001 failのみを維持する', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/or-true.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(dir, 'scripts/or-true.sh', '#!/bin/bash\nnpm test || true\n', 'or true');
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+    assert.ok(!result.lines.includes('rule_id=SP002'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H1d AC2 回帰: TARGET_COMMAND || exit 1 はpassを維持する', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/or-exit.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(dir, 'scripts/or-exit.sh', '#!/bin/bash\nnpm test || exit 1\n', 'or exit');
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H2b AC3/AC4: 非標準indent composite actionは候補ゼロにせずSP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'action.yml', 'name: x\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'action.yml',
+      `name: x
+runs:
+ using: composite
+ steps:
+  - name: Run tests
+    continue-on-error: true
+    run: npm test
+`,
+      'nonstandard composite indent',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_nonstandard_step_indent_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H4c AC2: failure-record窓はset -eで終了しexit 0をSP001にしない', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/status-set-e.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(dir, 'scripts/status-set-e.sh', '#!/bin/bash\nCHECK_STATUS=1\nset -e\nexit 0\n', 'status window terminates at set e');
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+    assert.ok(!result.lines.some((line) => line.includes('shell_unconditional_exit0_after_failure_record')));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('H4d AC2/AC4: CHECK_STATUS=PIPESTATUS はfailure recordとしてSP001 fail', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/status-pipestatus.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(dir, 'scripts/status-pipestatus.sh', '#!/bin/bash\nCHECK_STATUS=PIPESTATUS\nexit 0\n', 'pipestatus failure record');
     const result = runOnRepo(dir, baseSha, headSha);
     assert.equal(result.exitCode, 1);
     assert.ok(result.lines.includes('result=fail'));

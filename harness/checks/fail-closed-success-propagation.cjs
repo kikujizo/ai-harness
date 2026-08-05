@@ -927,20 +927,30 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
   const seenKeys = new Set();
 
   const listLine = lines[startIdx];
+  // `- run: |`/`|-`/`|+`はblock scalarの開始行でもあるため、`(.+)$`は本来
+  // listInlineBlockが処理すべき行にも一致してしまう。block scalar indicatorの
+  // 場合はここでnoteStepKeyを呼ばず、run keyの登録はlistInlineBlock側に一本化する
+  // (二重登録によるhasDuplicateKey誤検知を防ぐ、Issue #123固定構文v3)。
   const listInlineRun = listLine.match(new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*(.+)$`));
   if (listInlineRun) {
-    noteStepKey(block, seenKeys, 'run');
     const value = listInlineRun[1].trim();
-    if (value === '|' || value === '|-' || value === '|+') {
-      if (value === '|-' || value === '|+') block.hasChompingRun = true;
-    } else if (value.length > 0 && value !== '>') {
-      block.runLines.push({ lineNo: startIdx + 1, text: value });
+    const isBlockScalarHeader = value === '|' || value === '|-' || value === '|+';
+    if (!isBlockScalarHeader) {
+      noteStepKey(block, seenKeys, 'run');
+      if (value.length > 0 && value !== '>') {
+        block.runLines.push({ lineNo: startIdx + 1, text: value });
+      }
+      if (value === '>') block.hasFoldedRun = true;
+    } else if (value === '|-' || value === '|+') {
+      block.hasChompingRun = true;
     }
-    if (value === '>') block.hasFoldedRun = true;
   }
 
+  // chomping indicator(`-`/`+`)は`|`の直後に1文字だけ付く。`(?:-\+)?`は
+  // 「`-`の次に`+`」という2文字の並びを意味してしまい`|-`/`|+`単体に一致しない誤りだったため
+  // `[-+]?`に修正(Issue #123固定構文v3)。
   const listInlineBlock = listLine.match(
-    new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*\\|(?:-\\+)?\\s*$`),
+    new RegExp(`^\\s{${stepListIndent}}-\\s+run:\\s*\\|[-+]?\\s*$`),
   );
   if (listInlineBlock) {
     noteStepKey(block, seenKeys, 'run');

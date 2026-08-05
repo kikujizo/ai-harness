@@ -2255,3 +2255,86 @@ test('G4e AC3: 窓内で終了状態参照はあるが停止未確認はSP002 un
     cleanup(dir);
   }
 });
+
+test('G6a AC3: nameなし list開始行 run: | + npm test は重複key誤検知せずpass', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          npm test
+`,
+      'nameless list-inline block run',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+    assert.ok(!result.lines.some((line) => line.includes('workflow_structure_unsupported')));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G6b AC3: nameなし list開始行 run: |- + npm test は本文収集のうえSP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |-
+          npm test
+`,
+      'nameless list-inline strip chomping run',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_structure_unsupported'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G6c AC3: nameなし list開始行 run: |+ + npm test は本文収集のうえSP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |+
+          npm test
+`,
+      'nameless list-inline keep chomping run',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_structure_unsupported'));
+  } finally {
+    cleanup(dir);
+  }
+});

@@ -26,12 +26,12 @@ const CHECK_PURPOSE_RE =
   /\b(test|tests|check|verify|lint|fail-closed)\b|npm\s+test|yarn\s+test|pnpm\s+test|node\s+[^\s|;&]*test|bash\s+-n|shellcheck|eslint|jest|mocha|vitest/i;
 const SP001_SUPPRESS_RE = /\|\|\s*(true|:)\s*($|[#;])/;
 const UNCONDITIONAL_EXIT0_RE = /^\s*exit\s+0\s*($|[#;])/;
-// 値側は非ゼロ整数(`1`等)/`false`/`$?`参照だけをfailure値として認める。
+// 値側は非ゼロ整数(`1`等)/`false`/`$?`参照/`PIPESTATUS`参照だけをfailure値として認める。
 // `[^0\s]`（0でも空白でもない任意の1文字）は`true`のような成功値の1文字目にも
 // 一致してしまい、`CHECK_STATUS=true`を誤ってfailure記録扱いする過剰検出だったため
 // 修正(Issue #123固定構文v3)。
 const FAILURE_RECORD_RE =
-  /\b([A-Z][A-Z0-9_]*_(?:EXIT|PASS|FAIL|STATUS)|LOCAL_E2E_PASS|POC_KEY_GATE_PASS)\s*=\s*(?:false|[1-9]\d*|\$?\?)(?:\s|$|[#;])/i;
+  /\b([A-Z][A-Z0-9_]*_(?:EXIT|PASS|FAIL|STATUS)|LOCAL_E2E_PASS|POC_KEY_GATE_PASS)\s*=\s*(?:false|[1-9]\d*|\$?\?|PIPESTATUS)(?:\s|$|[#;])/i;
 const FAILURE_RECORD_WINDOW_MAX_MEANINGFUL = 3;
 const SET_PLUS_E_RE = /^\s*set\s+\+e\b/;
 const SET_MINUS_E_RE =
@@ -48,6 +48,10 @@ const FAIL_CLOSED_CALL_RE = /\|\|\s*fail_closed\b|;\s*then\s+fail_closed\b/;
 // あるため、TARGET_COMMANDが `&&` を含む行にある場合はerrexit契約による証明とみなさない
 // (Issue #123固定構文v3)。
 const AND_AND_RE = /&&/;
+// `||`自体は固定pass形(`|| exit n`/`|| return n`/`|| fail_closed`)やSP001 suppress
+// (`|| true`/`|| :`)なら別経路で処理されるが、それ以外(`|| echo ok`等)の`||`はerrexit契約の
+// 証明にならない(Issue #123固定構文v3)。
+const OR_OR_RE = /\|\|/;
 const FLAT_IF_MAX_MEANINGFUL = 8;
 const ERREXIT_CONTRACT_MAX_MEANINGFUL = 3;
 const IF_NOT_RE = /^\s*if\s+!\s+/;
@@ -259,6 +263,15 @@ function isMeaningfulLine(line) {
   return trimmed.length > 0 && !trimmed.startsWith('#');
 }
 
+// Node用のmeaningful line判定。shell/workflow用のisMeaningfulLineは`#`コメントしか
+// 除外しないため、Nodeの`//` comment-only行もmeaningfulとしてカウントしてしまい、
+// comment/空行を挟んだflat-ifの契約上限(8 meaningful lines)を実質より狭くしていた。
+// 言語別に判定を分離する(Issue #123固定構文v3)。
+function isMeaningfulNodeLine(line) {
+  const trimmed = line.trim();
+  return trimmed.length > 0 && !trimmed.startsWith('#') && !trimmed.startsWith('//');
+}
+
 function isShebangLine(line) {
   return /^\s*#!/.test(line);
 }
@@ -266,7 +279,7 @@ function isShebangLine(line) {
 function countMeaningfulLines(lines, start, end) {
   let count = 0;
   for (let i = start; i <= end; i += 1) {
-    if (isMeaningfulLine(lines[i])) count += 1;
+    if (isMeaningfulNodeLine(lines[i])) count += 1;
   }
   return count;
 }
@@ -473,10 +486,11 @@ function computeSetPlusEWindows(lines) {
 }
 
 // failure record(`FOO_STATUS=1`等)検出後、後続の3 meaningful lines(空行・コメント除く
-// 実効行)だけをcontextとする固定窓を前計算する。fi/done/esac/}のいずれかが現れたら
-// 窓を終了する。旧実装は`exit 0`側から直前8物理行を逆走査しており、契約(次の3
-// meaningful linesかつterminatorまで)より広すぎる窓だったため`set +e`窓と同じ
-// 前向き固定窓方式に修正(Issue #123固定構文v3)。
+// 実効行)だけをcontextとする固定窓を前計算する。fi/done/esac/}、または
+// set -e/-eu/-euo pipefail/-o errexitのいずれかが現れたら窓を終了する。旧実装は
+// `exit 0`側から直前8物理行を逆走査しており、契約(次の3 meaningful linesかつ
+// terminatorまで)より広すぎる窓だったため`set +e`窓と同じ前向き固定窓方式に修正
+// (Issue #123固定構文v3)。
 function computeFailureRecordWindows(lines) {
   const windowByLine = new Array(lines.length).fill(false);
   let remaining = 0;
@@ -485,7 +499,7 @@ function computeFailureRecordWindows(lines) {
     if (!isMeaningfulLine(rawLine)) continue;
     const stripped = stripComment(rawLine, 'shell').trimEnd();
     if (remaining > 0) {
-      if (SHELL_BLOCK_CLOSE_RE.test(stripped)) {
+      if (SHELL_BLOCK_CLOSE_RE.test(stripped) || SET_MINUS_E_RE.test(stripped)) {
         remaining = 0;
       } else {
         windowByLine[i] = true;
@@ -656,13 +670,18 @@ function extractShellCandidates(content, relPath) {
         }
       }
 
-      candidates.push({
-        kind: 'target_command',
-        line: lineNo,
-        hasProofOnLine: hasShellProofOnLine(line, confirmedFailClosed),
-        errexitProven: errexitInContract && !errexitContractVoided && !AND_AND_RE.test(line),
-        ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
-      });
+      {
+        const hasProofOnLine = hasShellProofOnLine(line, confirmedFailClosed);
+        const hasUnprovenOrList = OR_OR_RE.test(line) && !hasProofOnLine;
+        candidates.push({
+          kind: 'target_command',
+          line: lineNo,
+          hasProofOnLine,
+          errexitProven:
+            errexitInContract && !errexitContractVoided && !AND_AND_RE.test(line) && !hasUnprovenOrList,
+          ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
+        });
+      }
       continue;
     }
 
@@ -730,7 +749,7 @@ function getNodeFlatIfRange(lines, ifIdx) {
     if (started && depth <= 0) {
       break;
     }
-    if (i > ifIdx && lineIndent(lines[i]) < ifIndent && isMeaningfulLine(lines[i])) {
+    if (i > ifIdx && lineIndent(lines[i]) < ifIndent && isMeaningfulNodeLine(lines[i])) {
       end = i - 1;
       break;
     }
@@ -741,7 +760,7 @@ function getNodeFlatIfRange(lines, ifIdx) {
 
 function hasElseAfterFlatIf(lines, endIdx) {
   for (let i = endIdx + 1; i < Math.min(lines.length, endIdx + 3); i += 1) {
-    if (!isMeaningfulLine(lines[i])) continue;
+    if (!isMeaningfulNodeLine(lines[i])) continue;
     const codeView = buildCodeView(stripComment(lines[i], 'node'));
     if (/\belse\b/.test(codeView)) return true;
     break;
@@ -751,7 +770,7 @@ function hasElseAfterFlatIf(lines, endIdx) {
 
 function flatIfInteriorIsSimple(lines, start, end) {
   for (let i = start + 1; i < end; i += 1) {
-    if (!isMeaningfulLine(lines[i])) continue;
+    if (!isMeaningfulNodeLine(lines[i])) continue;
     const codeView = buildCodeView(stripComment(lines[i], 'node'));
     if (/[{}]/.test(codeView)) return false;
     if (/\b(if|else|switch|for|while|do|try|catch|finally|function|class)\b/.test(codeView)) {
@@ -779,13 +798,13 @@ function isLimitedImplicitReturnIfCore(lines, ifIdx, allowTrailingFailureExit) {
 
   if (!funcBody) {
     for (let i = 0; i < start; i += 1) {
-      if (!isMeaningfulLine(lines[i])) continue;
+      if (!isMeaningfulNodeLine(lines[i])) continue;
       const stripped = stripComment(lines[i], 'node');
       if (/^['"]use strict['"]/.test(stripped.trim())) continue;
       return false;
     }
     for (let i = end + 1; i < lines.length; i += 1) {
-      if (!isMeaningfulLine(lines[i])) continue;
+      if (!isMeaningfulNodeLine(lines[i])) continue;
       if (isLoneClosingBraceLine(lines[i], 'node')) continue;
       if (allowTrailingFailureExit) {
         const stripped = stripComment(lines[i], 'node');
@@ -797,7 +816,7 @@ function isLimitedImplicitReturnIfCore(lines, ifIdx, allowTrailingFailureExit) {
   }
 
   for (let i = funcBody.bodyStart + 1; i < funcBody.bodyEnd; i += 1) {
-    if (!isMeaningfulLine(lines[i])) continue;
+    if (!isMeaningfulNodeLine(lines[i])) continue;
     if (isLoneClosingBraceLine(lines[i], 'node')) continue;
     if (i >= start && i <= end) continue;
     if (i < start) return false;
@@ -880,7 +899,7 @@ function extractNodeCandidates(content, relPath) {
           found = back;
           break;
         }
-        if (back !== idx && isMeaningfulLine(lines[back])) {
+        if (back !== idx && isMeaningfulNodeLine(lines[back])) {
           meaningfulSeen += 1;
         }
       }
@@ -1193,6 +1212,33 @@ function jobHasTestPurpose(jobLines) {
   return WORKFLOW_TEST_STEP_RE.test(slice) || CHECK_PURPOSE_RE.test(slice);
 }
 
+// collectCompositeStepBlocksは`runs:`直下の`using: composite`/`steps:`を固定2-space
+// indentでしか判定できない。有効なaction.yamlだが非標準indent(例: 1-space)の場合、
+// isComposite判定自体が失敗しstepブロックが1つも収集されずfail-openする。indentを
+// 問わず`runs:`セクション内にcomposite用途の`using:`/`steps:`があるかを緩く判定する
+// (Issue #123固定構文v3、composite action版)。
+function actionHasNonstandardCompositeSteps(lines) {
+  let runsIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^runs:\s*$/.test(lines[i])) {
+      runsIdx = i;
+      break;
+    }
+  }
+  if (runsIdx === -1) return false;
+
+  let isComposite = false;
+  let hasSteps = false;
+  let hasStandardStepIndent = false;
+  for (let i = runsIdx + 1; i < lines.length; i += 1) {
+    if (lineIndent(lines[i]) === 0 && isMeaningfulLine(lines[i])) break;
+    if (/^\s*using:\s*composite\s*$/i.test(lines[i])) isComposite = true;
+    if (/^\s*steps:\s*$/.test(lines[i])) hasSteps = true;
+    if (/^    -\s/.test(lines[i])) hasStandardStepIndent = true;
+  }
+  return isComposite && hasSteps && !hasStandardStepIndent;
+}
+
 // collectWorkflowStepBlocksは固定2/4/6-space indentのsteps:構造しか解析できない。
 // 有効なYAMLだが非標準indent(例: 1-space)の場合、stepブロックが1つも収集されず
 // test用途のcontinue-on-error等がそのままfail-open(finding 0)する。固定構文へ
@@ -1319,6 +1365,12 @@ function extractWorkflowCandidates(content, relPath) {
 
   if (!isAction) {
     candidates.push(...extractJobLevelCandidates(lines, relPath));
+  } else if (
+    stepBlocks.length === 0 &&
+    actionHasNonstandardCompositeSteps(lines) &&
+    (WORKFLOW_TEST_STEP_RE.test(content) || CHECK_PURPOSE_RE.test(content))
+  ) {
+    candidates.push({ kind: 'workflow_job_nonstandard_step_indent', path: relPath, line: 1 });
   }
 
   return candidates;

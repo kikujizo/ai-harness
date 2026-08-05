@@ -1035,7 +1035,10 @@ function parseStepBlock(lines, startIdx, endIdx, stepListIndent, stepKeyIndent, 
       }
     }
 
-    if (line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*\\|(?:-\\+)?\\s*$`))) {
+    // chomping indicator(`-`/`+`)は`|`の直後に1文字だけ付く。`(?:-\+)?`は
+    // 「`-`の次に`+`」という2文字の並びを意味してしまい`run: |-`/`run: |+`単体に
+    // 一致しない誤りだったため`[-+]?`に修正(Issue #123固定構文v3、step直下形式)。
+    if (line.match(new RegExp(`^\\s{${stepKeyIndent}}run:\\s*\\|[-+]?\\s*$`))) {
       if (/run:\s*\|-/.test(line) || /run:\s*\|\+/.test(line)) {
         block.hasChompingRun = true;
       }

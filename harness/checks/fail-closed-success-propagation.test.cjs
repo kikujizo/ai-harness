@@ -2338,3 +2338,89 @@ jobs:
     cleanup(dir);
   }
 });
+
+test('G7a AC3: step直下 id: t1 + run: | + npm test は本文収集のうえpass', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: t1
+        run: |
+          npm test
+`,
+      'step-body block run',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+    assert.ok(!result.lines.some((line) => line.includes('workflow_structure_unsupported')));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G7b AC3: step直下 id: t1 + run: |- + npm test は本文収集のうえSP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: t1
+        run: |-
+          npm test
+`,
+      'step-body strip chomping run',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_structure_unsupported'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G7c AC3: step直下 id: t1 + run: |+ + npm test は本文収集のうえSP004 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: t1
+        run: |+
+          npm test
+`,
+      'step-body keep chomping run',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_structure_unsupported'));
+  } finally {
+    cleanup(dir);
+  }
+});

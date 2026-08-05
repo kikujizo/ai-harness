@@ -1,0 +1,60 @@
+# Issue #123: 変更された shell / Node test / GitHub Workflow について、既知の
+# success-propagation 迂回と静的に成否伝播を証明できない箇所を機械検出し、
+# 独立レビュー前に成功扱いせず停止する。
+#
+# 権威ある判定は base branch 上の checker で行う（PR head 側のプログラム・test・
+# workflow は実行しない）。
+#
+# `pull_request_target` を使う理由は issue-manifest-diff と同様（PR 側の .yml 改変で
+# checker 呼び出しを無力化できないようにする）。
+# PR head は差分解析用 git object としてのみ取得し、checkout / require / exec しない。
+
+name: Fail-closed success propagation
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fail-closed-success-propagation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base branch (checker本体はPR headでなくbase側を使う)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Fetch PR head commit (checkoutはしない。tree比較のためのgit objectのみ取得)
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git fetch origin "refs/pull/${PR_NUMBER}/head"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run fail-closed-success-propagation checker (base branch上のcheckerをread-only実行)
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          node harness/checks/fail-closed-success-propagation.cjs \
+            --base "${BASE_SHA}" \
+            --head "${HEAD_SHA}" | tee -a "$GITHUB_STEP_SUMMARY"

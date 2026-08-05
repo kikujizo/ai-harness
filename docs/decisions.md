@@ -3221,3 +3221,89 @@ mergeされていた場合、その下流影響は本PRのrevertだけでは取�
 - [ ] ChatGPTによる要件レビュー（1回目request-changes→修正済み→再レビュー依頼中）
 - [ ] Codexによる技術レビュー（1回目request-changes→修正済み→再レビュー依頼中）
 - [ ] 人間によるmerge判断（発効点・`gate=human_approval`）
+
+---
+
+# Decision: 既知のsuccess-propagation迂回をPRレビュー前にblocking検出する（fail-closed-success-propagation）
+
+Date: 2026-08-01
+Status: Proposed
+Related Issues: #123
+Related PRs: #127
+
+## 決定事項
+
+変更された shell・Node.js test・GitHub Workflow について、既知の success-propagation 迂回（SP001〜SP004）と静的に成否伝播を証明できない箇所を、`harness/checks/fail-closed-success-propagation.cjs` で機械検出し、独立レビュー前に成功扱いせず停止する。PR 上の権威ある判定は `pull_request_target` ＋ read-only ＋ base branch 上の checker で行い、PR head 側コードは checkout / require / exec しない。
+
+## 背景・課題
+
+親提案 #120 の fail-closed 基準導入直後、ai-dev-workflow PR #157（実行不能を skip して成功）と PR #156（未処理 `sleep 5` 後に終了コード 0）が確認された。現状は実装後レビューでの人手確認に依存しており、既知迂回を PR レビュー前に blocking 検出する仕組みがなかった。
+
+## 採用する方針
+
+- 固定構文契約 `success-propagation-fixed/v1`（checker 出力 `syntax_contract=...`）で SP001〜SP004 を既知パターン検出。CLI 契約は `--base <commit_sha> --head <commit_sha>` のみ
+- shell 候補同一性: 同一 `TARGET_COMMAND` 開始行は 1 候補。SP001 `fail` 時は SP002 `unknown` を重複付与しない
+- Node.js: `raw_view` / `code_view` 分離、対応可能 condition と限定 implicit return のみ `fail`、それ以外は `unknown`
+- Workflow / composite: `jobs.*.steps` と `runs.steps`（composite）のみ step 候補。job reusable・dynamic matrix・`uses:`・`run: >` は `unknown` または契約どおり `fail`
+- `harness/checks/fail-closed-success-propagation.test.cjs`（新規）で AC1〜AC5 相当を実 git fixture で再現
+- `.github/workflows/fail-closed-success-propagation.yml`（新規）を `pull_request_target`（opened / synchronize / reopened）で発火。base branch 上の checker を read-only 実行
+- `docs/criteria/fail-closed.md` へ checker の適用範囲・候補同一性・`unknown` blocking・構造解析分離・checker pass の限界を追記
+- 個別 finding は `pass|fail|unknown`、PR 全体は `pass|fail|blocked`。`unknown` が1件でも PR 全体を `blocked` ＋ nonzero
+
+## 採用しない方針 / 却下した代替案
+
+- **完全な shell / JavaScript / YAML 構文・意味解析（AST 等）を本 PR で導入**: 固定構文 v3 で構造解析を分離し別 Checkpoint へ送るため却下
+- **fail-closed 基準2〜8の機械検査を同一 PR で導入**: 粒度超過のため却下（別 Checkpoint）
+- **inline ignore / allowlist / warning-only 経路**: 迂回経路を増やすため却下
+- **PR head 側 checker の実行**: 信頼境界を破るため却下
+- **`pull_request` イベントの使用**: ワークフロー定義自体が PR 側で改変可能なため却下（Issue #122 と同様に `pull_request_target` を採用）
+
+## 判断理由
+
+- Checkpoint 1（Issue #122 / PR #124）で確立した manifest 照合と同型の信頼境界（base branch 上 checker、PR head 非実行）を踏襲できる
+- 導入直後に実測された2件の迂回に限定することで、3〜5ファイル・半日粒度に収まる
+- `unknown` を PR 全体 `blocked` とすることで、静的解析不能を成功扱いしない fail-closed 契約を維持できる
+
+## リスク（不可逆4カテゴリの該当有無）
+
+カテゴリ③に該当（`.github/workflows` へ blocking 判定を追加）。
+`risk=high gate=human_approval`。実装・テスト・PR 作成は AI 工程として進め、merge 発効点のみ人間 approve/deny を必須とする。
+
+最悪の失敗は既知迂回を `pass` にして違反を見逃すこと、または `unknown` 過剰判定で正常 PR を継続停止すること。Workflow と checker は `git revert` で戻せるが、見逃し期間中に merge された下流影響は revert だけでは戻らない。
+
+## 影響範囲
+
+- `harness/checks/fail-closed-success-propagation.cjs`（新規）
+- `harness/checks/fail-closed-success-propagation.test.cjs`（新規）
+- `.github/workflows/fail-closed-success-propagation.yml`（新規）
+- `docs/criteria/fail-closed.md`
+- 本 Decision Log
+
+## 取り消し手順
+
+1. 実装 PR を `git revert` する
+2. `.github/workflows/fail-closed-success-propagation.yml` を削除する
+3. `harness/checks/fail-closed-success-propagation.*` を削除する
+4. `docs/criteria/fail-closed.md` の checker 節を戻す
+5. 本 Decision Log の Status を `Superseded` へ更新する
+
+## 見直す条件
+
+- `unknown` 過剰判定が運用上のボトルネックになった場合 → 検出ルールの見直しを別 Issue で行う
+- 基準2〜8の機械検査が必要になった場合 → 別 Checkpoint として分割する
+- branch protection への required check 化が必要になった場合 → 別 Checkpoint で再設計
+
+## レビュー記録
+
+| 項目 | 結果 | 証跡 |
+|---|---|---|
+| ChatGPT要件レビュー | 未実施 | - |
+| Codex独立技術レビュー | 未実施 | - |
+| merge | 未実施 | - |
+
+## 次アクション
+
+- [x] Cursor による実装・テスト・PR 作成（本エントリ）
+- [ ] ChatGPT 要件レビュー
+- [ ] Codex 独立技術レビュー
+- [ ] 人間による merge 判断（発効点・`gate=human_approval`）

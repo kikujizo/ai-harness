@@ -23,7 +23,7 @@ const NODE_EXTENSIONS = new Set(['.js', '.cjs', '.mjs']);
 const YAML_EXTENSIONS = new Set(['.yml', '.yaml']);
 
 const CHECK_PURPOSE_RE =
-  /\b(test|check|verify|lint)\b|npm\s+test|yarn\s+test|pnpm\s+test|node\s+[^\s|;&]*test|bash\s+-n|shellcheck|eslint|jest|mocha|vitest/i;
+  /\b(test|tests|check|verify|lint|fail-closed)\b|npm\s+test|yarn\s+test|pnpm\s+test|node\s+[^\s|;&]*test|bash\s+-n|shellcheck|eslint|jest|mocha|vitest/i;
 const SP001_SUPPRESS_RE = /\|\|\s*(true|:)\s*($|[#;])/;
 const UNCONDITIONAL_EXIT0_RE = /^\s*exit\s+0\s*($|[#;])/;
 const FAILURE_RECORD_RE =
@@ -43,8 +43,16 @@ const FLAT_IF_MAX_MEANINGFUL = 8;
 const ERREXIT_CONTRACT_MAX_MEANINGFUL = 3;
 const IF_NOT_RE = /^\s*if\s+!\s+/;
 const SHELL_BLOCK_KEYWORD_RE = /\b(?:if|then|elif|for|while|until|case|function)\b/;
-const EXTERNAL_CMD_RE =
-  /^\s*(?:[A-Za-z_][\w]*=\S*\s+)*(?:sleep|curl|wget|git|node|python3?|bash|sh|npm|yarn|pnpm|make|docker|kubectl|gh|aws|gcloud|terraform|ansible|helm|cargo|go|rustc|java|mvn|gradle|cmake|ninja|tar|cp|mv|rm|mkdir|chmod|chown|flock|timeout|wait|read|command|eval|exec)\b/i;
+const TARGET_COMMAND_NAMES = new Set([
+  'sleep', 'curl', 'wget', 'git', 'node', 'python', 'python3', 'bash', 'sh', 'npm', 'yarn',
+  'pnpm', 'make', 'docker', 'kubectl', 'gh', 'aws', 'gcloud', 'terraform', 'ansible', 'helm',
+  'cargo', 'go', 'rustc', 'java', 'mvn', 'gradle', 'cmake', 'ninja', 'tar', 'cp', 'mv', 'rm',
+  'mkdir', 'chmod', 'chown', 'flock', 'timeout', 'wait', 'read', 'command', 'eval', 'exec',
+]);
+// 未定義wrapper（例: sudo、env、xargs）経由は直接実行へ変換せず unknown にする(Issue #123 固定構文v3)。
+const UNKNOWN_WRAPPER_NAMES = new Set(['sudo', 'env', 'xargs']);
+const ENV_PREFIX_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*=\S*$/;
+const SHELL_BLOCK_CLOSE_RE = /^\s*(?:fi|done|esac|\})\s*($|[#;])/;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
 const ABSENCE_TERM_PARTS = [
@@ -395,6 +403,66 @@ function hasShellProofOnLine(line, confirmedFailClosed) {
   return false;
 }
 
+// 先頭の連続する NAME=value 環境変数プレフィックスを読み飛ばし、TARGET_COMMAND判定対象の
+// 最初のtokenを返す(basename判定はcaller側で行う)。
+function getFirstCommandToken(text) {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  const tokens = trimmed.split(/\s+/);
+  let i = 0;
+  while (i < tokens.length && ENV_PREFIX_TOKEN_RE.test(tokens[i])) {
+    i += 1;
+  }
+  return i < tokens.length ? tokens[i] : null;
+}
+
+function basenameOfCommandToken(token) {
+  const idx = token.lastIndexOf('/');
+  return idx === -1 ? token : token.slice(idx + 1);
+}
+
+// flat `if !` 開始行は候補としてTARGET_COMMANDを直接実行候補と統合するため、`if !`
+// prefixを読み飛ばした残りからcommand tokenを解決する。
+function resolveCommandBasename(line) {
+  let commandPortion = line;
+  const ifNotMatch = line.match(IF_NOT_RE);
+  if (ifNotMatch) {
+    commandPortion = line.slice(ifNotMatch[0].length);
+  }
+  const token = getFirstCommandToken(commandPortion);
+  if (!token) return null;
+  const cleaned = token.replace(/[;&|]+$/, '');
+  if (cleaned.length === 0) return null;
+  return basenameOfCommandToken(cleaned).toLowerCase();
+}
+
+// `set +e`検出後、後続の3 meaningful lines(空行・コメント除く実効行)だけをcontextとする
+// 固定窓を、ファイル全体に対して1パスで前計算する。fi/done/esac/}/set -e系のいずれかが
+// 現れたら窓を終了し、窓外へ`set +e`状態を持ち越さない。複数の`set +e`が重なる場合は
+// 最も近い先行anchorだけを採用する(新しいanchorが常に前の窓を上書きする)。
+function computeSetPlusEWindows(lines) {
+  const windowByLine = new Array(lines.length).fill(null);
+  let current = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const rawLine = lines[i];
+    if (!isMeaningfulLine(rawLine)) continue;
+    const stripped = stripComment(rawLine, 'shell').trimEnd();
+    if (current && current.remaining > 0) {
+      if (SHELL_BLOCK_CLOSE_RE.test(stripped) || SET_MINUS_E_RE.test(stripped)) {
+        current = null;
+      } else {
+        windowByLine[i] = current;
+        current.indices.push(i);
+        current.remaining -= 1;
+      }
+    }
+    if (SET_PLUS_E_RE.test(stripped)) {
+      current = { remaining: ERREXIT_CONTRACT_MAX_MEANINGFUL, indices: [] };
+    }
+  }
+  return windowByLine;
+}
+
 function findFlatIfNotBlock(lines, idx) {
   let ifIdx = idx;
   const line = stripComment(lines[idx], 'shell');
@@ -459,9 +527,10 @@ function extractShellCandidates(content, relPath) {
   const lines = content.split(/\r?\n/);
   const candidates = [];
   const confirmedFailClosed = collectConfirmedFailClosedNames(lines);
+  const setPlusEWindows = computeSetPlusEWindows(lines);
 
   let errexitInContract = false;
-  let errexitDisabled = false;
+  let errexitContractVoided = false;
   let meaningfulBeforeCommand = 0;
 
   for (let idx = 0; idx < lines.length; idx += 1) {
@@ -475,11 +544,11 @@ function extractShellCandidates(content, relPath) {
       meaningfulBeforeCommand += 1;
       if (SET_MINUS_E_RE.test(line) && meaningfulBeforeCommand <= ERREXIT_CONTRACT_MAX_MEANINGFUL) {
         errexitInContract = true;
-        errexitDisabled = false;
+        errexitContractVoided = false;
       }
     }
     if (SET_PLUS_E_RE.test(line)) {
-      errexitDisabled = true;
+      errexitContractVoided = true;
       errexitInContract = false;
     }
 
@@ -519,30 +588,60 @@ function extractShellCandidates(content, relPath) {
       }
     }
 
-    if (errexitDisabled && CHECK_PURPOSE_RE.test(line) && !EXIT_STATUS_CHECK_RE.test(line)) {
-      const lookahead = lines.slice(idx + 1, idx + 4).join('\n');
-      if (!EXIT_STATUS_CHECK_RE.test(lookahead) && !hasShellProofOnLine(line, confirmedFailClosed)) {
-        candidates.push({
-          kind: 'fixed',
-          result: 'fail',
-          ruleId: 'SP001',
-          line: lineNo,
-          reason: 'shell_set_plus_e_without_exit_check',
-        });
-        continue;
+    if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
+
+    const commandBasename = resolveCommandBasename(line);
+
+    if (commandBasename && TARGET_COMMAND_NAMES.has(commandBasename)) {
+      const windowEntry = setPlusEWindows[idx];
+      if (windowEntry) {
+        const hasProof = hasShellProofOnLine(line, confirmedFailClosed);
+        if (!hasProof) {
+          const laterText = windowEntry.indices
+            .filter((i) => i > idx)
+            .map((i) => stripComment(lines[i], 'shell'))
+            .join('\n');
+          if (EXIT_STATUS_CHECK_RE.test(laterText)) {
+            candidates.push({
+              kind: 'fixed',
+              result: 'unknown',
+              ruleId: 'SP002',
+              line: lineNo,
+              reason: 'shell_set_plus_e_status_ref_unproven',
+            });
+          } else {
+            candidates.push({
+              kind: 'fixed',
+              result: 'fail',
+              ruleId: 'SP001',
+              line: lineNo,
+              reason: 'shell_set_plus_e_without_exit_check',
+            });
+          }
+          continue;
+        }
       }
+
+      candidates.push({
+        kind: 'target_command',
+        line: lineNo,
+        hasProofOnLine: hasShellProofOnLine(line, confirmedFailClosed),
+        errexitProven: errexitInContract && !errexitContractVoided,
+        ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
+      });
+      continue;
     }
 
-    if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
-    if (!EXTERNAL_CMD_RE.test(line) && !/^\s*[A-Za-z_][\w-]*\s+/.test(line)) continue;
-
-    candidates.push({
-      kind: 'target_command',
-      line: lineNo,
-      hasProofOnLine: hasShellProofOnLine(line, confirmedFailClosed),
-      errexitProven: errexitInContract && !errexitDisabled,
-      ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
-    });
+    if (commandBasename && UNKNOWN_WRAPPER_NAMES.has(commandBasename)) {
+      candidates.push({
+        kind: 'fixed',
+        result: 'unknown',
+        ruleId: 'SP002',
+        line: lineNo,
+        reason: 'shell_unresolved_wrapper_command',
+      });
+      continue;
+    }
   }
 
   return candidates.map((c) => Object.assign({}, c, { path: relPath }));
@@ -768,10 +867,10 @@ function classifyNodeCandidate(c) {
     return { result: 'unknown', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join('') };
   }
   if (c.hasSuccessExit) {
-    if (c.looseOk) {
-      return { result: 'fail', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_returns_success'].join('') };
-    }
-    return { result: 'unknown', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_propagation_unproven'].join('') };
+    // flat if内に明示的な正常終了(bare return等)がある場合、function前後の他statementの
+    // 有無に関係なく同一候補をfailとする。「function bodyが当該ifだけ」という制限は、
+    // 明示的終了文がない限定implicit returnの場合にだけ適用する(下のstrictOk分岐)。
+    return { result: 'fail', ruleId: 'SP003', reason: ['node_', 'sk', 'ip', '_returns_success'].join('') };
   }
   if (c.hasFailureExit) {
     return null;
@@ -801,8 +900,10 @@ function noteStepKey(block, seenKeys, key) {
 }
 
 function markAnchorAliasIfPresent(block, line) {
-  if (/:\s*&[A-Za-z0-9_]+\s*$/.test(line)) block.hasAnchorAlias = true;
-  if (/:\s*\*[A-Za-z0-9_]+\s*$/.test(line)) block.hasAnchorAlias = true;
+  // inline値付きanchor(`name: &label Run tests`)やcomment付きalias(`name: *label # comment`)も
+  // 固定するため、行末までの一致を要求しない(Issue #123 固定構文v3 Workflow anchor/alias/merge key)。
+  if (/:\s*&[A-Za-z0-9_]+/.test(line)) block.hasAnchorAlias = true;
+  if (/:\s*\*[A-Za-z0-9_]+/.test(line)) block.hasAnchorAlias = true;
   if (/^\s*<<:\s*\*[A-Za-z0-9_]+/.test(line)) block.hasAnchorAlias = true;
   if (/^\s*-\s*\*[A-Za-z0-9_]+\s*$/.test(line)) block.hasAnchorAlias = true;
 }

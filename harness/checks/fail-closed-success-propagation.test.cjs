@@ -927,7 +927,11 @@ if (!isReady()) {
   }
 });
 
-test('AC3 blocked: 複雑implicit return は SP003 unknown', () => {
+test('G5a AC3: 前後にstatementがあっても明示的successはSP003 fail', () => {
+  // Codex技術PM再裁定(#5152685893)グループ5: flat if内にbare return等の明示的な正常終了が
+  // ある場合、function前後statementの有無に関係なく同一候補をfailとする。このfixtureは
+  // 旧「複雑implicit return」テストと同一だが、実体は bare return を持つ明示的success candidate
+  // であり、限定implicit return(strictOk)の制限を適用すべきではない。
   const status = ['sk', 'ipped'].join('');
   const reason = ['bash ', 'un', 'available'].join('');
   const dir = makeRepo();
@@ -947,7 +951,41 @@ function runShellTest() {
 }
 runShellTest();
 `,
-      'complex implicit return',
+      'explicit success with surrounding statements',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G5b AC3: 前後statement付きで明示的終了のないimplicit returnはSP003 unknown', () => {
+  // G5aとの対比: if内に明示的な終了文(bare return等)が一切なく、function前後に他の
+  // statementがある「限定implicit return」の本来のケース。この場合はstrictOkの制限
+  // (function bodyが当該ifだけ)が適用され続け、unknownのままであること。
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['bash ', 'un', 'available'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'harness/checks/example.test.cjs', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'harness/checks/example.test.cjs',
+      `'use strict';
+function runShellTest() {
+  prepare();
+  if (!process.env.HAS_BASH) {
+    console.log('${status}: ${reason}');
+  }
+  process.exit(1);
+}
+runShellTest();
+`,
+      'implicit fallthrough with surrounding statements',
     );
     const result = runOnRepo(dir, baseSha, headSha);
     assert.equal(result.exitCode, 1);
@@ -1794,7 +1832,63 @@ jobs:
   }
 });
 
-test('R13 AC3: merge key(<<: *alias) を含む step は unknown', () => {
+test('R13a AC3: inline値付きanchor(&label)を含む step は unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: &test_label Run tests
+        run: npm test
+`,
+      'inline value anchor step',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_structure_unsupported'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('R13b AC3: comment付きalias(*label # comment)を含む step は unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      '.github/workflows/ci.yml',
+      `name: ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: *test_label # comment
+        run: npm test
+`,
+      'alias with comment step',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP004'));
+    assert.ok(result.lines.includes('reason=workflow_structure_unsupported'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('R13c AC3: merge key(<<: *alias) を含む step は unknown', () => {
   const dir = makeRepo();
   try {
     const baseSha = writeAndCommit(dir, '.github/workflows/ci.yml', 'name: ci\n', 'base');
@@ -1849,6 +1943,314 @@ jobs:
     assert.ok(result.lines.includes('reason=workflow_continue_on_error'));
     assert.ok(result.lines.includes('fail_count=1'));
     assert.ok(result.lines.includes('unknown_count=0'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G系: PR #127コメント#5187922715・Codex技術PM再裁定#5152685893で指摘された
+// 追加6群(PURPOSE_TOKEN・TARGET_COMMAND basename・未定義wrapper・set +e固定窓・
+// Node明示的success/限定implicit return分離・Workflow anchor/alias/merge key)を固定する。
+// ---------------------------------------------------------------------------
+
+test('G1a AC2: path非test系でも本文の tests 語でSP003対象になる', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['un', 'avail', 'able'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'src/util.js', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'src/util.js',
+      `'use strict';
+function run() {
+  if (!tool) {
+    console.log('${status}: ${reason} (covered by tests)');
+    return;
+  }
+}
+run();
+`,
+      'purpose token tests in body',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G1b AC2: path非test系でも本文の fail-closed 語でSP003対象になる', () => {
+  const status = ['sk', 'ipped'].join('');
+  const reason = ['un', 'avail', 'able'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'src/other.js', "'use strict';\n", 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'src/other.js',
+      `'use strict';
+function run() {
+  if (!tool) {
+    console.log('${status}: ${reason} (fail-closed contract)');
+    return;
+  }
+}
+run();
+`,
+      'purpose token fail-closed in body',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP003'));
+    assert.ok(result.lines.includes('reason=node_skip_returns_success'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G2a AC2: 絶対パス(/usr/bin/sleep)もbasenameでTARGET_COMMAND認識', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/abspath.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/abspath.sh',
+      '#!/bin/bash\n/usr/bin/sleep 5\n',
+      'absolute path target command',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_failure_propagation_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G2b AC2: 相対パス(./bin/node)もbasenameでTARGET_COMMAND認識', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/relpath.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/relpath.sh',
+      '#!/bin/bash\n./bin/node script.js\n',
+      'relative path target command',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G2c AC2 pass候補: パス付きTARGET_COMMANDの || exit 1 は証明になる', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/abspathproof.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/abspathproof.sh',
+      '#!/bin/bash\n/usr/bin/sleep 5 || exit 1\n',
+      'absolute path proven',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G3a AC2: sudo経由は直接実行へ変換せずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/sudo.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/sudo.sh',
+      '#!/bin/bash\nsudo sleep 5 || exit 1\n',
+      'sudo wrapper',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G3b AC2: env経由は直接実行へ変換せずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/env.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/env.sh',
+      '#!/bin/bash\nenv FOO=1 sleep 5 || exit 1\n',
+      'env wrapper',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G3c AC2: xargs経由は直接実行へ変換せずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/xargs.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/xargs.sh',
+      '#!/bin/bash\nxargs -I{} sleep {} || exit 1\n',
+      'xargs wrapper',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G3d AC2 反証: 相対パスのwrapper(../bin/sudo)もbasenameでunknown判定', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/relsudo.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/relsudo.sh',
+      '#!/bin/bash\n../bin/sudo sleep 5 || exit 1\n',
+      'relative path wrapper',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G4a AC3: set +e 直後の未伝播TARGET_COMMANDはSP001 fail', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/pluse-immediate.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/pluse-immediate.sh',
+      `#!/bin/bash\nset +e\n${pause}\n`,
+      'set plus e immediate',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+    assert.ok(result.lines.includes('reason=shell_set_plus_e_without_exit_check'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G4b AC3: } で窓が終了し窓外commandへset +e状態を持ち越さない', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/pluse-terminated.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/pluse-terminated.sh',
+      `#!/bin/bash\nset +e\n}\n${pause}\n`,
+      'set plus e terminated window',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(!result.lines.includes('rule_id=SP001'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G4c AC3 境界: 3番目のmeaningful lineはまだ窓内でSP001 fail', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/pluse-line3.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/pluse-line3.sh',
+      `#!/bin/bash\nset +e\necho one\necho two\n${pause}\n`,
+      'set plus e third meaningful line',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G4d AC3 境界: 4番目のmeaningful lineは窓外でSP002 unknown', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/pluse-line4.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/pluse-line4.sh',
+      `#!/bin/bash\nset +e\necho one\necho two\necho three\n${pause}\n`,
+      'set plus e fourth meaningful line',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(!result.lines.includes('rule_id=SP001'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('G4e AC3: 窓内で終了状態参照はあるが停止未確認はSP002 unknown', () => {
+  const pause = ['sl', 'eep', ' 5'].join('');
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/pluse-statusref.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/pluse-statusref.sh',
+      `#!/bin/bash\nset +e\n${pause}\nstatus=$?\n`,
+      'set plus e status ref',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_set_plus_e_status_ref_unproven'));
+    assert.ok(!result.lines.includes('rule_id=SP001'));
   } finally {
     cleanup(dir);
   }

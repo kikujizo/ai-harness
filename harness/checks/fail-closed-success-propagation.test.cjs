@@ -3528,3 +3528,72 @@ test('M23 AC2 反証: backtick内のcommand substitution、command substitution�
     cleanup(dir);
   }
 });
+
+// 独立技術レビュー#5200517828指摘: (A)のlexical state stackは物理行をまたいで
+// 状態を引き継がず、かつ型不一致の`)`でもparenDeltaを無条件に減らす箇所が
+// 残っていたため、前行から継続するquoted data内の`)`でrangeを早期終了する
+// fail-openと、substitution内部のコメント本文にある`)`を終端と誤カウントする
+// fail-openが残っていた。PM方針によりB案(開始のみ検出、終了は検出しない。
+// 開始行からEOFまでを無条件unknownとする単調規律)へ切り替え、findLexicalOpenRange
+// で実装した(N1〜N3)。B案が「無用化(何もpassしなくなる)」していないことは
+// 既存のI1b/M10/M11(引き続きpass)で確認する。
+
+test('N1 AC2/AC4: 前行から継続するquoted data内の)でrangeが早期終了しないことを確認しSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/cross-line-quoted-data.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/cross-line-quoted-data.sh',
+      '#!/bin/bash\nset -e\nRESULT=$(\n  echo ")"\n  npm test\n)\n',
+      'a quoted closing paren on a continuation line must not end the substitution range early',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('N2 AC2/AC4: substitution内部のコメント本文にある)を終端と誤認せずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/comment-inside-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/comment-inside-cmdsub.sh',
+      '#!/bin/bash\nset -e\necho "$(echo start # )\n  npm test\n  echo ok\n)"\n',
+      'a ) inside a comment inside a command substitution must not be counted as the terminator',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('N3 AC2/AC4: heredoc本体内のnpm testは開始検出のみでSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/heredoc-with-target.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/heredoc-with-target.sh',
+      '#!/bin/bash\nset -e\ncat <<EOF\nnpm test\nEOF\n',
+      'a target command name inside a heredoc body must not be treated as top-level',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});

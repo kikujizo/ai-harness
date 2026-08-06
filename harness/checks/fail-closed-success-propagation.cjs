@@ -591,41 +591,13 @@ function computeShellBlockDepths(lines) {
   return depths;
 }
 
-// line continuation(行末`\`)は複数行にまたがるため、開始行だけを見ても
-// TARGET_COMMANDへの言及を検出できない。契約上、行継続自体が未対応構造(常にunknown)
-// のため、チェーン全体を結合したテキストで用途一致だけ判定し、開始行1件のunknown
-// 候補にまとめる。2行目以降は個別処理せずスキップする(Issue #123固定構文v3)。
-function computeLineContinuationChains(lines) {
-  const skipLines = new Set();
-  const chainByStartIdx = new Map();
-  for (let i = 0; i < lines.length; i += 1) {
-    if (skipLines.has(i)) continue;
-    const stripped = stripComment(lines[i], 'shell');
-    if (!LINE_CONTINUATION_RE.test(stripped)) continue;
-    let combined = stripped.replace(/\\\s*$/, ' ');
-    let j = i;
-    while (LINE_CONTINUATION_RE.test(stripComment(lines[j], 'shell'))) {
-      if (j + 1 >= lines.length) break;
-      j += 1;
-      skipLines.add(j);
-      const jStripped = stripComment(lines[j], 'shell');
-      combined += LINE_CONTINUATION_RE.test(jStripped)
-        ? jStripped.replace(/\\\s*$/, ' ')
-        : jStripped.trim();
-    }
-    chainByStartIdx.set(i, { endIdx: j, combinedText: combined });
-  }
-  return { skipLines, chainByStartIdx };
-}
+// heredoc opener(`<<WORD`/`<<-WORD`)を検出する。heredoc本体は次のterminator
+// 行まで任意の内容を含みうる複数行構造であり、開始行の字句だけでは境界を
+// 静的に確定できない(Issue #123固定構文v3)。
+const HEREDOC_RE = /<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?\s*$/;
 
-// 行末が未閉じの`(`/`$(`で終わる行から対応する`)`までの範囲を追跡する
-// (複数行subshell・複数行command substitution)。単一行で閉じる場合は
-// isCleanDirectTargetCommandのUNSAFE_SHELL_META_CHAR_RE判定(`(`/`)`/`$`/backtick
-// を含む行は無条件unknown)に任せ、ここでは扱わない。範囲内の
-// TARGET_COMMANDへの言及だけを判定し、開始行1件のunknown候補にまとめる
-// (Issue #123固定構文v3)。
-// stripComment(コメント検出)とcomputeMultilineGroupingRanges(括弧デルタ・
-// バッククォート数)の両方が消費する、クォート状態を共有する1本の字句prepass
+// stripComment(コメント検出)とfindLexicalOpenRange(未閉じクォート/括弧/
+// バッククォートの開始検出)の両方が消費する、クォート状態を共有する1本の字句prepass
 // (独立技術レビュー#5200130028/#5200256283指摘対応)。汎用parserは作らず、
 // 保守的に次の不変条件だけを守る契約とする(Issue #123固定構文v3):
 // 「不確実なら常に"まだ開いている"側(unknown)へ倒し、"閉じた"側(passの対象)へ
@@ -709,8 +681,14 @@ function scanShellLexicalState(text) {
       stack.push('paren');
       parenDelta += 1;
     } else if (ch === ')') {
-      if (ctx === 'paren') stack.pop();
-      parenDelta -= 1;
+      // ctxが'paren'でない`)`(型が合わない閉じ)はどのコンテキストも閉じない。
+      // 独立技術レビュー#5200517828指摘: 以前はここで無条件にparenDeltaを
+      // 減らしており、コメント本文やquoted data内の`)`をsubstitutionの終端と
+      // 誤カウントするunder-counting(fail-open)を生んでいた。
+      if (ctx === 'paren') {
+        stack.pop();
+        parenDelta -= 1;
+      }
     } else if (
       ch === '#' &&
       ctx === 'top' &&
@@ -720,51 +698,37 @@ function scanShellLexicalState(text) {
       break;
     }
   }
-  return { parenDelta, backtickCount, commentIndex };
+  return { parenDelta, backtickCount, commentIndex, stackDepthAtEnd: stack.length };
 }
 
-// 行末が未閉じの`(`/`$(`で終わる行、または未閉じのbacktickを含む行から、対応する
-// 閉じ位置までの範囲を追跡する(複数行subshell・複数行command substitution・複数行
-// backtick substitution)。クォート内の括弧・バッククォートは無視する(quote-aware)。
-// 単一行で閉じる場合はisCleanDirectTargetCommandのUNSAFE_SHELL_META_CHAR_RE判定に
-// 任せ、ここでは扱わない。ファイル末尾まで閉じ位置が確定できない場合も、静的に境界を確定できない構造として
-// 範囲をファイル末尾まで広げ、unknown判定の対象に含める(Issue #123固定構文v3)。
-function computeMultilineGroupingRanges(lines) {
-  const skipLines = new Set();
-  const rangeByStartIdx = new Map();
+// (B)方針: 複数行にまたがるshell構造(未閉じのクォート・括弧・バッククォート・
+// 行継続・heredoc)は「開始」だけを検出し、「終了」は検出しない。終了位置を
+// 探そうとする実装(旧computeLineContinuationChains/computeMultilineGroupingRanges)
+// は、閉じ括弧の型・行をまたぐクォート状態を取り違えるたびfail-openを生み続けた
+// (独立技術レビュー#5200130028/#5200256283/#5200517828で計5件、ChatGPT要件
+// 再確認#5199636456分を含めるとさらに多い)。「開始を検出したら二度と通常の
+// per-line解析(block-depth判定含む)へ戻らない」という単調な規律に置き換える:
+// 最初にlexical stackが空でない(未閉じのクォート/括弧/バッククォート)・行末が
+// 継続`\`・heredoc openerのいずれかが現れた行から、ファイル末尾までを1つの
+// 範囲とする。over-tip(過剰にunknownへ倒す)はfalse-unknownというノイズを生む
+// だけで安全側、この設計はunder-tip(閉じを誤認して早期にpass解析へ戻ること)
+// を構造的に不可能にする(PM方針(B)採用、Issue #123固定構文v3)。
+function findLexicalOpenRange(lines) {
   for (let i = 0; i < lines.length; i += 1) {
-    if (skipLines.has(i)) continue;
     const stripped = stripComment(lines[i], 'shell').trimEnd();
-    const { parenDelta, backtickCount } = scanShellLexicalState(stripped);
-    // 行末が`(`/backtickで終わる形(`RESULT=$(`)だけでなく、開き括弧の直後に
-    // 中身が続いて複数行にまたがる形(`RESULT=$(echo start` → 次行で閉じる、
-    // `cat <(echo start`のprocess substitution等)も未閉じ(parenDelta > 0/
-    // backtickCountが奇数)であれば同じ範囲追跡へ含める。行頭・行末の位置条件を
-    // 前提にすると「開始行自体に中身がある」形を取りこぼすため、クォート外の
-    // 字句デルタだけを根拠にする(Issue #123固定構文v3、ChatGPT要件再確認
-    // #5199636456指摘のmid-line開始反例対応)。
-    const opensParenGroup = parenDelta > 0;
-    const opensBacktickGroup = !opensParenGroup && backtickCount % 2 === 1;
-    if (!opensParenGroup && !opensBacktickGroup) continue;
-
-    let parenDepth = opensParenGroup ? parenDelta : 0;
-    let backtickOpen = opensBacktickGroup;
-    let endIdx = i;
-    let combined = stripped;
-    for (let j = i + 1; j < lines.length; j += 1) {
-      const jStripped = stripComment(lines[j], 'shell');
-      const jDelta = scanShellLexicalState(jStripped);
-      if (opensParenGroup) parenDepth += jDelta.parenDelta;
-      if (opensBacktickGroup && jDelta.backtickCount % 2 === 1) backtickOpen = !backtickOpen;
-      combined += `\n${jStripped}`;
-      endIdx = j;
-      skipLines.add(j);
-      const stillOpen = opensParenGroup ? parenDepth > 0 : backtickOpen;
-      if (!stillOpen) break;
+    if (stripped.trim().length === 0 || isShebangLine(stripped)) continue;
+    const opensByContinuation = LINE_CONTINUATION_RE.test(stripped);
+    const opensByHeredoc = HEREDOC_RE.test(stripped);
+    const { stackDepthAtEnd } = scanShellLexicalState(stripped);
+    if (opensByContinuation || opensByHeredoc || stackDepthAtEnd > 0) {
+      const combinedText = lines
+        .slice(i)
+        .map((l) => stripComment(l, 'shell'))
+        .join('\n');
+      return { startIdx: i, combinedText };
     }
-    rangeByStartIdx.set(i, { endIdx, combinedText: combined });
   }
-  return { skipLines, rangeByStartIdx };
+  return null;
 }
 
 // `set +e`検出後、後続の3 meaningful lines(空行・コメント除く実効行)だけをcontextとする
@@ -888,8 +852,7 @@ function extractShellCandidates(content, relPath) {
   const confirmedFailClosed = collectConfirmedFailClosedNames(lines);
   const setPlusEWindows = computeSetPlusEWindows(lines);
   const failureRecordWindows = computeFailureRecordWindows(lines);
-  const continuationInfo = computeLineContinuationChains(lines);
-  const groupingInfo = computeMultilineGroupingRanges(lines);
+  const lexicalOpenRange = findLexicalOpenRange(lines);
   const blockDepths = computeShellBlockDepths(lines);
 
   let errexitInContract = false;
@@ -897,7 +860,9 @@ function extractShellCandidates(content, relPath) {
   let meaningfulBeforeCommand = 0;
 
   for (let idx = 0; idx < lines.length; idx += 1) {
-    if (continuationInfo.skipLines.has(idx) || groupingInfo.skipLines.has(idx)) continue;
+    // (B)方針: 開始行を検出したら、それ以降(EOFまで)は一切のper-line解析
+    // (block-depth判定含む)を行わない(Issue #123固定構文v3)。
+    if (lexicalOpenRange && idx > lexicalOpenRange.startIdx) continue;
 
     const lineNo = idx + 1;
     const rawLine = lines[idx];
@@ -950,12 +915,13 @@ function extractShellCandidates(content, relPath) {
       continue;
     }
 
-    // line continuation・複数行subshell・複数行command substitutionは開始行だけを
-    // 見てもTARGET_COMMANDへの言及を検出できないため、結合済みテキスト(範囲全体)で
-    // 用途一致だけを判定し、開始行1件のunknown候補にまとめる(Issue #123固定構文v3)。
-    const multilineGroup = continuationInfo.chainByStartIdx.get(idx) || groupingInfo.rangeByStartIdx.get(idx);
-    if (multilineGroup) {
-      const combined = multilineGroup.combinedText;
+    // line continuation・複数行subshell・複数行command substitution・heredoc等の
+    // 開始行は、開始行だけを見てもTARGET_COMMANDへの言及を検出できないため、開始行
+    // からEOFまでの結合済みテキストで用途一致だけを判定し、開始行1件のunknown候補
+    // にまとめる。以降のEOFまでの行は既にループ先頭でスキップ済み(Issue #123
+    // 固定構文v3、PM方針(B)採用)。
+    if (lexicalOpenRange && idx === lexicalOpenRange.startIdx) {
+      const combined = lexicalOpenRange.combinedText;
       if (
         INDIRECT_REF_START_RE.test(combined) ||
         lineMentionsTargetCommandName(combined) ||

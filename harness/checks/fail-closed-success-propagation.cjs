@@ -626,81 +626,98 @@ function computeLineContinuationChains(lines) {
 // (Issue #123固定構文v3)。
 // stripComment(コメント検出)とcomputeMultilineGroupingRanges(括弧デルタ・
 // バッククォート数)の両方が消費する、クォート状態を共有する1本の字句prepass
-// (独立技術レビュー#5200130028指摘対応)。汎用parserは作らず、保守的に次の
-// 2点だけを解決する契約とする(Issue #123固定構文v3):
-// (1) クォート外(シングル・ダブルとも)の`#`だけをコメント開始とみなす。
-//     シングルクォート内の`#`はリテラルであり、以前の実装はこれを見落として
-//     `printf '#'; npm test || true`のようなcandidate-zero fail-openを生んでいた。
+// (独立技術レビュー#5200130028/#5200256283指摘対応)。汎用parserは作らず、
+// 保守的に次の不変条件だけを守る契約とする(Issue #123固定構文v3):
+// 「不確実なら常に"まだ開いている"側(unknown)へ倒し、"閉じた"側(passの対象)へ
+// 誤って倒さない」。over-counting(開いたままにしすぎる)はunknown範囲が広がる
+// だけで安全、under-counting(早く閉じすぎる)がfail-openであり禁止。
+//
+// 具体的には次の2点をネスト構造を一様に扱うlexical state stackで解決する:
+// (1) クォート外(シングル・ダブルとも)の`#`だけをコメント開始とみなす。ただし
+//     POSIX同様、`#`は行頭または直前が空白/`;`/`&`/`|`/`(`/`)`の場合のみコメント
+//     開始とし、word途中の`#`(`foo#bar`)はリテラルとして扱う。シングルクォート
+//     内の`#`もリテラルであり、以前の実装はこの両方を見落として
+//     `printf '#'; npm test || true`や`printf foo#bar; npm test || true`のような
+//     candidate-zero fail-openを生んでいた。
 // (2) command substitution(`$(`)・backtick substitutionはbashではdouble quote
-//     内でも実行されるため、括弧デルタ・バッククォート数のカウント対象に含める
-//     (single quote内は不活性のまま無視する。double quote内でのsingle quoteの
-//     混入は不活性のまま無視するのが正しいbash挙動であり、ここで状態を誤って
-//     トグルしない)。内部の正確な境界(ネストしたクォート等)までは追わず、
-//     「開いた」ことさえ検出できれば複数行グルーピング判定で安全側(unknown)に
-//     倒せるため十分とする。
+//     内でも実行されるため、括弧デルタ・バッククォート数のカウント対象に含める。
+//     ad-hocなフラグ(inDouble+doubleSubDepth)ではcommand substitution内部で
+//     新たに開くネストしたクォート(例: `$(printf '%s' ")")`のquoted `)`を
+//     誤ってsubstitutionの終端とカウントする不具合を生んだため、pushした
+//     コンテキストの種類をスタックで管理し、閉じ文字は対応する種類のコンテキスト
+//     がスタック最上段にあるときだけpopする(型が合わなければ閉じない=安全側)。
 function scanShellLexicalState(text) {
   let parenDelta = 0;
   let backtickCount = 0;
   let commentIndex = -1;
-  let inSingle = false;
-  let inDouble = false;
-  // double quote内で`$(`により開始したcommand substitutionのネスト深さ。
-  // これが0のとき、double quote内の裸の`(`/`)`は文字列リテラルの一部でしか
-  // ないため(例: `echo ")"`)カウント対象から除く。0より大きいときだけ、その
-  // サブコンテキスト内の`(`/`)`をcommand substitutionの一部としてカウントする
-  // (L5回帰対応: quoted `)`単体をcommand substitutionの終端と誤認しないため)。
-  let doubleSubDepth = 0;
+  const stack = [];
+
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
-    if (inSingle) {
-      if (ch === "'") inSingle = false;
+    const ctx = stack.length > 0 ? stack[stack.length - 1] : 'top';
+
+    if (ctx === 'single') {
+      if (ch === "'") stack.pop();
       continue;
     }
-    if (inDouble) {
+
+    if (ctx === 'double') {
       if (ch === '\\') {
         i += 1;
         continue;
       }
-      if (ch === '"' && doubleSubDepth === 0) {
-        inDouble = false;
+      if (ch === '"') {
+        stack.pop();
         continue;
       }
       if (ch === '$' && text[i + 1] === '(') {
+        stack.push('paren');
         parenDelta += 1;
-        doubleSubDepth += 1;
         i += 1;
         continue;
       }
-      if (ch === '(' && doubleSubDepth > 0) {
-        parenDelta += 1;
-        doubleSubDepth += 1;
-        continue;
-      }
-      if (ch === ')' && doubleSubDepth > 0) {
-        parenDelta -= 1;
-        doubleSubDepth -= 1;
-        continue;
-      }
       if (ch === '`') {
+        stack.push('backtick');
         backtickCount += 1;
+        continue;
       }
+      // 裸の`(`/`)`・`'`・`#`はdouble quote内では不活性(文字通り)。
       continue;
     }
+
+    // ctxは'top'/'paren'/'backtick'のいずれか。command substitution・
+    // backtick substitutionの内部は新しいシェルコマンドコンテキストであり、
+    // クォート・置換の開始判定はトップレベルと共通(Issue #123固定構文v3)。
     if (ch === '\\') {
       i += 1;
     } else if (ch === "'") {
-      inSingle = true;
+      stack.push('single');
     } else if (ch === '"') {
-      inDouble = true;
-    } else if (ch === '#') {
-      commentIndex = i;
-      break;
+      stack.push('double');
+    } else if (ch === '`') {
+      if (ctx === 'backtick') {
+        stack.pop();
+      } else {
+        stack.push('backtick');
+      }
+      backtickCount += 1;
+    } else if (ch === '$' && text[i + 1] === '(') {
+      stack.push('paren');
+      parenDelta += 1;
+      i += 1;
     } else if (ch === '(') {
+      stack.push('paren');
       parenDelta += 1;
     } else if (ch === ')') {
+      if (ctx === 'paren') stack.pop();
       parenDelta -= 1;
-    } else if (ch === '`') {
-      backtickCount += 1;
+    } else if (
+      ch === '#' &&
+      ctx === 'top' &&
+      (i === 0 || /[\s;&|()]/.test(text[i - 1]))
+    ) {
+      commentIndex = i;
+      break;
     }
   }
   return { parenDelta, backtickCount, commentIndex };

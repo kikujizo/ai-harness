@@ -3441,3 +3441,90 @@ test('M19 AC2 反証: double quote内のsingle quoteはクォート状態を誤�
     cleanup(dir);
   }
 });
+
+// 独立技術レビュー#5200256283指摘: ad-hocなフラグ(inDouble+doubleSubDepth)は
+// command substitution内部で新たに開くネストしたクォートを正しく扱えず、
+// quoted `)`をsubstitutionの終端と誤認するfail-openを生んでいた。加えて
+// stripCommentは単語途中の`#`(POSIXでは非コメント)も無条件でコメット開始と
+// 誤認していた。両方をlexical state stack(型付きpush/pop)とword境界条件で
+// 修正する(M20〜M23)。
+
+test('M20 AC2/AC4: $()内部で新たに開くquoted )はsubstitutionの終端と誤認されずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/nested-quote-in-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/nested-quote-in-cmdsub.sh',
+      '#!/bin/bash\nset -e\necho "$(printf \'%s\' ")"\n  npm test\n  echo ok\n)"\n',
+      'a quoted closing paren opened fresh inside $() must not be treated as the substitution terminator',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M21 AC2/AC4: 二重にネストしたcommand substitutionはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/double-nested-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/double-nested-cmdsub.sh',
+      '#!/bin/bash\nset -e\necho "$(echo "$(npm test)" )"\necho done\n',
+      'command substitution nested two levels deep inside double quotes',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M22 AC2: 単語途中の#はコメント開始と誤認されずnpm test || trueが候補化されSP001 fail', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/hash-mid-word.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/hash-mid-word.sh',
+      '#!/bin/bash\nprintf foo#bar; npm test || true\n',
+      '# in the middle of a word is not a comment start in POSIX shell',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+    assert.ok(result.lines.includes('reason=shell_success_suppression'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M23 AC2 反証: backtick内のcommand substitution、command substitution内のbacktickはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/mixed-nesting.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/mixed-nesting.sh',
+      '#!/bin/bash\nset -e\nRESULT=$(echo `npm test`\n  echo ok\n)\n',
+      'a backtick substitution opened inside a $() command substitution',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});

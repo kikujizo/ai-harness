@@ -3393,6 +3393,7 @@ Issue #85 / #128 で、harness-sync 同期 PR の base が `main` 以外（featu
 
 | 項目 | 結果 | 証跡 |
 |---|---|---|
+| Draft PR | 作成済み | [#130](https://github.com/kikujizo/ai-harness/pull/130) |
 | ChatGPT要件レビュー | 未実施 | - |
 | Codex独立技術レビュー | 未実施 | - |
 | merge | 未実施 | - |

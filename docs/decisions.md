@@ -3315,7 +3315,7 @@ Related PRs: #127
 Date: 2026-08-06
 Status: Proposed
 Related Issues: #128, #85
-Related PRs: （PR作成後に更新）
+Related PRs: #130
 
 ## 決定事項
 

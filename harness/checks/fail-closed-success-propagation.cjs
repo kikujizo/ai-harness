@@ -65,6 +65,16 @@ const TARGET_COMMAND_NAMES = new Set([
 // 未定義wrapper（例: sudo、env、xargs）経由は直接実行へ変換せず unknown にする(Issue #123 固定構文v3)。
 const UNKNOWN_WRAPPER_NAMES = new Set(['sudo', 'env', 'xargs']);
 const ENV_PREFIX_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*=\S*$/;
+// pipeline・行継続・here-doc・subshell・command substitutionは、先頭token方式では
+// TARGET_COMMANDの成否を静的に証明できない契約上の未対応shell構造(Issue #123固定構文v3)。
+// 単一の`|`(`||`の一部ではない)を検出する。
+const PIPELINE_RE = /(?<!\|)\|(?!\|)/;
+const LINE_CONTINUATION_RE = /\\\s*$/;
+const HEREDOC_RE = /<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?\s*$/;
+const COMMAND_SUB_RE = /\$\(|`[^`]*`/;
+// subshellは`(`が行頭、または`;`/`&`直後にあり、その直後にコマンドらしき文字が続く形を
+// 緩く検出する(arithmetic `((...))`はCOMMAND_SUB_REと重複判定されても害はないため区別しない)。
+const SUBSHELL_RE = /(?:^|[;&]\s*)\(\s*[A-Za-z_.\/$]/;
 const SHELL_BLOCK_CLOSE_RE = /^\s*(?:fi|done|esac|\})\s*($|[#;])/;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
@@ -419,7 +429,16 @@ function collectConfirmedFailClosedNames(lines) {
   return confirmed;
 }
 
+// 行に`||`が2回以上出現する場合(`npm test || echo ok || exit 1`等)、TARGET_COMMAND
+// 直後の中間commandが成功すれば固定形(`exit n`等)には到達しないため、直接の伝播証明
+// として扱わない。固定pass形はTARGET_COMMANDに直接接続された唯一の`||`のみを証明とする
+// (Issue #123固定構文v3)。
+function hasMultipleOrSegments(line) {
+  return (line.match(/\|\|/g) || []).length >= 2;
+}
+
 function hasShellProofOnLine(line, confirmedFailClosed) {
+  if (hasMultipleOrSegments(line)) return false;
   if (FIXED_PROPAGATION_PROOF_RE.test(line)) return true;
   if (confirmedFailClosed.has('fail_closed') && FAIL_CLOSED_CALL_RE.test(line)) return true;
   return false;
@@ -456,6 +475,26 @@ function resolveCommandBasename(line) {
   const cleaned = token.replace(/[;&|]+$/, '');
   if (cleaned.length === 0) return null;
   return basenameOfCommandToken(cleaned).toLowerCase();
+}
+
+function lineMentionsTargetCommandName(line) {
+  for (const name of TARGET_COMMAND_NAMES) {
+    if (new RegExp(`\\b${name}\\b`, 'i').test(line)) return true;
+  }
+  return false;
+}
+
+// pipeline・行継続・here-doc・subshell・command substitutionはTARGET_COMMANDの
+// 先頭token方式では成否を静的証明できないため、これらの構造とTARGET_COMMAND名の
+// 用途一致が同一行にある場合はSP002 unknownとして候補化する(Issue #123固定構文v3)。
+function hasUnsupportedShellStructure(line) {
+  return (
+    PIPELINE_RE.test(line) ||
+    LINE_CONTINUATION_RE.test(line) ||
+    HEREDOC_RE.test(line) ||
+    COMMAND_SUB_RE.test(line) ||
+    SUBSHELL_RE.test(line)
+  );
 }
 
 // `set +e`検出後、後続の3 meaningful lines(空行・コメント除く実効行)だけをcontextとする
@@ -637,6 +676,17 @@ function extractShellCandidates(content, relPath) {
     }
 
     if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
+
+    if (hasUnsupportedShellStructure(line) && lineMentionsTargetCommandName(line)) {
+      candidates.push({
+        kind: 'fixed',
+        result: 'unknown',
+        ruleId: 'SP002',
+        line: lineNo,
+        reason: 'shell_unsupported_structure_unproven',
+      });
+      continue;
+    }
 
     const commandBasename = resolveCommandBasename(line);
 

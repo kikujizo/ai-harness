@@ -2581,6 +2581,146 @@ test('I4 AC2: CHECK_STATUS=PIPESTATUS 直後の無条件exit 0はSP001 fail', ()
   }
 });
 
+test('J1 AC2/AC4: TARGET_COMMAND || echo ok || exit 1 は間接証明のためSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/or-indirect.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/or-indirect.sh',
+      '#!/bin/bash\nnpm test || echo ok || exit 1\n',
+      'or list with intermediate success command',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_failure_propagation_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('J2 AC2/AC4: TARGET_COMMAND || echo ok || fail_closed も間接証明のためSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/or-indirect-fc.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/or-indirect-fc.sh',
+      '#!/bin/bash\nfail_closed() { exit 1; }\nnpm test || echo ok || fail_closed\n',
+      'or list with intermediate success before confirmed fail_closed',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_failure_propagation_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('J3 AC2/AC4: set -e 下の pipeline(npm test | tee) はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/pipeline.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/pipeline.sh',
+      '#!/bin/bash\nset -e\nnpm test | tee out.log\n',
+      'pipeline not statically provable',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('J4 AC2/AC4: 行継続(npm test \\\\)はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/continuation.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/continuation.sh',
+      '#!/bin/bash\nset -e\nnpm test \\\n  --runInBand\n',
+      'line continuation not statically provable',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('J5 AC2/AC4: here-doc(npm test <<EOF)はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/heredoc.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/heredoc.sh',
+      '#!/bin/bash\nset -e\nnpm test <<EOF\ninput\nEOF\n',
+      'heredoc not statically provable',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('J6 AC2/AC4: subshell((npm test))は候補ゼロにせずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/subshell.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/subshell.sh',
+      '#!/bin/bash\nset -e\n(npm test)\n',
+      'subshell not statically provable',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('J7 AC2/AC4: command substitution(RESULT=$(npm test))は候補ゼロにせずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/cmdsub.sh',
+      '#!/bin/bash\nset -e\nRESULT=$(npm test)\n',
+      'command substitution not statically provable',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test('H3 AC3: ABSENCE_TERMまで7コメント離れたflat-ifもcomment除外のmeaningful line基準でfail検出する', () => {
   const dir = makeRepo();
   try {

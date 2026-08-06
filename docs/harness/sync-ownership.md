@@ -139,7 +139,7 @@ Action README の `:!` pathspec は「全同期からの例外指定」用途で
 - 新規作成停止後は既存 PR を確認する
 - 個別処置は別 Issue ＋ Codex PM route へ戻す
 - 自動 close、自動 rebase をしない
-- 高リスクの不可逆な発効点だけ人間 approve／deny とする
+- 既存OPEN同期PRの個別処置では通常の技術判断に新しい人間承認ゲートを設けず、不可逆4カテゴリの発効点は `AGENTS.md` の人間approve／denyに従う。harness-sync PR自体のmergeは、既存どおり常に人間が行う。
 - 通常 PR や既存の自動 merge 条件へ適用範囲を広げない
 
 ## 撤退手順

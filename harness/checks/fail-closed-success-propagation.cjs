@@ -64,24 +64,19 @@ const TARGET_COMMAND_NAMES = new Set([
 ]);
 // 未定義wrapper（例: sudo、env、xargs）経由は直接実行へ変換せず unknown にする(Issue #123 固定構文v3)。
 const UNKNOWN_WRAPPER_NAMES = new Set(['sudo', 'env', 'xargs']);
-const ENV_PREFIX_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*=\S*$/;
-// pipeline・行継続・here-doc・subshell・command substitutionは、先頭token方式では
-// TARGET_COMMANDの成否を静的に証明できない契約上の未対応shell構造(Issue #123固定構文v3)。
-// 単一の`|`(`||`の一部ではない)を検出する。
-const PIPELINE_RE = /(?<!\|)\|(?!\|)/;
+// 値部分がクォートで始まる場合は閉じクォートまでを1トークンとして要求する。
+// `MSG="run npm test"`のように閉じていない`"run`のような断片は、実際には文字列
+// リテラルの一部でしかなくenv prefixではないため、ここでマッチさせず後続のtoken
+// 解決(getFirstCommandToken)に進ませない(commandBasenameが解決できずunknownへ
+// 倒れる。Issue #123固定構文v3)。
+const ENV_PREFIX_TOKEN_RE = /^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s'"]*)$/;
+// 行継続は先頭token方式ではTARGET_COMMANDの成否を静的に証明できない契約上の
+// 未対応shell構造(Issue #123固定構文v3)。
 const LINE_CONTINUATION_RE = /\\\s*$/;
-const HEREDOC_RE = /<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?\s*$/;
-const COMMAND_SUB_RE = /\$\(|`[^`]*`/;
-// subshellは`(`が行頭、または`;`/`&`直後にあり、その直後にコマンドらしき文字が続く形を
-// 緩く検出する(arithmetic `((...))`はCOMMAND_SUB_REと重複判定されても害はないため区別しない)。
-const SUBSHELL_RE = /(?:^|[;&]\s*)\(\s*[A-Za-z_.\/$]/;
 // 間接参照(`CMD=npm` → `"$CMD" test`)はTARGET_COMMANDを静的に解決できないため常に
 // unknownとする。先頭tokenが変数展開("$VAR"またはunquoted $VAR)である行を検出する
 // (Issue #123固定構文v3)。
 const INDIRECT_REF_START_RE = /^\s*(?:if\s+!\s+)?"?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"?(?=\s|$)/;
-// background実行(単体の`&`。`&&`ではない)は`set -e`で呼出元へ失敗が伝播しないため
-// 固定passにしない(Issue #123固定構文v3)。
-const BACKGROUND_RE = /(?<!&)&(?!&)\s*($|[#;])/;
 // positive `if TARGET_COMMAND`(`if !`ではない)はflat `if !` guard契約の対象外。
 // 単体の`!`(if文を伴わない否定)も固定構文外。いずれもTARGET_COMMANDの先頭token解決
 // 自体を`if`/`!`にしてしまうため、resolveCommandBasenameの結果で自然に弾かれるが、
@@ -497,32 +492,99 @@ function lineMentionsTargetCommandName(line) {
   return false;
 }
 
-// pipeline・行継続・here-doc・subshell・command substitutionはTARGET_COMMANDの
-// 先頭token方式では成否を静的証明できないため、これらの構造とTARGET_COMMAND名の
-// 用途一致が同一行にある場合はSP002 unknownとして候補化する(Issue #123固定構文v3)。
-function hasUnsupportedShellStructure(line) {
-  return (
-    PIPELINE_RE.test(line) ||
-    LINE_CONTINUATION_RE.test(line) ||
-    HEREDOC_RE.test(line) ||
-    COMMAND_SUB_RE.test(line) ||
-    SUBSHELL_RE.test(line) ||
-    hasMultipleOrSegments(line) ||
-    INDIRECT_REF_START_RE.test(line) ||
-    BACKGROUND_RE.test(line)
-  );
+// 末尾の固定OR証明(`|| exit n`/`|| return n`/確認済み`|| fail_closed`)だけを
+// 「本体」から除いて判定するための境界。証明部分にはメタ文字許可を与え、
+// それより前の本体には一切のshellメタ文字を許さない(下のUNSAFE_SHELL_META_CHAR_RE)。
+const TRAILING_OR_PROOF_RE =
+  /\|\|\s*(?:exit\s+[1-9]\d*|return\s+[1-9]\d*|fail_closed)\b\s*$/;
+// 単体のpipeline(`||`の一部でない`|`)・単体のbackground(`&&`の一部でない`&`)・
+// list区切り(;)・subshell/command substitution((・)・$)・backtick substitution(`)・
+// here-doc(<<)は、いずれも先頭token方式では成否を静的に証明できない構造を作りうる。
+// 個別の構造を検出器として都度追加する設計(ブラックリスト)は「新しい構造が
+// 見つかるたび次のラウンドが生まれる」を繰り返した反省から、本体にこれらの
+// メタ文字が1文字でもあれば理由を問わずunknownへ倒すpositive whitelistへ統一する
+// (Issue #123固定構文v3)。`&&`/`||`自体はここでは弾かない(候補化はする)。
+// errexit契約下・OR伝播の証明可否はAND_AND_RE/hasShellProofOnLine/
+// hasMultipleOrSegments等の既存ロジックが判定する(単一/複数のOR区別も含め、
+// 候補化されたあとにそこで正しくunproven判定される)。process substitution
+// (`<(`/`>(`)は`(`自体がここで検出されるため、単純なredirect(`>file`/`2>&1`)を
+// 誤って弾かないよう単体の`<`/`>`はメタ文字に含めない(here-docの`<<`のみ検出)。
+const UNSAFE_SHELL_META_CHAR_RE = /(?<!\|)\|(?!\|)|(?<!&)&(?!&)|[;()$`]|<</;
+
+// 行末の固定OR証明を除いた「本体」を返す。fail_closedはconfirmedFailClosedで
+// 確認済み(単一statement定義)の場合のみ証明として扱う(R5契約)。
+function stripTrailingOrProof(line, confirmedFailClosed) {
+  const match = line.match(TRAILING_OR_PROOF_RE);
+  if (!match) return line;
+  if (/fail_closed\s*$/.test(match[0]) && !confirmedFailClosed.has('fail_closed')) {
+    return line;
+  }
+  return line.slice(0, match.index);
 }
 
 // TARGET_COMMANDへの言及がある行を「まず候補化」したうえで、次の固定ホワイトリスト
 // 形に完全一致する場合だけpass判定ロジック(hasProofOnLine/errexitProven/ifNotProven)
 // へ進める。一致しなければ理由を問わずSP002 unknownへ倒す(デフォルトunknown・
 // ホワイトリストのみpassという反転ルールの中核、Issue #123固定構文v3)。
-function isCleanDirectTargetCommand(line, commandBasename) {
+// flat `if !` guardの終端(`; then <TERM>; fi`)を検出する。この終端はif文構文
+// そのものであり、TARGET_COMMAND本体への危険な追加構造ではないため、メタ文字
+// 判定の対象から除く(TERMがexit n/return n/fail_closedかどうかの精査は別関数
+// hasIfNotFailureStopが担う。ここでは構文の形だけを許容する)。
+const IF_NOT_THEN_FI_TAIL_RE = /;\s*then\b[\s\S]*;\s*fi\s*$/;
+
+function isCleanDirectTargetCommand(line, commandBasename, confirmedFailClosed = new Set()) {
   if (!commandBasename || !TARGET_COMMAND_NAMES.has(commandBasename)) return false;
-  if (hasUnsupportedShellStructure(line)) return false;
   if (POSITIVE_IF_RE.test(line)) return false;
   if (BARE_NEGATION_RE.test(line)) return false;
-  return true;
+  // 2個以上の`||`(TARGET_COMMAND直後の中間commandが成功すれば固定形に到達しない)は
+  // 単一の`||`(候補化してhasShellProofOnLineの証明可否に委ねる)とは扱いを分け、
+  // ここで無条件unknownにする(Issue #123固定構文v3、hasMultipleOrSegments契約)。
+  if (hasMultipleOrSegments(line)) return false;
+
+  let body = line;
+  const ifNotMatch = line.match(IF_NOT_RE);
+  if (ifNotMatch) {
+    body = body.slice(ifNotMatch[0].length);
+    const tailMatch = body.match(IF_NOT_THEN_FI_TAIL_RE);
+    if (tailMatch) {
+      body = body.slice(0, tailMatch.index);
+    }
+  }
+  body = stripTrailingOrProof(body, confirmedFailClosed);
+  return !UNSAFE_SHELL_META_CHAR_RE.test(body);
+}
+
+// ブロック開始キーワード(if/for/while/until/case)と裸の`{`(function本体・
+// グルーピング)。対応する終端(fi/done/esac/`}`)が現れるまでブロック内とみなす。
+// 単語境界ベースの緩い検出で、文字列リテラル内の誤検出は安全側(depth過大→unknown
+// 増加)に倒れるだけなので許容する(Issue #123固定構文v3)。
+const BLOCK_OPEN_KEYWORD_RE = /\b(?:if|for|while|until|case)\b/g;
+const BLOCK_CLOSE_KEYWORD_RE = /\b(?:fi|done|esac)\b/g;
+const BRACE_OPEN_RE = /\{/g;
+const BRACE_CLOSE_RE = /\}/g;
+
+// TARGET_COMMANDがトップレベル(depth 0)にあるか、複数行if条件・function本体・
+// for/while/until/caseのボディ内(depth > 0)にあるかを判定する。depth > 0の
+// TARGET_COMMANDは、呼び出し元でどう扱われるか(`|| true`で握りつぶされる等)や
+// 実際に実行されるかどうか(if条件の真偽次第)を静的に証明できないため、flat
+// `if !` guardの1行完結形を除き常にunknownとする(Issue #123固定構文v3)。
+// 行頭時点でのdepthを返す(その行自体が開くブロックはこの行のTARGET_COMMAND
+// 判定には影響しない。1行完結の`if !`guard等は既存の別ロジックで判定する)。
+function computeShellBlockDepths(lines) {
+  const depths = [];
+  let depth = 0;
+  for (const rawLine of lines) {
+    const line = stripComment(rawLine, 'shell');
+    depths.push(depth);
+    const opens =
+      (line.match(BLOCK_OPEN_KEYWORD_RE) || []).length +
+      (line.match(BRACE_OPEN_RE) || []).length;
+    const closes =
+      (line.match(BLOCK_CLOSE_KEYWORD_RE) || []).length +
+      (line.match(BRACE_CLOSE_RE) || []).length;
+    depth = Math.max(0, depth + opens - closes);
+  }
+  return depths;
 }
 
 // line continuation(行末`\`)は複数行にまたがるため、開始行だけを見ても
@@ -554,7 +616,8 @@ function computeLineContinuationChains(lines) {
 
 // 行末が未閉じの`(`/`$(`で終わる行から対応する`)`までの範囲を追跡する
 // (複数行subshell・複数行command substitution)。単一行で閉じる場合は
-// SUBSHELL_RE/COMMAND_SUB_REの同一行判定に任せ、ここでは扱わない。範囲内の
+// isCleanDirectTargetCommandのUNSAFE_SHELL_META_CHAR_RE判定(`(`/`)`/`$`/backtick
+// を含む行は無条件unknown)に任せ、ここでは扱わない。範囲内の
 // TARGET_COMMANDへの言及だけを判定し、開始行1件のunknown候補にまとめる
 // (Issue #123固定構文v3)。
 // クォート(シングル/ダブル)内の`(`/`)`/バッククォートを無視して、行の括弧深さ変化と
@@ -597,8 +660,8 @@ function scanShellLexicalDelta(text) {
 // 行末が未閉じの`(`/`$(`で終わる行、または未閉じのbacktickを含む行から、対応する
 // 閉じ位置までの範囲を追跡する(複数行subshell・複数行command substitution・複数行
 // backtick substitution)。クォート内の括弧・バッククォートは無視する(quote-aware)。
-// 単一行で閉じる場合はSUBSHELL_RE/COMMAND_SUB_REの同一行判定に任せ、ここでは扱わない。
-// ファイル末尾まで閉じ位置が確定できない場合も、静的に境界を確定できない構造として
+// 単一行で閉じる場合はisCleanDirectTargetCommandのUNSAFE_SHELL_META_CHAR_RE判定に
+// 任せ、ここでは扱わない。ファイル末尾まで閉じ位置が確定できない場合も、静的に境界を確定できない構造として
 // 範囲をファイル末尾まで広げ、unknown判定の対象に含める(Issue #123固定構文v3)。
 function computeMultilineGroupingRanges(lines) {
   const skipLines = new Set();
@@ -754,6 +817,7 @@ function extractShellCandidates(content, relPath) {
   const failureRecordWindows = computeFailureRecordWindows(lines);
   const continuationInfo = computeLineContinuationChains(lines);
   const groupingInfo = computeMultilineGroupingRanges(lines);
+  const blockDepths = computeShellBlockDepths(lines);
 
   let errexitInContract = false;
   let errexitContractVoided = false;
@@ -864,13 +928,28 @@ function extractShellCandidates(content, relPath) {
     // (sudo/env/xargs/time等)・pipeline・positive if・background・間接参照等を
     // 都度検出器として追加する設計はshell構文が尽きないため未対応構造が出るたびに
     // 再発する(Issue #123固定構文v3)。
-    if (!isCleanDirectTargetCommand(line, commandBasename)) {
+    if (!isCleanDirectTargetCommand(line, commandBasename, confirmedFailClosed)) {
       candidates.push({
         kind: 'fixed',
         result: 'unknown',
         ruleId: 'SP002',
         line: lineNo,
         reason: 'shell_unsupported_structure_unproven',
+      });
+      continue;
+    }
+
+    // 複数行if条件・function本体・for/while/until/caseのボディ内(depth > 0)は、
+    // 実際に実行されるか(if条件の真偽次第)・呼び出し元でどう扱われるか(`|| true`で
+    // 握りつぶされる等)を静的に証明できないため、常にunknownとする(Issue #123
+    // 固定構文v3)。
+    if (blockDepths[idx] > 0) {
+      candidates.push({
+        kind: 'fixed',
+        result: 'unknown',
+        ruleId: 'SP002',
+        line: lineNo,
+        reason: 'shell_nested_block_context_unproven',
       });
       continue;
     }

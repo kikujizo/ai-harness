@@ -3053,3 +3053,223 @@ test('H4b AC2: CHECK_STATUS=1直後の無条件exit 0はSP001 fail', () => {
     cleanup(dir);
   }
 });
+
+// ChatGPT要件再確認#5199636456指摘: isCleanDirectTargetCommandが有限の除外条件の
+// 積み上げ(ブラックリスト)のままだったため見逃していた5つのfail-open反例と、
+// 文字列リテラル誤検出を、positive whitelist(危険メタ文字なし)+block-nesting
+// depth追跡+quote-aware ENV_PREFIX_TOKEN_REで閉じる(M系列)。
+
+test('M1 AC2/AC4: background途中の& (npm test & echo done)はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/bg-mid.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/bg-mid.sh',
+      '#!/bin/bash\nset -e\nnpm test & echo done\n',
+      'background execution followed by another command on the same line',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M2 AC2/AC4: 複数行positive if条件内のnpm testはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/multiline-if.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/multiline-if.sh',
+      '#!/bin/bash\nset -e\nif\n  npm test\nthen\n  echo ok\nfi\n',
+      'multiline positive if condition body',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_nested_block_context_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M3 AC2/AC4: || trueで呼ばれるfunction内部のnpm testはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/func-internal.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/func-internal.sh',
+      '#!/bin/bash\nset -e\nrun_tests() {\n  npm test\n}\nrun_tests || true\n',
+      'target command inside a function body called with || true',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_nested_block_context_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M4 AC2/AC4: 開始行に別commandがある複数行command substitutionはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/multiline-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/multiline-cmdsub.sh',
+      '#!/bin/bash\nset -e\necho prefix; RESULT=$(\n  npm test\n)\n',
+      'multiline command substitution whose opening line already has another command',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M5 AC2/AC4: process substitution(cp <(npm test) out.txt)はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/process-sub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/process-sub.sh',
+      '#!/bin/bash\nset -e\ncp <(npm test) out.txt\n',
+      'process substitution around the target command',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M6 AC2/AC4: 文字列リテラル内のTARGET_COMMAND名(MSG="run npm test")はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/string-literal.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/string-literal.sh',
+      '#!/bin/bash\nset -e\nMSG="run npm test"\necho $MSG\n',
+      'target command name appearing only inside a string literal',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M7 AC2 反証: forループ本体内のnpm testはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/for-body.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/for-body.sh',
+      '#!/bin/bash\nset -e\nfor i in 1 2 3; do\n  npm test\ndone\n',
+      'target command inside a for loop body',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_nested_block_context_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M8 AC2 反証: caseブランチ内のnpm testはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/case-branch.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/case-branch.sh',
+      '#!/bin/bash\nset -e\ncase $1 in\n  x) npm test ;;\nesac\n',
+      'target command inside a case branch',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M9 AC2 反証: if本体内にネストしたfunction内部のnpm testはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/nested-func-in-if.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/nested-func-in-if.sh',
+      '#!/bin/bash\nset -e\nif true; then\n  run_tests() { npm test; }\n  run_tests\nfi\n',
+      'function defined and called inside an if body',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M10 AC2 回帰: 単純なstdoutリダイレクト(npm test > out.log)はpassを維持する', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/redirect-bare.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/redirect-bare.sh',
+      '#!/bin/bash\nset -e\nnpm test > out.log\necho done\n',
+      'bare direct execution with a simple stdout redirect',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M11 AC2 回帰: stderr破棄リダイレクト+確認済みfail_closed証明はpassを維持する', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/redirect-proof.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/redirect-proof.sh',
+      '#!/bin/bash\nfail_closed() { exit 1; }\nnpm test 2>/dev/null || fail_closed\n',
+      'stderr-discarding redirect combined with a confirmed fail_closed proof',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});

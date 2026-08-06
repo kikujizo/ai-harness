@@ -2581,6 +2581,126 @@ test('I4 AC2: CHECK_STATUS=PIPESTATUS 直後の無条件exit 0はSP001 fail', ()
   }
 });
 
+test('K1 AC2/AC4: echo "$(npm test)" はbuiltin除外より前にcommand substitutionを検出しSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/echo-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/echo-cmdsub.sh',
+      '#!/bin/bash\nset -e\necho "$(npm test)"\n',
+      'command substitution inside echo builtin',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('K2 AC2/AC4: local RESULT=$(npm test) もbuiltin除外より前に検出しSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/local-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/local-cmdsub.sh',
+      '#!/bin/bash\nset -e\nverify() {\n  local RESULT=$(npm test)\n}\n',
+      'command substitution inside local builtin',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('K3 AC2/AC4: TARGET_COMMANDが次行にある行継続(FOO=1 \\\\)は範囲追跡でSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/continuation-next-line.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/continuation-next-line.sh',
+      '#!/bin/bash\nset -e\nFOO=1 \\\n  npm test\n',
+      'TARGET_COMMAND on continuation next line',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('K4 AC2/AC4: 複数行subshell( 改行 npm test 改行 )は範囲追跡でSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/multiline-subshell.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/multiline-subshell.sh',
+      '#!/bin/bash\nset -e\n(\n  npm test\n)\n',
+      'multiline subshell',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('K5 AC2/AC4: 複数行command substitution(RESULT=$( 改行 npm test 改行 ))は範囲追跡でSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/multiline-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/multiline-cmdsub.sh',
+      '#!/bin/bash\nset -e\nRESULT=$(\n  npm test\n)\n',
+      'multiline command substitution',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('K6 AC2/AC4: 間接参照(CMD=npm → "$CMD" test)はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/indirect-ref.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/indirect-ref.sh',
+      '#!/bin/bash\nset -e\nCMD=npm\n"$CMD" test\n',
+      'indirect command reference',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test('J1 AC2/AC4: TARGET_COMMAND || echo ok || exit 1 は間接証明のためSP002 unknown', () => {
   const dir = makeRepo();
   try {
@@ -2595,7 +2715,7 @@ test('J1 AC2/AC4: TARGET_COMMAND || echo ok || exit 1 は間接証明のためSP
     assert.equal(result.exitCode, 1);
     assert.ok(result.lines.includes('result=blocked'));
     assert.ok(result.lines.includes('rule_id=SP002'));
-    assert.ok(result.lines.includes('reason=shell_failure_propagation_unproven'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
   } finally {
     cleanup(dir);
   }
@@ -2615,7 +2735,7 @@ test('J2 AC2/AC4: TARGET_COMMAND || echo ok || fail_closed も間接証明のた
     assert.equal(result.exitCode, 1);
     assert.ok(result.lines.includes('result=blocked'));
     assert.ok(result.lines.includes('rule_id=SP002'));
-    assert.ok(result.lines.includes('reason=shell_failure_propagation_unproven'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
   } finally {
     cleanup(dir);
   }

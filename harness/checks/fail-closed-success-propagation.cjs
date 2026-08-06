@@ -75,6 +75,10 @@ const COMMAND_SUB_RE = /\$\(|`[^`]*`/;
 // subshellは`(`が行頭、または`;`/`&`直後にあり、その直後にコマンドらしき文字が続く形を
 // 緩く検出する(arithmetic `((...))`はCOMMAND_SUB_REと重複判定されても害はないため区別しない)。
 const SUBSHELL_RE = /(?:^|[;&]\s*)\(\s*[A-Za-z_.\/$]/;
+// 間接参照(`CMD=npm` → `"$CMD" test`)はTARGET_COMMANDを静的に解決できないため常に
+// unknownとする。先頭tokenが変数展開("$VAR"またはunquoted $VAR)である行を検出する
+// (Issue #123固定構文v3)。
+const INDIRECT_REF_START_RE = /^\s*(?:if\s+!\s+)?"?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"?(?=\s|$)/;
 const SHELL_BLOCK_CLOSE_RE = /^\s*(?:fi|done|esac|\})\s*($|[#;])/;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
@@ -493,8 +497,70 @@ function hasUnsupportedShellStructure(line) {
     LINE_CONTINUATION_RE.test(line) ||
     HEREDOC_RE.test(line) ||
     COMMAND_SUB_RE.test(line) ||
-    SUBSHELL_RE.test(line)
+    SUBSHELL_RE.test(line) ||
+    hasMultipleOrSegments(line) ||
+    INDIRECT_REF_START_RE.test(line)
   );
+}
+
+// line continuation(行末`\`)は複数行にまたがるため、開始行だけを見ても
+// TARGET_COMMANDへの言及を検出できない。契約上、行継続自体が未対応構造(常にunknown)
+// のため、チェーン全体を結合したテキストで用途一致だけ判定し、開始行1件のunknown
+// 候補にまとめる。2行目以降は個別処理せずスキップする(Issue #123固定構文v3)。
+function computeLineContinuationChains(lines) {
+  const skipLines = new Set();
+  const chainByStartIdx = new Map();
+  for (let i = 0; i < lines.length; i += 1) {
+    if (skipLines.has(i)) continue;
+    const stripped = stripComment(lines[i], 'shell');
+    if (!LINE_CONTINUATION_RE.test(stripped)) continue;
+    let combined = stripped.replace(/\\\s*$/, ' ');
+    let j = i;
+    while (LINE_CONTINUATION_RE.test(stripComment(lines[j], 'shell'))) {
+      if (j + 1 >= lines.length) break;
+      j += 1;
+      skipLines.add(j);
+      const jStripped = stripComment(lines[j], 'shell');
+      combined += LINE_CONTINUATION_RE.test(jStripped)
+        ? jStripped.replace(/\\\s*$/, ' ')
+        : jStripped.trim();
+    }
+    chainByStartIdx.set(i, { endIdx: j, combinedText: combined });
+  }
+  return { skipLines, chainByStartIdx };
+}
+
+// 行末が未閉じの`(`/`$(`で終わる行から対応する`)`までの範囲を追跡する
+// (複数行subshell・複数行command substitution)。単一行で閉じる場合は
+// SUBSHELL_RE/COMMAND_SUB_REの同一行判定に任せ、ここでは扱わない。範囲内の
+// TARGET_COMMANDへの言及だけを判定し、開始行1件のunknown候補にまとめる
+// (Issue #123固定構文v3)。
+function computeMultilineGroupingRanges(lines) {
+  const skipLines = new Set();
+  const rangeByStartIdx = new Map();
+  for (let i = 0; i < lines.length; i += 1) {
+    if (skipLines.has(i)) continue;
+    const stripped = stripComment(lines[i], 'shell').trimEnd();
+    if (!/(?:^|[;&=]\s*)\$?\(\s*$/.test(stripped)) continue;
+    const opens = (stripped.match(/\(/g) || []).length;
+    const closes = (stripped.match(/\)/g) || []).length;
+    let depth = opens - closes;
+    if (depth <= 0) continue;
+    let endIdx = i;
+    let combined = stripped;
+    for (let j = i + 1; j < lines.length && depth > 0; j += 1) {
+      const jStripped = stripComment(lines[j], 'shell');
+      const jOpens = (jStripped.match(/\(/g) || []).length;
+      const jCloses = (jStripped.match(/\)/g) || []).length;
+      depth += jOpens - jCloses;
+      combined += `\n${jStripped}`;
+      endIdx = j;
+      skipLines.add(j);
+    }
+    if (endIdx === i) continue; // 対応する閉じ括弧が見つからなかった(未対応、無視)
+    rangeByStartIdx.set(i, { endIdx, combinedText: combined });
+  }
+  return { skipLines, rangeByStartIdx };
 }
 
 // `set +e`検出後、後続の3 meaningful lines(空行・コメント除く実効行)だけをcontextとする
@@ -618,12 +684,16 @@ function extractShellCandidates(content, relPath) {
   const confirmedFailClosed = collectConfirmedFailClosedNames(lines);
   const setPlusEWindows = computeSetPlusEWindows(lines);
   const failureRecordWindows = computeFailureRecordWindows(lines);
+  const continuationInfo = computeLineContinuationChains(lines);
+  const groupingInfo = computeMultilineGroupingRanges(lines);
 
   let errexitInContract = false;
   let errexitContractVoided = false;
   let meaningfulBeforeCommand = 0;
 
   for (let idx = 0; idx < lines.length; idx += 1) {
+    if (continuationInfo.skipLines.has(idx) || groupingInfo.skipLines.has(idx)) continue;
+
     const lineNo = idx + 1;
     const rawLine = lines[idx];
     const line = stripComment(rawLine, 'shell').trimEnd();
@@ -675,20 +745,58 @@ function extractShellCandidates(content, relPath) {
       continue;
     }
 
-    if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
-
-    if (hasUnsupportedShellStructure(line) && lineMentionsTargetCommandName(line)) {
-      candidates.push({
-        kind: 'fixed',
-        result: 'unknown',
-        ruleId: 'SP002',
-        line: lineNo,
-        reason: 'shell_unsupported_structure_unproven',
-      });
+    // line continuation・複数行subshell・複数行command substitutionは開始行だけを
+    // 見てもTARGET_COMMANDへの言及を検出できないため、結合済みテキスト(範囲全体)で
+    // 用途一致だけを判定し、開始行1件のunknown候補にまとめる(Issue #123固定構文v3)。
+    const multilineGroup = continuationInfo.chainByStartIdx.get(idx) || groupingInfo.rangeByStartIdx.get(idx);
+    if (multilineGroup) {
+      const combined = multilineGroup.combinedText;
+      if (
+        INDIRECT_REF_START_RE.test(combined) ||
+        lineMentionsTargetCommandName(combined) ||
+        TARGET_COMMAND_NAMES.has(resolveCommandBasename(combined) || '')
+      ) {
+        candidates.push({
+          kind: 'fixed',
+          result: 'unknown',
+          ruleId: 'SP002',
+          line: lineNo,
+          reason: 'shell_unsupported_structure_unproven',
+        });
+      }
       continue;
     }
 
+    // SHELL_BUILTIN_ONLY_REによる早期continueは、command substitutionを含まない
+    // 場合のみ行う。`local RESULT=$(npm test)`のようにbuiltin風でも内部でTARGET_COMMAND
+    // を実行する行を取りこぼさないため(Issue #123固定構文v3)。
+    if (SHELL_BUILTIN_ONLY_RE.test(line) && !COMMAND_SUB_RE.test(line)) continue;
+
     const commandBasename = resolveCommandBasename(line);
+
+    // デフォルトunknown・ホワイトリストのみpassの反転ルール: pipeline・行継続・
+    // here-doc・subshell・command substitution・複数`||`・間接参照のいずれかが
+    // 同一行にあり、かつTARGET_COMMANDへの言及(間接参照は無条件)があれば、
+    // 先頭tokenが解決できるか否かに関わらずSP002 unknownへ倒す。個別の構造を
+    // 都度検出器として追加する設計はshell構文が尽きないため未対応構造が
+    // 出るたびに再発する(Issue #123固定構文v3)。
+    if (hasUnsupportedShellStructure(line)) {
+      const isIndirectRef = INDIRECT_REF_START_RE.test(line);
+      const mentionsTarget =
+        isIndirectRef ||
+        lineMentionsTargetCommandName(line) ||
+        (commandBasename && TARGET_COMMAND_NAMES.has(commandBasename));
+      if (mentionsTarget) {
+        candidates.push({
+          kind: 'fixed',
+          result: 'unknown',
+          ruleId: 'SP002',
+          line: lineNo,
+          reason: 'shell_unsupported_structure_unproven',
+        });
+        continue;
+      }
+    }
 
     if (commandBasename && TARGET_COMMAND_NAMES.has(commandBasename)) {
       const windowEntry = setPlusEWindows[idx];

@@ -370,8 +370,12 @@ function isLoneClosingBraceLine(line, kind) {
 
 function stripComment(line, kind) {
   if (kind === 'shell') {
-    const hash = line.indexOf('#');
-    return hash === -1 ? line : line.slice(0, hash);
+    // クォート外の`#`だけをコメント開始とみなす(scanShellLexicalStateと共有の
+    // 字句状態。シングルクォート内の`#`はリテラルであり、単純なindexOf('#')は
+    // `printf '#'; npm test || true`のようなcandidate-zero fail-openを生む。
+    // Issue #123固定構文v3、独立技術レビュー#5200130028指摘対応)。
+    const { commentIndex } = scanShellLexicalState(line);
+    return commentIndex === -1 ? line : line.slice(0, commentIndex);
   }
   if (kind === 'node') {
     const slash = line.indexOf('//');
@@ -620,14 +624,32 @@ function computeLineContinuationChains(lines) {
 // を含む行は無条件unknown)に任せ、ここでは扱わない。範囲内の
 // TARGET_COMMANDへの言及だけを判定し、開始行1件のunknown候補にまとめる
 // (Issue #123固定構文v3)。
-// クォート(シングル/ダブル)内の`(`/`)`/バッククォートを無視して、行の括弧深さ変化と
-// バッククォート出現回数を計算する。文字列リテラル内の閉じ括弧を字句境界として
-// 誤カウントしないため(Issue #123固定構文v3)。
-function scanShellLexicalDelta(text) {
+// stripComment(コメント検出)とcomputeMultilineGroupingRanges(括弧デルタ・
+// バッククォート数)の両方が消費する、クォート状態を共有する1本の字句prepass
+// (独立技術レビュー#5200130028指摘対応)。汎用parserは作らず、保守的に次の
+// 2点だけを解決する契約とする(Issue #123固定構文v3):
+// (1) クォート外(シングル・ダブルとも)の`#`だけをコメント開始とみなす。
+//     シングルクォート内の`#`はリテラルであり、以前の実装はこれを見落として
+//     `printf '#'; npm test || true`のようなcandidate-zero fail-openを生んでいた。
+// (2) command substitution(`$(`)・backtick substitutionはbashではdouble quote
+//     内でも実行されるため、括弧デルタ・バッククォート数のカウント対象に含める
+//     (single quote内は不活性のまま無視する。double quote内でのsingle quoteの
+//     混入は不活性のまま無視するのが正しいbash挙動であり、ここで状態を誤って
+//     トグルしない)。内部の正確な境界(ネストしたクォート等)までは追わず、
+//     「開いた」ことさえ検出できれば複数行グルーピング判定で安全側(unknown)に
+//     倒せるため十分とする。
+function scanShellLexicalState(text) {
   let parenDelta = 0;
   let backtickCount = 0;
+  let commentIndex = -1;
   let inSingle = false;
   let inDouble = false;
+  // double quote内で`$(`により開始したcommand substitutionのネスト深さ。
+  // これが0のとき、double quote内の裸の`(`/`)`は文字列リテラルの一部でしか
+  // ないため(例: `echo ")"`)カウント対象から除く。0より大きいときだけ、その
+  // サブコンテキスト内の`(`/`)`をcommand substitutionの一部としてカウントする
+  // (L5回帰対応: quoted `)`単体をcommand substitutionの終端と誤認しないため)。
+  let doubleSubDepth = 0;
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
     if (inSingle) {
@@ -639,13 +661,40 @@ function scanShellLexicalDelta(text) {
         i += 1;
         continue;
       }
-      if (ch === '"') inDouble = false;
+      if (ch === '"' && doubleSubDepth === 0) {
+        inDouble = false;
+        continue;
+      }
+      if (ch === '$' && text[i + 1] === '(') {
+        parenDelta += 1;
+        doubleSubDepth += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === '(' && doubleSubDepth > 0) {
+        parenDelta += 1;
+        doubleSubDepth += 1;
+        continue;
+      }
+      if (ch === ')' && doubleSubDepth > 0) {
+        parenDelta -= 1;
+        doubleSubDepth -= 1;
+        continue;
+      }
+      if (ch === '`') {
+        backtickCount += 1;
+      }
       continue;
     }
-    if (ch === "'") {
+    if (ch === '\\') {
+      i += 1;
+    } else if (ch === "'") {
       inSingle = true;
     } else if (ch === '"') {
       inDouble = true;
+    } else if (ch === '#') {
+      commentIndex = i;
+      break;
     } else if (ch === '(') {
       parenDelta += 1;
     } else if (ch === ')') {
@@ -654,7 +703,7 @@ function scanShellLexicalDelta(text) {
       backtickCount += 1;
     }
   }
-  return { parenDelta, backtickCount };
+  return { parenDelta, backtickCount, commentIndex };
 }
 
 // 行末が未閉じの`(`/`$(`で終わる行、または未閉じのbacktickを含む行から、対応する
@@ -669,7 +718,7 @@ function computeMultilineGroupingRanges(lines) {
   for (let i = 0; i < lines.length; i += 1) {
     if (skipLines.has(i)) continue;
     const stripped = stripComment(lines[i], 'shell').trimEnd();
-    const { parenDelta, backtickCount } = scanShellLexicalDelta(stripped);
+    const { parenDelta, backtickCount } = scanShellLexicalState(stripped);
     // 行末が`(`/backtickで終わる形(`RESULT=$(`)だけでなく、開き括弧の直後に
     // 中身が続いて複数行にまたがる形(`RESULT=$(echo start` → 次行で閉じる、
     // `cat <(echo start`のprocess substitution等)も未閉じ(parenDelta > 0/
@@ -687,7 +736,7 @@ function computeMultilineGroupingRanges(lines) {
     let combined = stripped;
     for (let j = i + 1; j < lines.length; j += 1) {
       const jStripped = stripComment(lines[j], 'shell');
-      const jDelta = scanShellLexicalDelta(jStripped);
+      const jDelta = scanShellLexicalState(jStripped);
       if (opensParenGroup) parenDepth += jDelta.parenDelta;
       if (opensBacktickGroup && jDelta.backtickCount % 2 === 1) backtickOpen = !backtickOpen;
       combined += `\n${jStripped}`;

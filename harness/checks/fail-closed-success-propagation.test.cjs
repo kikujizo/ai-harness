@@ -3356,3 +3356,88 @@ test('M15 AC2 反証: クォート内の括弧は複数行グルーピングを�
     cleanup(dir);
   }
 });
+
+// 独立技術レビュー#5200130028指摘: stripCommentとscanShellLexicalDelta(旧)が
+// それぞれ独立・不完全にクォート状態を追跡していたため、(1)double quote内でも
+// 実行される$()/backtick substitutionを見落とす fail-open と、(2)single quote内の
+// `#`をコメント開始と誤認しcandidate-zeroでpassするfail-openが残っていた。
+// 両関数が共有する1本の字句prepass(scanShellLexicalState)へ統合して閉じる
+// (M16〜M19)。
+
+test('M16 AC2/AC4: double quote内で開始する複数行command substitutionはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/dq-multiline-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/dq-multiline-cmdsub.sh',
+      '#!/bin/bash\nset -e\necho "$(echo start\n  npm test\n  echo ok\n)"\n',
+      'command substitution opened inside double quotes, spanning multiple lines',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M17 AC2/AC4: double quote内で開始する複数行backtick substitutionはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/dq-multiline-backtick.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/dq-multiline-backtick.sh',
+      '#!/bin/bash\nset -e\necho "`echo start\n  npm test\n  echo ok\n`"\n',
+      'backtick substitution opened inside double quotes, spanning multiple lines',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M18 AC2: single quote内の#はコメント開始と誤認されずnpm test || trueが候補化されSP001 fail', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/hash-in-single-quote.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/hash-in-single-quote.sh',
+      "#!/bin/bash\nprintf '#'; npm test || true\n",
+      'literal # inside single quotes must not truncate the rest of the line as a comment',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=fail'));
+    assert.ok(result.lines.includes('rule_id=SP001'));
+    assert.ok(result.lines.includes('reason=shell_success_suppression'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M19 AC2 反証: double quote内のsingle quoteはクォート状態を誤ってトグルしない', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/dq-with-apostrophe.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/dq-with-apostrophe.sh',
+      '#!/bin/bash\nset -e\necho "it\'s # not a comment"\nnpm test\necho done\n',
+      "an apostrophe inside double quotes must stay inert (not open single-quote mode)",
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});

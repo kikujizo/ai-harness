@@ -79,6 +79,15 @@ const SUBSHELL_RE = /(?:^|[;&]\s*)\(\s*[A-Za-z_.\/$]/;
 // unknownとする。先頭tokenが変数展開("$VAR"またはunquoted $VAR)である行を検出する
 // (Issue #123固定構文v3)。
 const INDIRECT_REF_START_RE = /^\s*(?:if\s+!\s+)?"?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"?(?=\s|$)/;
+// background実行(単体の`&`。`&&`ではない)は`set -e`で呼出元へ失敗が伝播しないため
+// 固定passにしない(Issue #123固定構文v3)。
+const BACKGROUND_RE = /(?<!&)&(?!&)\s*($|[#;])/;
+// positive `if TARGET_COMMAND`(`if !`ではない)はflat `if !` guard契約の対象外。
+// 単体の`!`(if文を伴わない否定)も固定構文外。いずれもTARGET_COMMANDの先頭token解決
+// 自体を`if`/`!`にしてしまうため、resolveCommandBasenameの結果で自然に弾かれるが、
+// 意図を明示するため個別にも判定する(Issue #123固定構文v3)。
+const POSITIVE_IF_RE = /^\s*if\s+(?!!\s)/;
+const BARE_NEGATION_RE = /^\s*!\s+/;
 const SHELL_BLOCK_CLOSE_RE = /^\s*(?:fi|done|esac|\})\s*($|[#;])/;
 const SHELL_BUILTIN_ONLY_RE =
   /^\s*(?:#|echo|printf|true|false|exit|return|local|export|unset|shift|set|trap|source|\.|:)\b/;
@@ -499,8 +508,21 @@ function hasUnsupportedShellStructure(line) {
     COMMAND_SUB_RE.test(line) ||
     SUBSHELL_RE.test(line) ||
     hasMultipleOrSegments(line) ||
-    INDIRECT_REF_START_RE.test(line)
+    INDIRECT_REF_START_RE.test(line) ||
+    BACKGROUND_RE.test(line)
   );
+}
+
+// TARGET_COMMANDへの言及がある行を「まず候補化」したうえで、次の固定ホワイトリスト
+// 形に完全一致する場合だけpass判定ロジック(hasProofOnLine/errexitProven/ifNotProven)
+// へ進める。一致しなければ理由を問わずSP002 unknownへ倒す(デフォルトunknown・
+// ホワイトリストのみpassという反転ルールの中核、Issue #123固定構文v3)。
+function isCleanDirectTargetCommand(line, commandBasename) {
+  if (!commandBasename || !TARGET_COMMAND_NAMES.has(commandBasename)) return false;
+  if (hasUnsupportedShellStructure(line)) return false;
+  if (POSITIVE_IF_RE.test(line)) return false;
+  if (BARE_NEGATION_RE.test(line)) return false;
+  return true;
 }
 
 // line continuation(行末`\`)は複数行にまたがるため、開始行だけを見ても
@@ -535,29 +557,75 @@ function computeLineContinuationChains(lines) {
 // SUBSHELL_RE/COMMAND_SUB_REの同一行判定に任せ、ここでは扱わない。範囲内の
 // TARGET_COMMANDへの言及だけを判定し、開始行1件のunknown候補にまとめる
 // (Issue #123固定構文v3)。
+// クォート(シングル/ダブル)内の`(`/`)`/バッククォートを無視して、行の括弧深さ変化と
+// バッククォート出現回数を計算する。文字列リテラル内の閉じ括弧を字句境界として
+// 誤カウントしないため(Issue #123固定構文v3)。
+function scanShellLexicalDelta(text) {
+  let parenDelta = 0;
+  let backtickCount = 0;
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inSingle) {
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (ch === '"') inDouble = false;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+    } else if (ch === '"') {
+      inDouble = true;
+    } else if (ch === '(') {
+      parenDelta += 1;
+    } else if (ch === ')') {
+      parenDelta -= 1;
+    } else if (ch === '`') {
+      backtickCount += 1;
+    }
+  }
+  return { parenDelta, backtickCount };
+}
+
+// 行末が未閉じの`(`/`$(`で終わる行、または未閉じのbacktickを含む行から、対応する
+// 閉じ位置までの範囲を追跡する(複数行subshell・複数行command substitution・複数行
+// backtick substitution)。クォート内の括弧・バッククォートは無視する(quote-aware)。
+// 単一行で閉じる場合はSUBSHELL_RE/COMMAND_SUB_REの同一行判定に任せ、ここでは扱わない。
+// ファイル末尾まで閉じ位置が確定できない場合も、静的に境界を確定できない構造として
+// 範囲をファイル末尾まで広げ、unknown判定の対象に含める(Issue #123固定構文v3)。
 function computeMultilineGroupingRanges(lines) {
   const skipLines = new Set();
   const rangeByStartIdx = new Map();
   for (let i = 0; i < lines.length; i += 1) {
     if (skipLines.has(i)) continue;
     const stripped = stripComment(lines[i], 'shell').trimEnd();
-    if (!/(?:^|[;&=]\s*)\$?\(\s*$/.test(stripped)) continue;
-    const opens = (stripped.match(/\(/g) || []).length;
-    const closes = (stripped.match(/\)/g) || []).length;
-    let depth = opens - closes;
-    if (depth <= 0) continue;
+    const { parenDelta, backtickCount } = scanShellLexicalDelta(stripped);
+    const opensParenGroup = parenDelta > 0 && /(?:^|[;&=]\s*)\$?\(\s*$/.test(stripped);
+    const opensBacktickGroup = !opensParenGroup && backtickCount % 2 === 1 && /`\s*$/.test(stripped);
+    if (!opensParenGroup && !opensBacktickGroup) continue;
+
+    let parenDepth = opensParenGroup ? parenDelta : 0;
+    let backtickOpen = opensBacktickGroup;
     let endIdx = i;
     let combined = stripped;
-    for (let j = i + 1; j < lines.length && depth > 0; j += 1) {
+    for (let j = i + 1; j < lines.length; j += 1) {
       const jStripped = stripComment(lines[j], 'shell');
-      const jOpens = (jStripped.match(/\(/g) || []).length;
-      const jCloses = (jStripped.match(/\)/g) || []).length;
-      depth += jOpens - jCloses;
+      const jDelta = scanShellLexicalDelta(jStripped);
+      if (opensParenGroup) parenDepth += jDelta.parenDelta;
+      if (opensBacktickGroup && jDelta.backtickCount % 2 === 1) backtickOpen = !backtickOpen;
       combined += `\n${jStripped}`;
       endIdx = j;
       skipLines.add(j);
+      const stillOpen = opensParenGroup ? parenDepth > 0 : backtickOpen;
+      if (!stillOpen) break;
     }
-    if (endIdx === i) continue; // 対応する閉じ括弧が見つからなかった(未対応、無視)
     rangeByStartIdx.set(i, { endIdx, combinedText: combined });
   }
   return { skipLines, rangeByStartIdx };
@@ -767,38 +835,47 @@ function extractShellCandidates(content, relPath) {
       continue;
     }
 
-    // SHELL_BUILTIN_ONLY_REによる早期continueは、command substitutionを含まない
-    // 場合のみ行う。`local RESULT=$(npm test)`のようにbuiltin風でも内部でTARGET_COMMAND
-    // を実行する行を取りこぼさないため(Issue #123固定構文v3)。
-    if (SHELL_BUILTIN_ONLY_RE.test(line) && !COMMAND_SUB_RE.test(line)) continue;
-
     const commandBasename = resolveCommandBasename(line);
+    const hasTargetContext =
+      INDIRECT_REF_START_RE.test(line) ||
+      lineMentionsTargetCommandName(line) ||
+      (commandBasename && TARGET_COMMAND_NAMES.has(commandBasename));
 
-    // デフォルトunknown・ホワイトリストのみpassの反転ルール: pipeline・行継続・
-    // here-doc・subshell・command substitution・複数`||`・間接参照のいずれかが
-    // 同一行にあり、かつTARGET_COMMANDへの言及(間接参照は無条件)があれば、
-    // 先頭tokenが解決できるか否かに関わらずSP002 unknownへ倒す。個別の構造を
-    // 都度検出器として追加する設計はshell構文が尽きないため未対応構造が
-    // 出るたびに再発する(Issue #123固定構文v3)。
-    if (hasUnsupportedShellStructure(line)) {
-      const isIndirectRef = INDIRECT_REF_START_RE.test(line);
-      const mentionsTarget =
-        isIndirectRef ||
-        lineMentionsTargetCommandName(line) ||
-        (commandBasename && TARGET_COMMAND_NAMES.has(commandBasename));
-      if (mentionsTarget) {
+    // TARGET_COMMANDへの言及が全くない行だけがSHELL_BUILTIN_ONLY_REの早期continue
+    // 対象。`echo ok | npm test`のようにbuiltinで始まっても言及があれば、下の
+    // ホワイトリスト判定へ進める(Issue #123固定構文v3)。
+    if (!hasTargetContext) {
+      if (SHELL_BUILTIN_ONLY_RE.test(line)) continue;
+      if (commandBasename && UNKNOWN_WRAPPER_NAMES.has(commandBasename)) {
         candidates.push({
           kind: 'fixed',
           result: 'unknown',
           ruleId: 'SP002',
           line: lineNo,
-          reason: 'shell_unsupported_structure_unproven',
+          reason: 'shell_unresolved_wrapper_command',
         });
-        continue;
       }
+      continue;
     }
 
-    if (commandBasename && TARGET_COMMAND_NAMES.has(commandBasename)) {
+    // デフォルトunknown・ホワイトリストのみpassの反転ルール: 固定形(errexit契約下の
+    // bare direct execution/TARGET_COMMANDへ直接接続された単一の||証明/flat `if !`
+    // guard)に完全一致しない限り、理由を問わずSP002 unknownへ倒す。未対応wrapper
+    // (sudo/env/xargs/time等)・pipeline・positive if・background・間接参照等を
+    // 都度検出器として追加する設計はshell構文が尽きないため未対応構造が出るたびに
+    // 再発する(Issue #123固定構文v3)。
+    if (!isCleanDirectTargetCommand(line, commandBasename)) {
+      candidates.push({
+        kind: 'fixed',
+        result: 'unknown',
+        ruleId: 'SP002',
+        line: lineNo,
+        reason: 'shell_unsupported_structure_unproven',
+      });
+      continue;
+    }
+
+    {
       const windowEntry = setPlusEWindows[idx];
       if (windowEntry) {
         const hasProof = hasShellProofOnLine(line, confirmedFailClosed);
@@ -828,31 +905,18 @@ function extractShellCandidates(content, relPath) {
         }
       }
 
-      {
-        const hasProofOnLine = hasShellProofOnLine(line, confirmedFailClosed);
-        const hasUnprovenOrList = OR_OR_RE.test(line) && !hasProofOnLine;
-        candidates.push({
-          kind: 'target_command',
-          line: lineNo,
-          hasProofOnLine,
-          errexitProven:
-            errexitInContract && !errexitContractVoided && !AND_AND_RE.test(line) && !hasUnprovenOrList,
-          ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
-        });
-      }
-      continue;
-    }
-
-    if (commandBasename && UNKNOWN_WRAPPER_NAMES.has(commandBasename)) {
+      const hasProofOnLine = hasShellProofOnLine(line, confirmedFailClosed);
+      const hasUnprovenOrList = OR_OR_RE.test(line) && !hasProofOnLine;
       candidates.push({
-        kind: 'fixed',
-        result: 'unknown',
-        ruleId: 'SP002',
+        kind: 'target_command',
         line: lineNo,
-        reason: 'shell_unresolved_wrapper_command',
+        hasProofOnLine,
+        errexitProven:
+          errexitInContract && !errexitContractVoided && !AND_AND_RE.test(line) && !hasUnprovenOrList,
+        ifNotProven: hasIfNotFailureStop(lines, idx, confirmedFailClosed),
       });
-      continue;
     }
+    continue;
   }
 
   return candidates.map((c) => Object.assign({}, c, { path: relPath }));

@@ -2088,7 +2088,7 @@ test('G3a AC2: sudo経由は直接実行へ変換せずSP002 unknown', () => {
     assert.equal(result.exitCode, 1);
     assert.ok(result.lines.includes('result=blocked'));
     assert.ok(result.lines.includes('rule_id=SP002'));
-    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
   } finally {
     cleanup(dir);
   }
@@ -2108,7 +2108,7 @@ test('G3b AC2: env経由は直接実行へ変換せずSP002 unknown', () => {
     assert.equal(result.exitCode, 1);
     assert.ok(result.lines.includes('result=blocked'));
     assert.ok(result.lines.includes('rule_id=SP002'));
-    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
   } finally {
     cleanup(dir);
   }
@@ -2128,7 +2128,7 @@ test('G3c AC2: xargs経由は直接実行へ変換せずSP002 unknown', () => {
     assert.equal(result.exitCode, 1);
     assert.ok(result.lines.includes('result=blocked'));
     assert.ok(result.lines.includes('rule_id=SP002'));
-    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
   } finally {
     cleanup(dir);
   }
@@ -2148,7 +2148,7 @@ test('G3d AC2 反証: 相対パスのwrapper(../bin/sudo)もbasenameでunknown�
     assert.equal(result.exitCode, 1);
     assert.ok(result.lines.includes('result=blocked'));
     assert.ok(result.lines.includes('rule_id=SP002'));
-    assert.ok(result.lines.includes('reason=shell_unresolved_wrapper_command'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
   } finally {
     cleanup(dir);
   }
@@ -2576,6 +2576,146 @@ test('I4 AC2: CHECK_STATUS=PIPESTATUS 直後の無条件exit 0はSP001 fail', ()
     assert.ok(result.lines.includes('result=fail'));
     assert.ok(result.lines.includes('rule_id=SP001'));
     assert.ok(result.lines.includes('reason=shell_unconditional_exit0_after_failure_record'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('L1 AC2/AC4: positive if TARGET_COMMAND; then はcandidate zeroにせずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/positive-if.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/positive-if.sh',
+      '#!/bin/bash\nset -e\nif npm test; then\n  echo ok\nfi\necho done\n',
+      'positive if condition',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('L1b AC2/AC4: 単体の! TARGET_COMMAND(if文なし)もSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/bare-negation.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/bare-negation.sh',
+      '#!/bin/bash\nset -e\n! npm test\necho done\n',
+      'bare negation without if',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('L2 AC2/AC4: background実行(npm test &)はSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/background.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/background.sh',
+      '#!/bin/bash\nset -e\nnpm test &\necho done\n',
+      'background job',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('L3 AC2/AC4: builtin開始pipeline(echo ok | npm test)は早期continueで消えずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/builtin-pipeline.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/builtin-pipeline.sh',
+      '#!/bin/bash\nset -e\necho ok | npm test\n',
+      'builtin-started pipeline',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('L4 AC2/AC4: 未登録wrapper(time npm test)は個別列挙なしでSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/time-wrapper.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/time-wrapper.sh',
+      '#!/bin/bash\nset -e\ntime npm test\n',
+      'time wrapper not in explicit list',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('L5 AC2/AC4: quoted )を含む複数行command substitutionはquote-aware追跡でSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/quoted-paren-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/quoted-paren-cmdsub.sh',
+      '#!/bin/bash\nset -e\nRESULT=$(\n  echo ")"\n  npm test\n)\n',
+      'quoted closing paren inside multiline command substitution',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('L6 AC2/AC4: 複数行backtick substitutionは範囲追跡でSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/multiline-backtick.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/multiline-backtick.sh',
+      '#!/bin/bash\nset -e\nRESULT=`\n  npm test\n`\n',
+      'multiline backtick substitution',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
   } finally {
     cleanup(dir);
   }

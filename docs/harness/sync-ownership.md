@@ -131,7 +131,7 @@ Action README の `:!` pathspec は「全同期からの例外指定」用途で
 | 2 | 誤 base で停止 | `base: feature/foo`（`main` 以外） | `blocked` / `stop_reason: invalid_base` | `main` 以外を base にした同期 PR は merge 候補にしない |
 | 3 | stacked PR で停止 | `base: <既存OPEN同期PRのhead branch>`, `stacked: true` | `blocked` / `stop_reason: stacked_harness_sync_pr` / `stacked: true` | 既存 OPEN harness-sync PR の head branch を base に新規同期 PR を作らない |
 | 4 | 既存 OPEN 同期 PR あり | `open_harness_sync_pr_count: 1` 以上 | `blocked` / `stop_reason: existing_open_harness_sync_pr` | 新規作成停止後は既存 PR の source、base、state を確認する |
-| 5 | OPEN のまま再作成要求 | `requested_action: recreate`, 既存 PR が OPEN | `blocked` | 既存 PR を OPEN のまま再作成しない |
+| 5 | OPEN のまま再作成要求 | `requested_action: recreate`, 既存 PR が OPEN | `blocked` / `stop_reason: existing_open_harness_sync_pr` / `next_action: create_followup_issue_for_codex_pm_route` | 既存 PR を OPEN のまま再作成しない |
 | 6 | 解消後の再作成可能 | `requested_action: recreate`, `previous_pr_state: closed` または `withdrawn`, `open_harness_sync_pr_count: 0` | `eligible` / `next_action: recreate_harness_sync_pr` | 再作成時の base も必ず `main` |
 
 ### 運用上の共通事項

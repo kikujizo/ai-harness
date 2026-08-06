@@ -3338,7 +3338,7 @@ Issue #85 / #128 で、harness-sync 同期 PR の base が `main` 以外（featu
 
 - **既存 OPEN 同期 PR へ stack する**: base 固定と OPEN 件数制御を破るため却下
 - **OPEN 同期 PR を残したまま新規同期 PR を作る**: 重複同期 PR と誤 merge リスクのため却下
-- **既存 PR を自動 close する**: 人間判断を迂回し不可逆リスクがあるため却下
+- **既存 PR を自動 close する**: 個別 PR の処置を本 Issue で自動化せず、別 Issue へ分離して Codex PM が route を確定するため却下
 - **既存 PR を自動 rebase または自動 base 変更する**: 同期内容の意図を破壊しうるため却下
 - **通常 PR へ base 固定・stack 禁止を拡張する**: 本 Decision のスコープ外のため却下
 - **guard / verify-merge の契約を今回変更する**: 文書正本化のみのスコープのため却下

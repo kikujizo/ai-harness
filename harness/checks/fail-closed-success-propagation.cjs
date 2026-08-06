@@ -747,16 +747,21 @@ function findLexicalOpenRange(lines) {
     if (stripped.trim().length === 0 || isShebangLine(stripped)) continue;
     const opensByContinuation = LINE_CONTINUATION_RE.test(stripped);
     const opensByHeredoc = HEREDOC_RE.test(stripped);
-    // 行末時点でstackが空/非空か(stackDepthAtEnd)ではなく、複雑なopener
-    // (`(`/`$(`/backtick)を1回でも見たという事実(sawComplexOpener)を開始
-    // 判定に使う。独立技術レビュー#5200711995指摘: `RESULT=$(echo start # )`
-    // のように、command substitution内部のコメント本文にある`)`がctx==='paren'
-    // としてpopされてしまい(#はctx==='top'限定でしか認識されない)、行末時点の
-    // stackDepthAtEndだけを見ると「(同一行内で)閉じた」と誤判定されていた。
-    // 「行内で閉じたように見えるかどうか」の判定を一切信用しない(Issue #123
-    // 固定構文v3、PM方針(B))。
-    const { sawComplexOpener } = scanShellLexicalState(stripped);
-    if (opensByContinuation || opensByHeredoc || sawComplexOpener) {
+    // 開始判定は「複雑なopener(`(`/`$(`/backtick)を1回でも見たか」
+    // (sawComplexOpener)と「行末時点でstackが非空か」(stackDepthAtEnd > 0)の
+    // 両方をORで見る。片方だけでは不十分: 独立技術レビュー#5200711995指摘の
+    // `RESULT=$(echo start # )`のように、command substitution内部のコメント
+    // 本文にある`)`がctx==='paren'としてpopされてしまい(#はctx==='top'限定
+    // でしか認識されない)stackDepthAtEndだけでは「(同一行内で)閉じた」と
+    // 誤判定される場合があるためsawComplexOpenerで一度でも開いた事実を保持する。
+    // 一方、ChatGPT要件レビュー#5200860524指摘: `sh -c "`のような単純な
+    // single/double quoteだけの複数行開始(`$(`/backtick/非空`(`を伴わない)は
+    // sawComplexOpenerがfalseのままのため、stackDepthAtEndも見ないと検出漏れ
+    // になり、`sh -c "\n npm test\n" || true`のような複数行構造にまたがる
+    // success-propagation迂回(SP001)を素通りさせるfail-openを生む
+    // (Issue #123固定構文v3、PM方針(B))。
+    const { sawComplexOpener, stackDepthAtEnd } = scanShellLexicalState(stripped);
+    if (opensByContinuation || opensByHeredoc || sawComplexOpener || stackDepthAtEnd > 0) {
       const combinedText = lines
         .slice(i)
         .map((l) => stripComment(l, 'shell'))

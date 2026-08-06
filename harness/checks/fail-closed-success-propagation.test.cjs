@@ -3646,3 +3646,30 @@ test('N5 AC2 反証: 関数定義の空括弧はcomplex openerとして誤検出
     cleanup(dir);
   }
 });
+
+// ChatGPT要件レビュー#5200860524指摘: N4の修正(sawComplexOpenerへの置き換え)が
+// stackDepthAtEndを開始判定から完全に外したため、`$(`/backtick/非空`(`を伴わない
+// 単純な複数行single/double quote(例: `sh -c "`)の開始を検出できなくなっていた。
+// これにより、サブシェル内失敗を外側の`|| true`で握りつぶす典型的な
+// success-propagation迂回(SP001)が、複数行構造の開始行を素通りしたまま
+// per-line解析にかけられ、候補ゼロ(pass)としてすり抜けるfail-openを再現できた。
+// stackDepthAtEnd > 0をsawComplexOpenerとのORへ戻すことで修正した(N6)。
+test('N6 AC2 反証: sh -cの複数行double quote内のnpm testを外側||trueで握りつぶす迂回はunknownで検出される', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/multiline-double-quote-suppress.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/multiline-double-quote-suppress.sh',
+      '#!/bin/bash\nset -e\nsh -c "\n  npm test\n" || true\necho done\n',
+      'a simple multi-line double-quote open (no $()/backtick/non-empty paren) must still be detected as an open range',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});

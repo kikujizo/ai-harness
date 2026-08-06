@@ -623,6 +623,16 @@ function scanShellLexicalState(text) {
   let backtickCount = 0;
   let commentIndex = -1;
   const stack = [];
+  // command substitution(`$(`/`(`)・backtick substitutionのopenerを1回でも
+  // 見たら、同一行内の後続closerでfalseへ戻さない。独立技術レビュー
+  // #5200711995指摘: `$(echo start # )`のように、command substitution内部の
+  // コメント本文にある`)`がctx==='paren'扱いでpopされてしまい(#は
+  // ctx==='top'限定のためコメントと認識されずスルーされる)、行末時点の
+  // stackDepthAtEndだけを見ると「閉じた」と誤判定されていた。「開いた」という
+  // 事実そのものをこのフラグで保持し、findLexicalOpenRangeが行末状態でなく
+  // これを開始判定に使うことで、閉じたかどうかの判定を一切信用しない
+  // (Issue #123固定構文v3、PM方針(B))。
+  let sawComplexOpener = false;
 
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
@@ -645,12 +655,14 @@ function scanShellLexicalState(text) {
       if (ch === '$' && text[i + 1] === '(') {
         stack.push('paren');
         parenDelta += 1;
+        sawComplexOpener = true;
         i += 1;
         continue;
       }
       if (ch === '`') {
         stack.push('backtick');
         backtickCount += 1;
+        sawComplexOpener = true;
         continue;
       }
       // 裸の`(`/`)`・`'`・`#`はdouble quote内では不活性(文字通り)。
@@ -671,15 +683,25 @@ function scanShellLexicalState(text) {
         stack.pop();
       } else {
         stack.push('backtick');
+        sawComplexOpener = true;
       }
       backtickCount += 1;
     } else if (ch === '$' && text[i + 1] === '(') {
       stack.push('paren');
       parenDelta += 1;
+      sawComplexOpener = true;
       i += 1;
     } else if (ch === '(') {
       stack.push('paren');
       parenDelta += 1;
+      // 関数定義`name() {`の空括弧`()`はcommand substitution/subshellでは
+      // ないため、sawComplexOpenerの対象から除く(独立技術レビュー#5200711995
+      // 対応中に発覚: 除外しないと関数定義を含む行すべてが複数行構造の開始と
+      // 誤判定され、以降のファイル全体が無条件unknownになりchecker自体が
+      // 無用化する。空括弧は中身がなく危険性がないため安全に除外できる)。
+      if (text[i + 1] !== ')') {
+        sawComplexOpener = true;
+      }
     } else if (ch === ')') {
       // ctxが'paren'でない`)`(型が合わない閉じ)はどのコンテキストも閉じない。
       // 独立技術レビュー#5200517828指摘: 以前はここで無条件にparenDeltaを
@@ -698,7 +720,13 @@ function scanShellLexicalState(text) {
       break;
     }
   }
-  return { parenDelta, backtickCount, commentIndex, stackDepthAtEnd: stack.length };
+  return {
+    parenDelta,
+    backtickCount,
+    commentIndex,
+    stackDepthAtEnd: stack.length,
+    sawComplexOpener,
+  };
 }
 
 // (B)方針: 複数行にまたがるshell構造(未閉じのクォート・括弧・バッククォート・
@@ -719,8 +747,16 @@ function findLexicalOpenRange(lines) {
     if (stripped.trim().length === 0 || isShebangLine(stripped)) continue;
     const opensByContinuation = LINE_CONTINUATION_RE.test(stripped);
     const opensByHeredoc = HEREDOC_RE.test(stripped);
-    const { stackDepthAtEnd } = scanShellLexicalState(stripped);
-    if (opensByContinuation || opensByHeredoc || stackDepthAtEnd > 0) {
+    // 行末時点でstackが空/非空か(stackDepthAtEnd)ではなく、複雑なopener
+    // (`(`/`$(`/backtick)を1回でも見たという事実(sawComplexOpener)を開始
+    // 判定に使う。独立技術レビュー#5200711995指摘: `RESULT=$(echo start # )`
+    // のように、command substitution内部のコメント本文にある`)`がctx==='paren'
+    // としてpopされてしまい(#はctx==='top'限定でしか認識されない)、行末時点の
+    // stackDepthAtEndだけを見ると「(同一行内で)閉じた」と誤判定されていた。
+    // 「行内で閉じたように見えるかどうか」の判定を一切信用しない(Issue #123
+    // 固定構文v3、PM方針(B))。
+    const { sawComplexOpener } = scanShellLexicalState(stripped);
+    if (opensByContinuation || opensByHeredoc || sawComplexOpener) {
       const combinedText = lines
         .slice(i)
         .map((l) => stripComment(l, 'shell'))

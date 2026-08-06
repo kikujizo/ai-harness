@@ -3597,3 +3597,52 @@ test('N3 AC2/AC4: heredoc本体内のnpm testは開始検出のみでSP002 unkno
     cleanup(dir);
   }
 });
+
+// 独立技術レビュー#5200711995指摘: findLexicalOpenRangeが行末時点のstack
+// 非空(stackDepthAtEnd)を開始判定に使っていたため、command substitution
+// 内部のコメント本文にある`)`(#がctx==='top'限定でしか認識されないため
+// stripCommentされず素通りし、ctx==='paren'としてpopされる)により、同一行
+// 内で見かけ上「閉じた」と誤判定されるfail-openが残っていた。開始判定を
+// 「複雑なopenerを1回でも見たか」(sawComplexOpener、同一行の後続closerで
+// falseへ戻さない)に変更して修正した(N4)。この変更を入れる過程で、関数
+// 定義`name() {`の空括弧`()`まで複雑なopenerとして誤検出し、関数定義を含む
+// 行すべてが複数行構造の開始と誤判定されてchecker自体が無用化する新規
+// バグを自己検出し、空括弧は対象から除外して修正した(N5)。
+
+test('N4 AC2/AC4: command substitution内部のコメント本文にある)は同一行内でも終端と誤認せずSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/same-line-comment-paren.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/same-line-comment-paren.sh',
+      '#!/bin/bash\nset -e\nRESULT=$(echo start # )\n  npm test\n  echo ok\n)\n',
+      'a ) inside a same-line comment inside $() must not be mistaken for the closer',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('N5 AC2 反証: 関数定義の空括弧はcomplex openerとして誤検出されずcheckerが機能し続ける', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/function-def-empty-parens.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/function-def-empty-parens.sh',
+      '#!/bin/bash\nfail_closed() { exit 1; }\nnpm test 2>/dev/null || fail_closed\n',
+      'the empty parens in a function definition must not trigger the multi-line open detector',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});

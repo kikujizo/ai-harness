@@ -181,6 +181,28 @@ G2等の技術ゲート不成立は人間をレビュアー代替にせず、AI 
 - **中**: 差分は小さく。無関係ファイルを触らない。Issueにない依存追加・リファクタをしない。
 - **後**: 下記「出力契約」の形式で報告する。
 
+### harness-sync 同期PRの運用規則（正本）
+
+本節は **harness-sync で作成・確認・処置する同期PR**（テンプレート同期のため harness-sync workflow が作成する PR）にのみ適用する。
+
+- harness-sync PR の base は常に `main` とする
+- feature branch、別の同期 branch、既存 OPEN PR の head branch を base にしない
+- `main` 以外を base にした同期 PR は merge 候補にしない
+- 既存 OPEN harness-sync PR の head branch を base に新しい同期 PR を作らない
+- 既存 OPEN 同期 PR が 1 件以上ある場合、新しい同期 PR を作らない
+- 新規作成を停止した場合は、既存 PR の source（head branch）、base、state を確認する
+- 個別処置（close、rebase、base 変更、stack 解消など）は別 Issue へ分離し、Codex PM が route を確定する
+- 通常の技術判断に新しい人間承認ゲートを追加しない
+- 自動 close、自動 rebase、自動 base 変更を行わない
+- 再作成は、既存 OPEN 同期 PR を close または取り下げ、OPEN 件数が 0 になったことを確認した後に限る
+- 再作成時の base も必ず `main` とする
+- 既存 PR を OPEN のまま再作成しない
+- 「新しい同期 PR を先に作り、後で古い PR を整理する」運用を禁止する
+- 例外は原則なし
+- 緊急復旧等の例外は、対象 PR、理由、依存関係、取り消し手順を Decision Log へ記録し、カテゴリ③の発効点で人間 approve を得る
+- 例外を通常運用へ一般化しない
+- 本節は harness-sync 固有である。通常 PR の base/stack、自動マージ条件 G1〜G6、リスク分類、承認条件を変更しない
+
 ### Issue外の設計変更と実装詳細の境界
 
 実装AIは、Issue内で選択可能な実装詳細は通常どおり進めてよい。

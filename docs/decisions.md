@@ -3307,3 +3307,99 @@ Related PRs: #127
 - [ ] ChatGPT 要件レビュー
 - [ ] Codex 独立技術レビュー
 - [ ] 人間による merge 判断（発効点・`gate=human_approval`）
+
+---
+
+# Decision: harness-sync PRのbaseをmainへ固定しstacked PRを禁止する
+
+Date: 2026-08-06
+Status: Proposed
+Related Issues: #128, #85
+Related PRs: （PR作成後に更新）
+
+## 決定事項
+
+harness-sync で作成・確認・処置する同期 PR について、base を常に `main` に固定し、既存 OPEN 同期 PR への stack（既存 OPEN PR の head branch を base にした新規同期 PR）を禁止する。既存 OPEN 同期 PR が 1 件以上ある場合は新規同期 PR を作成しない。再作成は既存 OPEN 同期 PR を close または取り下げ、OPEN 件数が 0 になったことを確認した後に限る。自動 close、自動 rebase、自動 base 変更は行わない。
+
+## 背景・課題
+
+Issue #85 / #128 で、harness-sync 同期 PR の base が `main` 以外（feature branch や既存同期 PR の head branch）になるケースや、既存 OPEN 同期 PR がある状態で新規同期 PR を作成する stacked 運用が発生しうる。これにより merge 候補の判定が曖昧になり、誤 base や重複同期 PR が残存するリスクがある。
+
+## 採用する方針
+
+- `AGENTS.md` に harness-sync 固有の運用規則を追記する（通常 PR の G1〜G6・リスク分類・承認条件は変更しない）
+- `docs/harness/sync-ownership.md` に許可・停止判断の運用例を追記する（guard / verify-merge の機械契約変更は行わない）
+- base は常に `main`。再作成時も `main`
+- 既存 OPEN 同期 PR がある場合は新規作成を停止し、既存 PR の source、base、state を確認する
+- 個別処置は別 Issue へ分離し、Codex PM が route を確定する
+- 例外は原則なし。緊急復旧等は Decision Log 記録＋カテゴリ③発効点で人間 approve
+
+## 採用しない方針 / 却下した代替案
+
+- **既存 OPEN 同期 PR へ stack する**: base 固定と OPEN 件数制御を破るため却下
+- **OPEN 同期 PR を残したまま新規同期 PR を作る**: 重複同期 PR と誤 merge リスクのため却下
+- **既存 PR を自動 close する**: 人間判断を迂回し不可逆リスクがあるため却下
+- **既存 PR を自動 rebase または自動 base 変更する**: 同期内容の意図を破壊しうるため却下
+- **通常 PR へ base 固定・stack 禁止を拡張する**: 本 Decision のスコープ外のため却下
+- **guard / verify-merge の契約を今回変更する**: 文書正本化のみのスコープのため却下
+- **例外を恒常運用へする**: 運用の曖昧化を招くため却下
+
+## 判断理由
+
+- harness-sync 同期 PR はテンプレート同期という単一目的であり、base を `main` に固定することで merge 候補の判定を単純化できる
+- stacked PR や OPEN 重複は、どの同期 PR が正本かを人間が判断しづらくする
+- 文書正本化のみで実装・テスト・PR 作成を先行でき、発効点（merge）でのみ人間 approve を要求する運用と整合する
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ① 非該当
+- カテゴリ② 非該当
+- カテゴリ③ **該当**（`AGENTS.md` 正本変更）
+- カテゴリ④ 非該当
+
+`risk=high` `gate=human_approval`。実装・テスト・PR 作成は先行可能。発効点は実装 PR の merge。Cursor とは独立した ChatGPT 要件レビューと Codex 技術レビューが必要。Decision Log 記録後、merge 直前に人間 approve／deny が必要。approve 後の merge 実行は AI が行う。
+
+## このPRの最悪の失敗は何か・それは戻せるか
+
+1. **規則が広すぎて通常 PR まで不必要に停止する**: 文書上の適用範囲が曖昧だと、通常 PR の base/stack 判断まで harness-sync 規則が及ぶ。`git revert` と Decision Log の `Superseded` 更新で戻せる。
+2. **規則が曖昧で、誤 base、stacked PR、OPEN のままの再作成を許す**: 運用例と AGENTS 節の表現が不十分だと、意図しない PR が merge 候補に残る。同上、`git revert` で戻せる。
+
+## 影響範囲
+
+- `AGENTS.md`（harness-sync 固有節の追記のみ）
+- `docs/harness/sync-ownership.md`（許可・停止判断例の追記のみ）
+- `docs/decisions.md`（本 Decision Log エントリ）
+- 通常 PR、G1〜G6、既存 guard / verify-merge の契約には影響しない
+
+## 例外条件
+
+原則なし。緊急復旧等の例外は、対象 PR、理由、依存関係、取り消し手順を Decision Log へ記録し、カテゴリ③の発効点で人間 approve を得る。例外を通常運用へ一般化しない。
+
+## 取り消し手順
+
+1. 実装 PR を revert する
+2. `AGENTS.md` の harness-sync 固有規則を戻す
+3. `docs/harness/sync-ownership.md` の運用例を戻す
+4. Decision Log の Status を `Superseded` へ更新する
+5. 通常 PR、G1〜G6、既存 guard / verify-merge の契約が元の状態であることを確認する
+
+## 見直す条件
+
+- harness-sync 以外の PR 種別へ規則が誤適用された場合
+- stacked PR や OPEN 重複が文書規則だけでは防止できないと判明した場合（guard / verify-merge 変更は別 Issue）
+- 適用先リポジトリ数の増加により、同期 PR の運用負荷が変化した場合
+
+## レビュー記録
+
+| 項目 | 結果 | 証跡 |
+|---|---|---|
+| ChatGPT要件レビュー | 未実施 | - |
+| Codex独立技術レビュー | 未実施 | - |
+| merge | 未実施 | - |
+
+## 次アクション
+
+- [x] Cursor による実装・テスト・PR 作成（本エントリ）
+- [ ] ChatGPT 要件レビュー
+- [ ] Codex 独立技術レビュー
+- [ ] 人間による merge 判断（発効点・`gate=human_approval`）

@@ -119,6 +119,29 @@ Action README の `:!` pathspec は「全同期からの例外指定」用途で
 3. Action は commit SHA 固定。`dry-run` で診断し、問題なければ `create-pr`
 4. merge は常に人間。自動 merge / schedule / fan-out / dispatch は後続 Issue
 
+## harness-sync 同期PRの許可・停止判断例（運用）
+
+> **注記**: 以下は運用判断の例であり、既存 guard や verify-merge の新しい機械出力契約ではない。
+
+### ケース一覧
+
+| # | 状況 | 入力例 | 結果 | 補足 |
+|---|---|---|---|---|
+| 1 | 作成可能 | `base: main`, `open_harness_sync_pr_count: 0` | `eligible` / `stacked: false` / `next_action: create_or_continue_harness_sync_pr` | base は常に `main` |
+| 2 | 誤 base で停止 | `base: feature/foo`（`main` 以外） | `blocked` / `stop_reason: invalid_base` | `main` 以外を base にした同期 PR は merge 候補にしない |
+| 3 | stacked PR で停止 | `base: <既存OPEN同期PRのhead branch>`, `stacked: true` | `blocked` / `stop_reason: stacked_harness_sync_pr` / `stacked: true` | 既存 OPEN harness-sync PR の head branch を base に新規同期 PR を作らない |
+| 4 | 既存 OPEN 同期 PR あり | `open_harness_sync_pr_count: 1` 以上 | `blocked` / `stop_reason: existing_open_harness_sync_pr` | 新規作成停止後は既存 PR の source、base、state を確認する |
+| 5 | OPEN のまま再作成要求 | `requested_action: recreate`, 既存 PR が OPEN | `blocked` | 既存 PR を OPEN のまま再作成しない |
+| 6 | 解消後の再作成可能 | `requested_action: recreate`, `previous_pr_state: closed` または `withdrawn`, `open_harness_sync_pr_count: 0` | `eligible` / `next_action: recreate_harness_sync_pr` | 再作成時の base も必ず `main` |
+
+### 運用上の共通事項
+
+- 新規作成停止後は既存 PR を確認する
+- 個別処置は別 Issue ＋ Codex PM route へ戻す
+- 自動 close、自動 rebase をしない
+- 高リスクの不可逆な発効点だけ人間 approve／deny とする
+- 通常 PR や既存の自動 merge 条件へ適用範囲を広げない
+
 ## 撤退手順
 
 - 適用先の `harness-sync` workflow を無効化または削除する

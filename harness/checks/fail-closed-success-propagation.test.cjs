@@ -3273,3 +3273,86 @@ test('M11 AC2 回帰: stderr破棄リダイレクト+確認済みfail_closed証�
     cleanup(dir);
   }
 });
+
+// 独立レビュー#5200025133指摘: 開始行自体に中身がある(行末が`(`/backtickで
+// 終わらない)mid-line開始の複数行command/process/backtick substitutionは、
+// computeMultilineGroupingRangesの行末位置条件では範囲追跡から漏れ、開始行
+// 以外の中身行が独立候補として誤ってpassしていた(M12〜M14)。
+
+test('M12 AC2/AC4: 開始行自体に中身があるmid-line開始のcommand substitutionはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/midline-cmdsub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/midline-cmdsub.sh',
+      '#!/bin/bash\nset -e\nRESULT=$(echo start\n  npm test\n)\n',
+      'command substitution whose opening line already contains content before the newline',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M13 AC2/AC4: 開始行自体に中身があるmid-line開始のprocess substitutionはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/midline-process-sub.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/midline-process-sub.sh',
+      '#!/bin/bash\nset -e\ncat <(echo start\n  npm test\n)\n',
+      'process substitution whose opening line already contains content before the newline',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M14 AC2/AC4: 開始行自体に中身があるmid-line開始のbacktick substitutionはSP002 unknown', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/midline-backtick.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/midline-backtick.sh',
+      '#!/bin/bash\nset -e\nRESULT=`echo start\n  npm test\n`\n',
+      'backtick substitution whose opening line already contains content before the newline',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.lines.includes('result=blocked'));
+    assert.ok(result.lines.includes('rule_id=SP002'));
+    assert.ok(result.lines.includes('reason=shell_unsupported_structure_unproven'));
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test('M15 AC2 反証: クォート内の括弧は複数行グルーピングを誤発火させない', () => {
+  const dir = makeRepo();
+  try {
+    const baseSha = writeAndCommit(dir, 'scripts/quoted-paren.sh', '#!/bin/bash\n', 'base');
+    const headSha = writeAndCommit(
+      dir,
+      'scripts/quoted-paren.sh',
+      '#!/bin/bash\nset -e\necho "(not a paren group"\nnpm test\necho done\n',
+      'unbalanced parenthesis inside a string literal must not be treated as an open group',
+    );
+    const result = runOnRepo(dir, baseSha, headSha);
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.lines.includes('result=pass'));
+  } finally {
+    cleanup(dir);
+  }
+});

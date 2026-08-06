@@ -670,8 +670,15 @@ function computeMultilineGroupingRanges(lines) {
     if (skipLines.has(i)) continue;
     const stripped = stripComment(lines[i], 'shell').trimEnd();
     const { parenDelta, backtickCount } = scanShellLexicalDelta(stripped);
-    const opensParenGroup = parenDelta > 0 && /(?:^|[;&=]\s*)\$?\(\s*$/.test(stripped);
-    const opensBacktickGroup = !opensParenGroup && backtickCount % 2 === 1 && /`\s*$/.test(stripped);
+    // 行末が`(`/backtickで終わる形(`RESULT=$(`)だけでなく、開き括弧の直後に
+    // 中身が続いて複数行にまたがる形(`RESULT=$(echo start` → 次行で閉じる、
+    // `cat <(echo start`のprocess substitution等)も未閉じ(parenDelta > 0/
+    // backtickCountが奇数)であれば同じ範囲追跡へ含める。行頭・行末の位置条件を
+    // 前提にすると「開始行自体に中身がある」形を取りこぼすため、クォート外の
+    // 字句デルタだけを根拠にする(Issue #123固定構文v3、ChatGPT要件再確認
+    // #5199636456指摘のmid-line開始反例対応)。
+    const opensParenGroup = parenDelta > 0;
+    const opensBacktickGroup = !opensParenGroup && backtickCount % 2 === 1;
     if (!opensParenGroup && !opensBacktickGroup) continue;
 
     let parenDepth = opensParenGroup ? parenDelta : 0;

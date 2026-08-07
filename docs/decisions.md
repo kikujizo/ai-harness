@@ -3511,6 +3511,8 @@ Issue #85 / #128 で、harness-sync 同期 PR の base が `main` 以外（featu
 
 ---
 
+---
+
 # Decision: 高リスク承認v2契約の実効ルール同期（Issue #133）
 
 Date: 2026-08-10
@@ -3583,7 +3585,7 @@ Issue #134 で `AGENTS.md` / `pm-review` に正本化した高リスク承認v2�
 
 ---
 
-# Decision: Cursor一時scratch配置とcleanup技術ゲート・発効点分離
+# Decision: Cursor一時scratch配置とcleanup技術ゲート・発効点分離（Option 2）
 
 Date: 2026-08-07
 Status: Proposed
@@ -3593,60 +3595,89 @@ Related PRs: #132
 ## 決定事項
 
 Cursorの一時ファイルをOS identity由来のtrusted home配下のrun固有scratch
-（`<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo>/<run-id>/`）に限定する。
+（`RUN_ROOT=<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo_slug>/<run_id>/`）に限定する。
+writerとcleanupは同一 `RUN_LOCK`（`<SCRATCH_BASE>/.locks/<repo_slug>/<run_id>.lock`）を
+OS標準の排他プリミティブで必ず取得する（repo内lock実装ファイル・daemon・DBは追加しない）。
+
 identity-root resolverを次で固定する。
 
 - **Windows native**: current SID（`WindowsIdentity.GetCurrent().User.Value`）→
-  同一SIDの唯一の `Win32_UserProfile.LocalPath` を `TRUSTED_HOME`
-- **Linux / WSL**: ai-dev-workflow#139 を再利用（`id -u` → `getent passwd <uid>` 第6フィールド）
+  同一SIDの唯一の `Win32_UserProfile.LocalPath` を `TRUSTED_HOME`。
+  排他は `FileShare=None` 相当のexclusive FileStream。
+- **Linux / WSL**: ai-dev-workflow#139 を再利用（`id -u` → `getent passwd <uid>` 第6フィールド）。
+  排他は non-blocking exclusive `flock`。
 
 `USERPROFILE` / `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能・unsupported OSでは
-scratch作成もcleanup候補化もしない。通常作業中はcleanupせず、cleanupはexact `<repo>/<run-id>` root
-1件に対しidentity・provenance・非活動・inventory・path chain等のread-only技術ゲート全成立後にのみ
-closed questionへ進む。人間approve後も直前再検証し、状態変化時は再承認が必要。
+scratch作成もcleanup候補化もしない（`scratch_created=false`、mkdir/writeより前に停止）。
+scratch初回write前にOS別path-chain safety（symlink/reparse/mountpoint/owner/mode/ACL/special/
+canonical境界）を検証する。
+
+provenanceの権威入力はrun終了時の **exact GitHub completion record 1件** とする。
+`record_type=scratch-completion/v1`、`repo_full_name`、`repo_slug`、`run_id`、
+相対 `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、`run_state=completed`、
+`residue=present|none` を照合する。**旧仕様の canonical absolute scratch root を
+GitHubへ記録する方式は撤回**し、absolute local home path・個人情報はGitHubへ書かない。
+
+通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` 1件に対しidentity・exact provenance・
+path safety・inventory・`RUN_LOCK` 取得を含むread-only技術ゲート全成立後にのみ
+closed questionへ進む。人間approve後はlock再取得と全ゲート再検証を行い、削除完了確認まで
+lockを保持する。状態変化時は再承認が必要（approval再利用禁止）。
 カテゴリ③（`.cursor/rules/ai-workflow.mdc` のmerge）とカテゴリ④（実cleanup）は別発効点とする。
 
 ## 背景・課題
 
 `.cursor/rules/ai-workflow.mdc` は `alwaysApply: true` だが、一時ファイル配置とcleanup境界が未定義。
-環境変数偽装・別root・別run・利用中データをcleanup対象にしない契約が必要。
+旧Issueは「別cleanup中でないことを確認」と要求しながらlock機構をスコープ外としており、
+cleanup排他が構造的に不成立だった。fail-closedのまま常時blockedに縮小するとCheckpointの
+「安全確認後にcleanupのclosed questionへ到達する」目的を失う。
 
-## 採用する方針
+## 採用する方針（Option 2）
 
-- `.cursor/rules/ai-workflow.mdc` にidentity-root・scratch・cleanup技術ゲートを短く追記
-- `docs/harness/roles/cursor.md` は正本参照を維持し設計意図のみ同期
-- `docs/harness/setup.md` にシナリオ・fail-closed 8基準の実装前照合記録
+- **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
+- `.cursor/rules/ai-workflow.mdc` にidentity-root・path safety・`RUN_LOCK`・exact completion record・
+  cleanup gate（A/B/C制御順序）を短く追記
+- `docs/harness/roles/cursor.md` は正本参照を維持し設計意図・run lock必須のみ同期
+- `docs/harness/setup.md` にWindows/Linux・WSLシナリオ・否定例・fail-closed 8基準の実装前照合記録
+- provenanceはpath名推測禁止。exact GitHub record + local再検証の組み合わせ
 - Linux/WSLは ai-dev-workflow#139 の `getent passwd` 契約を再利用
 - Windowsはcurrent SIDと `Win32_UserProfile.LocalPath` の対応をルール契約として記述
 
 ## 採用しない方針 / 却下した代替案
 
-- **追加resolver script・package・daemon・lock・provenance DB**: 4ファイル文書のみで表現するため却下
+- **追加resolver script・package・daemon・repo内lock実装ファイル・provenance DB**: 4ファイル文書のみで表現するため却下
 - **環境変数homeを正本化**: 偽装リスクのため却下
+- **canonical absolute scratch rootのGitHub記録**: 個人情報・absolute path漏洩リスクのため撤回
+- **lock競合時のsteal・待機・lock file削除による突破**: 誤cleanupリスクのため却下
 - **本PRでの実cleanup**: カテゴリ④は別発効点のため却下
 - **固定manifest外ファイルの追加**: Issue境界を超えるため却下
 - **環境変数優先またはOS側無条件優先の不一致fallback**: 両方禁止
+- **fail-closedのままcleanupを常時blockedに縮小**: Checkpoint目的と矛盾するため却下（Option 1相当）
 
 ## 判断理由
 
+- writerとcleanup間の排他は明示的な共有lockなしでは証明できないが、OS標準プリミティブだけで足りる
 - identity-rootをOS由来で固定し、環境変数偽装への否定例を文書化することで、誤cleanupの主要経路を閉じる
+- exact GitHub completion record（相対path）とlocal再検証を組み合わせ、path単独推測を禁止する
 - 技術ゲートと人間approveを分離し、approveがゲートを代替しない契約を明示する
 - 文書正本化のみで実装・テスト・PRを先行し、merge（カテゴリ③）と実cleanup（カテゴリ④）を分離する
 
 ## リスク（不可逆4カテゴリの該当有無）
 
-- カテゴリ① 非該当
+- カテゴリ① 非該当（absolute homeのGitHub記録を撤回し個人情報リスクを低減）
 - カテゴリ② 非該当
 - カテゴリ③ **該当**（`.cursor/rules/ai-workflow.mdc` 正本変更）
 - カテゴリ④ 本PR実装は非該当。将来の実cleanupは**別発効点で該当**
 
 `risk=high` `gate=human_approval`。実装・テスト・PR・独立レビューは先行可能。merge直前に人間approve/deny。
+本PRのmerge承認はカテゴリ④の実cleanupへ流用しない。
 
 ## このPRの最悪の失敗は何か・それは戻せるか
 
-1. **identity・run帰属・活動状態の誤認で別ユーザー・別run・利用中データをcleanup対象にする**:
+1. **lock / provenance / path safetyの契約が誤り、同時writerまたは別cleanupを見逃し、
+   利用中・別run・別filesystemのデータをcleanup対象にする**:
    ルール変更は `git revert` で戻せるが、誤cleanupの外部影響は完全復旧不能の可能性がある。
-2. **ルールが曖昧で環境変数偽装を許す**: 同上、`git revert` と Decision `Superseded` で戻せる。
+2. **lockを過剰に厳しく定義しscratch/cleanupが常時fail-closedで停止する**:
+   可逆。誤削除より優先する設計判断。
 
 ## 影響範囲
 
@@ -3657,34 +3688,35 @@ closed questionへ進む。人間approve後も直前再検証し、状態変化�
 
 ## 例外条件
 
-原則なし。`id` / `getent` / `Win32_UserProfile` が利用不能な環境はfail-closedで停止し、
-新resolver実装はIssue外設計変更としてCodex PMへ戻す。
+原則なし。`id` / `getent` / `Win32_UserProfile` / `flock` / exclusive FileStream が
+利用不能な環境はfail-closedで停止し、新resolver実装はIssue外設計変更としてCodex PMへ戻す。
 
 ## 取り消し手順
 
 1. 実装PRをrevertする
 2. 上記4ファイルの本Issue由来変更を戻す
 3. 本 Decision Log の Status を `Superseded` へ更新する
-4. 外部影響が既にある場合はrevertだけで復旧済みとみなさず、別Issueで影響調査する
+4. runtime `RUN_LOCK` fileは活動証明ではないため、revertだけを理由に自動削除しない
+5. 外部影響が既にある場合はrevertだけで復旧済みとみなさず、別Issueで影響調査する
 
 ## 見直す条件
 
 - Windows / Linux・WSL以外のOSで同等resolverが必要になった場合
-- 追加script・lock・provenance DBが必要と判明した場合（別Checkpoint）
+- 追加script・lock daemon・provenance DBが必要と判明した場合（別Checkpoint）
 - 文書契約だけでは活動中run・inventory変化を観測できないと実測で判明した場合
 
 ## レビュー記録
 
 | 項目 | 結果 | 証跡 |
 |---|---|---|
-| Draft PR | 未作成 | - |
-| ChatGPT要件レビュー | 未実施 | - |
-| Codex独立技術レビュー | 未実施 | - |
-| merge | 未実施 | - |
+| Draft PR | 作成済み | PR #132 |
+| ChatGPT要件レビュー | **未実施（新HEAD再レビュー待ち）** | 旧HEAD `7aef433` の判定はIssue再仕様化により流用不可 |
+| Codex独立技術レビュー | **未実施（新HEAD再レビュー待ち）** | PMコメント #5214538741 でroute承認済み。実装後の独立レビューは別ゲート |
+| merge | 未実施 | カテゴリ③・`gate=human_approval` |
 
 ## 次アクション
 
-- [x] Cursor による実装（本エントリ・4ファイル文書）
-- [ ] ChatGPT 要件レビュー
-- [ ] Codex 独立技術レビュー
+- [x] Cursor による実装（本エントリ・4ファイル文書・Option 2）
+- [ ] ChatGPT 要件レビュー（新HEAD固定）
+- [ ] Codex 独立技術レビュー（新HEAD固定・fail-closed 8基準・lock/provenance/path safety）
 - [ ] 人間による merge 判断（発効点・カテゴリ③・`gate=human_approval`）

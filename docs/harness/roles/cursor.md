@@ -22,14 +22,21 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
 - 文書生成タスクではrecursive-writingを使う。`.env`・secretの秘匿とmain直push禁止は、
   指示だけでなくブランチ保護を最終防衛に置く。
 - 一時ファイルはOS identity由来のtrusted home配下のrun固有scratch（
-  `<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo>/<run-id>/`）に限定する。identity-rootは
-  Windows nativeではcurrent SID→`Win32_UserProfile.LocalPath`、Linux/WSLでは
-  `id -u`→`getent passwd`第6フィールド（#139再利用）。`USERPROFILE` / `HOME` / `~` 等の
-  環境由来homeは正本にせず、不一致・解決不能時はscratch作成もcleanup候補化もしない。
-  通常作業中はcleanupせず、cleanupはexact run rootに対する技術ゲート全成立後にのみ
-  closed questionへ進む。人間approveは技術ゲートを代替しない。approve後も直前再検証し、
-  状態変化時は再承認が必要。カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
-  詳細・制御順序の正本は `.cursor/rules/ai-workflow.mdc`（本ファイルは複製しない）。
+  `RUN_ROOT=<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo_slug>/<run_id>/`）に限定する。
+  writerとcleanupは同一 `RUN_LOCK`（`<SCRATCH_BASE>/.locks/<repo_slug>/<run_id>.lock`）を
+  non-blocking exclusive で必ず取得する（Linux: flock / Windows: FileShare=None）。
+  identity-rootは Windows nativeではcurrent SID→`Win32_UserProfile.LocalPath`、
+  Linux/WSLでは `id -u`→`getent passwd`第6フィールド（#139再利用）。`USERPROFILE` /
+  `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能時はscratch作成も
+  cleanup候補化もしない（`scratch_created=false`、mkdir/writeより前に停止）。
+  scratch初回write前にOS別path-chain safetyを検証する。provenanceの権威入力は
+  exact GitHub completion record 1件（相対 `scratch_rel` のみ。absolute homeは記録しない）。
+  通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` に対するread-only技術ゲート全成立後に
+  のみ closed questionへ進む。人間approveは技術ゲートを代替しない。approve後はlock再取得と
+  全ゲート再検証を行い、削除完了確認までlockを保持する。状態変化時は再承認が必要。
+  カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
+  詳細・制御順序・否定例の正本は `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
+  （本ファイルは複製しない）。
 
 ## GitHub書き込み
 

@@ -273,42 +273,71 @@ branch `issue-121-ambiguous-comprehensive-instruction-scope`。
 | 実出力（先頭） | `G1〜G6は全て充足済みのため、新しい人間承認は要求しない。本規定は通常リスクPRの既存merge条件（G1〜G6充足→AI merge可）を変更しないため、このPRは既存条件どおりAIがmergeを実行する。本規定のclosed question条件はこのPRには適用しない。適用対象は高リスクの発効点承認、または技術判断が不明で人間の許可を求めたくなる場面であり、本PRはG1〜G6が成立済みで残件も発効点も存在しないため、そもそも人間に問い合わせる局面ではない。` |
 | 合否 | **合格** — 曖昧指示への確認義務を理由に通常リスクへ新しい承認ゲートを追加していない |
 
-#### 一時scratch / cleanup境界（Issue #54 Checkpoint・5件）
+#### 一時scratch / cleanup境界（Issue #54 Checkpoint・Option 2・10件）
 
-- **Windows identity-root成立**: current SID→`Win32_UserProfile.LocalPath` で `TRUSTED_HOME` が一意に得られることを確認する。
-  `USERPROFILE` 等の環境由来候補が存在する場合のみ canonicalize して `TRUSTED_HOME` と照合し、一致なら成立、
-  不一致なら本シナリオではなく不一致停止へ回す（環境変数は正本にしない）。scratch論理パスが
-  `<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo>/<run-id>/` に限定されることを確認する。
-- **Windows / Linux 不一致停止（否定例）**: `TRUSTED_HOME=C:\Users\alice` かつ
+制御フロー正本: `.cursor/rules/ai-workflow.mdc`（A: scratch開始 / B: cleanup pre-approval /
+C: approve後）。EARLY停止時は `scratch_created=false`・`cleanup=false`・mkdir/writeより前に
+停止することを各否定例で観測する。
+
+- **Windows identity-root・path safety・lock取得成功**: current SID→`Win32_UserProfile.LocalPath` で
+  `TRUSTED_HOME` が一意に得られ、path-chain safety検証後、初回mkdir/writeより前に `RUN_LOCK` を
+  non-blocking exclusive 取得（FileShare=None）でき、`RUN_ROOT` へ書込できることを確認する。
+  run終了時にlock保持のまま exact GitHub completion record 1件（相対 `scratch_rel` のみ）を作成する。
+- **Linux/WSL identity-root・path safety・lock取得成功**: `id -u`→`getent passwd`第6フィールドで
+  `TRUSTED_HOME` が得られ、symlink/owner/mode/mountpoint/ACL/special/canonical検証後、
+  `flock` non-blocking exclusive 取得→`RUN_ROOT` 書込→completion record作成を確認する。
+- **Windows / Linux 不一致停止（否定例・EARLY）**: `TRUSTED_HOME=C:\Users\alice` かつ
   `USERPROFILE=C:\Temp\fake`、または getent home=`/home/alice` かつ `HOME=/tmp/fake` を渡し、
-  `stop_reason=identity_root_mismatch`、`scratch_created=false`、`cleanup_candidate=false`（または同等の
-  `blocked`）とし、環境変数優先・OS側無条件優先のfallbackがないことを確認する。
+  `result=blocked`、`stop_reason=identity_root_mismatch`、`scratch_created=false`、`cleanup=false`
+  とし、mkdir/write・completion record・cleanupが呼ばれないことを確認する。
+- **run lock競合（否定例・EARLY）**: 同一 `repo_slug/run_id` で `run_lock=conflict` を渡し、
+  `result=blocked`、`stop_reason=run_lock_conflict`、`cleanup=false` とし、待機・steal・
+  lock file削除による突破がないことを確認する。
+- **provenance不足（否定例）**: `provenance_record_url=missing_or_unreadable` を渡し、
+  `result=blocked`、`stop_reason=provenance_unknown`、`cleanup=false` となることを確認する。
 - **cleanup技術ゲート未成立停止**: `identity_root=unknown`、`provenance=unknown`、
   `run_state=active_or_unknown`、`path_safety=unknown`、または `inventory_changed=true` を渡し、
   人間approveがあっても `result=blocked`、`cleanup=false` となることを確認する。
-- **exact target closed question移行**: identity・provenance・`run_state=completed`・path安全性・
-  inventory不変が全成立した場合のみ `next_action=closed_question_for_exact_target` へ進むことを確認する。
-  approve後の直前再検証と、状態変化時の再承認要件を確認する。
-- **中断・部分失敗・確認不能**: cleanup中断・部分失敗・結果確認不能を成功扱いせず、残留再検出と
-  前回approve再利用禁止を確認する。
+- **exact target closed question移行**: identity・exact provenance・`run_state=completed`・
+  path安全性・inventory不変・`RUN_LOCK` 取得が全成立した場合のみ
+  `next_action=closed_question_for_exact_target` へ進むことを確認する。
+- **approve後 inventory drift（否定例）**: `human_approval=approve` かつ
+  `inventory_changed=true` を渡し、`result=blocked`、`stop_reason=inventory_changed`、
+  `approval_reusable=false`、`cleanup=false` となることを確認する。
+- **approve後 lock再取得・削除完了まで保持**: approve後に古いlock結果を流用せず `RUN_LOCK` を
+  再取得し、canonical/path safety/run_state/inventoryを全再検証したうえで削除し、
+  `RUN_ROOT` 消失確認までlockを保持することを確認する。
+- **中断・部分失敗・確認不能**: cleanup中断・部分失敗・結果確認不能を成功扱いせず、
+  `stop_reason=cleanup_interrupted` または `cleanup_result_unknown` で `blocked` とし、
+  残留再検出と前回approve再利用禁止を確認する。
 
-**試験実施記録（Issue #54・実装前・実施: Cursor）**
+**試験実施記録（Issue #54・Option 2・実装前・実施: Cursor）**
 
 共通環境: base SHA `7eec7c69d89e6d120c4df74fa286533149451061`、branch
-`cursor/issue-54-scratch-cleanup-boundary`、4ファイル文書のみ（実cleanup・追加scriptなし）。
+`cursor/issue-54-scratch-cleanup-boundary`、4ファイル文書のみ（実cleanup・追加script・
+repo内lock実装ファイルなし）。`RUN_LOCK` はruntime空ファイルでありGit diffに含めない。
 
-##### fail-closed 8基準（実装前照合・Codex PM #5213134077 判定転記）
+##### fail-closed 8基準（実装前照合・Issue #54 spec-side）
 
 | criterion | result | basis | next_action |
 |---|---|---|---|
-| `success-propagation` | pass | 中断・部分失敗・結果確認不能を成功扱いせず、残留再検出・前回approve再利用禁止を契約化 | continue |
-| `identity-root` | pass | Windows: SID→`Win32_UserProfile.LocalPath`、Linux/WSL: `id -u`→`getent`第6フィールド。不一致・解決不能・unsupported OSでscratch/cleanup禁止の否定例あり | continue |
-| `path-chain-safety` | pass | trusted homeからexact run rootと対象treeでsymlink等・owner・mode/ACL・special entryを検査しunsafe/unknownはblocked | continue |
-| `persistent-claim-bypass` | not_applicable | 永続claim・lock・provenance DBを導入しない。別root迂回用の永続claimが対象外 | continue |
-| `verify-before-mutate` | pass | read-only技術ゲート→closed question→approve→直前再検証の順。状態変化・確認不能で既存approve再利用禁止 | continue |
-| `provenance-no-fabrication` | pass | run帰属不明をpath名から推測せず `provenance=unknown` でblocked | continue |
-| `concurrency-interrupt-residue` | pass | 活動中run・並行cleanup・inventory変化・中断残留の停止と再検出を契約化 | continue |
-| `override-test-hook-isolation` | not_applicable | override/test hookを導入せず、追加機構はIssue外設計変更として停止 | continue |
+| `success-propagation` | pass | `blocked`/interrupt/unknownを成功扱いしない固定出力とapprove失効条件を定義。中断・部分失敗・結果確認不能は `blocked` | continue |
+| `identity-root` | pass | Windows: SID→`Win32_UserProfile.LocalPath`、Linux/WSL: `id -u`→`getent`第6フィールド。不一致・解決不能・unsupported OSで `scratch_created=false`（mkdir/write前停止） | continue |
+| `path-chain-safety` | pass | scratch作成前とcleanup前/approve後の両方でOS別にsymlink/reparse/mountpoint/owner/mode/ACL/special/canonical境界を検査。unknownは `path_safety_unknown` でblocked | continue |
+| `persistent-claim-bypass` | not_applicable | 永続claimを導入しない。`RUN_LOCK` fileの存在はclaim/活動証明に使わず、OSが保持する排他handle/FD（flock / FileShare=None）だけを利用 | continue |
+| `verify-before-mutate` | pass | scratch初回write前にidentity/path/lockを検証。cleanupはread-only gate→closed question→approve後lock再取得/全再検証→削除の順に固定 | continue |
+| `provenance-no-fabrication` | pass | exact GitHub completion record 1件を権威入力に固定。相対 `scratch_rel` のみ記録。absolute home・個人情報はGitHubへ書かない。record不明/不一致は `provenance_unknown`/`provenance_mismatch` でblocked | continue |
+| `concurrency-interrupt-residue` | pass | writerとcleanupが同一 `RUN_LOCK` を必須取得。cleanupはapprove後のlock再取得から削除完了まで保持。競合は `run_lock_conflict`、steal/待機/lock file削除禁止 | continue |
+| `override-test-hook-isolation` | not_applicable | override/test hookを導入しない | continue |
+
+##### 否定テスト観測例（文書契約・EARLY非実行の証明）
+
+| 入力 | 期待出力 | EARLY証明 |
+|---|---|---|
+| `USERPROFILE`/`HOME` が `TRUSTED_HOME` と不一致 | `result=blocked` `stop_reason=identity_root_mismatch` `scratch_created=false` `cleanup=false` | mkdir/write・completion record・cleanupより前に停止 |
+| 同一runで `run_lock=conflict` | `result=blocked` `stop_reason=run_lock_conflict` `cleanup=false` | steal・待機・lock file削除なし |
+| `provenance_record_url=missing` | `result=blocked` `stop_reason=provenance_unknown` `cleanup=false` | 削除・approve流用なし |
+| approve後 `inventory_changed=true` | `result=blocked` `stop_reason=inventory_changed` `approval_reusable=false` | 古いapproveでの削除継続なし |
 
 ## 既存リポジトリへの導入（差分マージ方式）
 

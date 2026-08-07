@@ -3588,7 +3588,7 @@ Issue #134 で `AGENTS.md` / `pm-review` に正本化した高リスク承認v2�
 Date: 2026-08-07
 Status: Proposed
 Related Issues: #54
-Related PRs:
+Related PRs: #132
 
 ## 決定事項
 

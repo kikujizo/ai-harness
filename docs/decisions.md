@@ -3580,3 +3580,111 @@ Issue #134 で `AGENTS.md` / `pm-review` に正本化した高リスク承認v2�
 
 - [ ] #133 PR merge後、`approval_contract_sync_pending` 解除を記録
 - [ ] 通常の新規高リスク案件へv2契約を全面適用
+
+---
+
+# Decision: Cursor一時scratch配置とcleanup技術ゲート・発効点分離
+
+Date: 2026-08-07
+Status: Proposed
+Related Issues: #54
+Related PRs:
+
+## 決定事項
+
+Cursorの一時ファイルをOS identity由来のtrusted home配下のrun固有scratch
+（`<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo>/<run-id>/`）に限定する。
+identity-root resolverを次で固定する。
+
+- **Windows native**: current SID（`WindowsIdentity.GetCurrent().User.Value`）→
+  同一SIDの唯一の `Win32_UserProfile.LocalPath` を `TRUSTED_HOME`
+- **Linux / WSL**: ai-dev-workflow#139 を再利用（`id -u` → `getent passwd <uid>` 第6フィールド）
+
+`USERPROFILE` / `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能・unsupported OSでは
+scratch作成もcleanup候補化もしない。通常作業中はcleanupせず、cleanupはexact `<repo>/<run-id>` root
+1件に対しidentity・provenance・非活動・inventory・path chain等のread-only技術ゲート全成立後にのみ
+closed questionへ進む。人間approve後も直前再検証し、状態変化時は再承認が必要。
+カテゴリ③（`.cursor/rules/ai-workflow.mdc` のmerge）とカテゴリ④（実cleanup）は別発効点とする。
+
+## 背景・課題
+
+`.cursor/rules/ai-workflow.mdc` は `alwaysApply: true` だが、一時ファイル配置とcleanup境界が未定義。
+環境変数偽装・別root・別run・利用中データをcleanup対象にしない契約が必要。
+
+## 採用する方針
+
+- `.cursor/rules/ai-workflow.mdc` にidentity-root・scratch・cleanup技術ゲートを短く追記
+- `docs/harness/roles/cursor.md` は正本参照を維持し設計意図のみ同期
+- `docs/harness/setup.md` にシナリオ・fail-closed 8基準の実装前照合記録
+- Linux/WSLは ai-dev-workflow#139 の `getent passwd` 契約を再利用
+- Windowsはcurrent SIDと `Win32_UserProfile.LocalPath` の対応をルール契約として記述
+
+## 採用しない方針 / 却下した代替案
+
+- **追加resolver script・package・daemon・lock・provenance DB**: 4ファイル文書のみで表現するため却下
+- **環境変数homeを正本化**: 偽装リスクのため却下
+- **本PRでの実cleanup**: カテゴリ④は別発効点のため却下
+- **固定manifest外ファイルの追加**: Issue境界を超えるため却下
+- **環境変数優先またはOS側無条件優先の不一致fallback**: 両方禁止
+
+## 判断理由
+
+- identity-rootをOS由来で固定し、環境変数偽装への否定例を文書化することで、誤cleanupの主要経路を閉じる
+- 技術ゲートと人間approveを分離し、approveがゲートを代替しない契約を明示する
+- 文書正本化のみで実装・テスト・PRを先行し、merge（カテゴリ③）と実cleanup（カテゴリ④）を分離する
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ① 非該当
+- カテゴリ② 非該当
+- カテゴリ③ **該当**（`.cursor/rules/ai-workflow.mdc` 正本変更）
+- カテゴリ④ 本PR実装は非該当。将来の実cleanupは**別発効点で該当**
+
+`risk=high` `gate=human_approval`。実装・テスト・PR・独立レビューは先行可能。merge直前に人間approve/deny。
+
+## このPRの最悪の失敗は何か・それは戻せるか
+
+1. **identity・run帰属・活動状態の誤認で別ユーザー・別run・利用中データをcleanup対象にする**:
+   ルール変更は `git revert` で戻せるが、誤cleanupの外部影響は完全復旧不能の可能性がある。
+2. **ルールが曖昧で環境変数偽装を許す**: 同上、`git revert` と Decision `Superseded` で戻せる。
+
+## 影響範囲
+
+- `.cursor/rules/ai-workflow.mdc`
+- `docs/harness/roles/cursor.md`
+- `docs/harness/setup.md`
+- `docs/decisions.md`（本エントリ）
+
+## 例外条件
+
+原則なし。`id` / `getent` / `Win32_UserProfile` が利用不能な環境はfail-closedで停止し、
+新resolver実装はIssue外設計変更としてCodex PMへ戻す。
+
+## 取り消し手順
+
+1. 実装PRをrevertする
+2. 上記4ファイルの本Issue由来変更を戻す
+3. 本 Decision Log の Status を `Superseded` へ更新する
+4. 外部影響が既にある場合はrevertだけで復旧済みとみなさず、別Issueで影響調査する
+
+## 見直す条件
+
+- Windows / Linux・WSL以外のOSで同等resolverが必要になった場合
+- 追加script・lock・provenance DBが必要と判明した場合（別Checkpoint）
+- 文書契約だけでは活動中run・inventory変化を観測できないと実測で判明した場合
+
+## レビュー記録
+
+| 項目 | 結果 | 証跡 |
+|---|---|---|
+| Draft PR | 未作成 | - |
+| ChatGPT要件レビュー | 未実施 | - |
+| Codex独立技術レビュー | 未実施 | - |
+| merge | 未実施 | - |
+
+## 次アクション
+
+- [x] Cursor による実装（本エントリ・4ファイル文書）
+- [ ] ChatGPT 要件レビュー
+- [ ] Codex 独立技術レビュー
+- [ ] 人間による merge 判断（発効点・カテゴリ③・`gate=human_approval`）

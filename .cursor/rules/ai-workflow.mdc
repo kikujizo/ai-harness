@@ -31,3 +31,20 @@ Cursor-specific rules only:
 - Never read, print, or commit `.env` or any secret. Never push to main.
 - GitHubへ書き込む人間向けテキストの冒頭に `> **記録者**: Cursor` 等を置く（共通ルールは
   `AGENTS.md`「GitHubドリヴン記録」参照。他AIのサービス名を名乗らない）。
+- **一時scratch / cleanup（Issue #54）** — 次の順序で適用する。unsupported OS →
+  `identity_root_unsupported`（scratch・cleanup候補とも禁止）。identity-root resolve:
+  Windows native → `CURRENT_SID = WindowsIdentity.GetCurrent().User.Value`、
+  `TRUSTED_HOME` = 同一SIDの `Win32_UserProfile` がちょうど1件の `LocalPath`；
+  Linux/WSL → `id -u` → `getent passwd <uid>` 第6フィールド（ai-dev-workflow#139）。
+  取得不能・0/複数件・path不正 → `identity_root_unresolved`。環境由来home（`USERPROFILE` /
+  `HOME` / `~` 等）をcanonicalizeして `TRUSTED_HOME` と不一致 → `identity_root_mismatch`
+  （どちらも推測採用しない）。identity-root成立後のみ scratch:
+  `<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo>/<run-id>/`。通常作業中はcleanupしない。
+  完了報告に repo / run_id / canonical scratch root / 残留有無 / `run_state=completed` を記録。
+  cleanup候補は exact `<repo>/<run-id>` root 1件のみ。read-only技術ゲート（identity再解決、
+  trusted配下、provenance、非活動、inventory、path chain / owner / ACL / special entry、
+  root外不出）が全成立するまで closed question に進まない。人間approve後もcleanup直前に同一
+  ゲート再検証。状態変化・確認不能 → `post_approve_drift` 等で blocked（既存approve再利用禁止）。
+  中断・部分失敗・結果確認不能は成功扱いしない。`result` は `blocked` または
+  `closed_question_for_exact_target`（成功丸め禁止）。カテゴリ③（本ルールのmerge）と
+  カテゴリ④（実cleanup）は別発効点。本PR mergeは将来のcleanup許可に流用しない。

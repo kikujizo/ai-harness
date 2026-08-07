@@ -21,6 +21,15 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
 - 「2敗で自走を止めhandoff-reportで上位へ引き継ぐ」はリトライ浪費を止めるエスカレーション規律の実装。
 - 文書生成タスクではrecursive-writingを使う。`.env`・secretの秘匿とmain直push禁止は、
   指示だけでなくブランチ保護を最終防衛に置く。
+- 一時ファイルはOS identity由来のtrusted home配下のrun固有scratch（
+  `<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo>/<run-id>/`）に限定する。identity-rootは
+  Windows nativeではcurrent SID→`Win32_UserProfile.LocalPath`、Linux/WSLでは
+  `id -u`→`getent passwd`第6フィールド（#139再利用）。`USERPROFILE` / `HOME` / `~` 等の
+  環境由来homeは正本にせず、不一致・解決不能時はscratch作成もcleanup候補化もしない。
+  通常作業中はcleanupせず、cleanupはexact run rootに対する技術ゲート全成立後にのみ
+  closed questionへ進む。人間approveは技術ゲートを代替しない。approve後も直前再検証し、
+  状態変化時は再承認が必要。カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
+  詳細・制御順序の正本は `.cursor/rules/ai-workflow.mdc`（本ファイルは複製しない）。
 
 ## GitHub書き込み
 

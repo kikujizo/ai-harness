@@ -22,8 +22,9 @@ AIが実行、高リスクは発効点で人間approve→AIが実行）。
 `implementation_start` の承認は merge / settings_apply / execution へ流用しない。
 高リスクの人間承認は独立レビュー・CI・`HIGH_RISK_TECH_GATE` の代替にならない。
 古いproposal・別scope・別subjectへの承認流用は禁止する。
-ChatGPTのみ、対象固定closed questionへの明示 `approve|deny` を直接観測した場合だけ
-`HUMAN_APPROVAL_RECORD: v2` を記録できる。Codex / Cursorは `HUMAN_APPROVAL_RECORD` を作成しない。
+ChatGPTは、対象固定closed questionへの明示 `approve|deny` を直接観測した場合だけ
+`HUMAN_APPROVAL_RECORD: v2` を記録できる。`recorded_by=human` / `recorded_by=claude-code`
+の許可条件は `AGENTS.md` 正本に従う。Codex / Cursorは `HUMAN_APPROVAL_RECORD` を作成しない。
 
 あなたがやらないこと: 実装可否・担当AIの判断（PMの仕事）、コード行レビュー（差分の行単位の技術判定）。
 Cursor/Claude Codeへの指示文作成は、依頼されたときのみ `docs/templates.md`

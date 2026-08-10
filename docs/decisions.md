@@ -4,6 +4,78 @@
 
 ---
 
+# Decision: 高リスク承認v2契約の実効ルール同期（Issue #133）
+
+Date: 2026-08-10
+Status: Accepted
+Related Issues: #133, #134
+
+## 決定事項
+
+Issue #134 で `AGENTS.md` / `pm-review` に正本化した高リスク承認v2契約を、
+`CLAUDE.md` と `docs/harness/roles/chatgpt.md` / `codex.md` / `claude-code.md` へ同期する。
+実装開始承認（`implementation_start`）と発効点承認（`merge` / `settings_apply` / `execution`）を分離し、
+各AI経路で承認前route禁止・v2 record・approve後gate除去を明文化する。
+
+## 背景・課題
+
+#134 merge後も `CLAUDE.md` と貼付用role文書に旧契約（「発効点のみ人間approve」「カテゴリ③事前承認不要」
+「実装開始は止めない」等）が残り、AIごとに解釈が分かれていた。
+#133 は #134 の全面運用適用に必須の同期Checkpointである。
+
+## 採用する方針
+
+- **二段階移行**: #134で正本（`AGENTS.md` / `pm-review`）を先行変更し、#133で実効・貼付用ルールを同期
+- **Cursor非変更**: `.cursor/rules/ai-workflow.mdc` と `docs/harness/roles/cursor.md` は現mainで
+  `AGENTS.md` 参照型であり独自の旧契約を持たないため変更しない
+- **ask≠v2 record**: `.claude/settings.json` の `ask` はローカル権限の追加防御。v2承認recordの代替ではない
+- **#133 merge後の全面適用**: #133がmerge/完了し同期完了記録がGitHub上で確認できた時点で
+  `approval_contract_sync_pending` を解除し、#133以外の新規高リスク案件へv2契約を全面適用
+- **カテゴリ③**: 権限・パイプライン自己変更（`CLAUDE.md` / role文書の同期はカテゴリ③ high-risk）
+
+## 採用しない方針 / 却下した代替案
+
+- **#134 mergeだけで同期完了とみなす案**: 実効ファイルに旧契約が残るため却下
+- **cursor.md / ai-workflow.mdc の同時変更**: AGENTS参照型で独自旧契約がないため不要
+- **`.claude/settings.json` の権限値変更**: askは維持し、文書上の意味づけのみ同期
+
+## 判断理由
+
+- 正本と実効ルールの乖離を解消し、どのAI経路でも同じ承認順序を強制できる
+- Cursor側は既にAGENTS参照型のため、変更せず二重定義を避ける
+- settings JSONは機械壁として維持し、v2 recordとの役割分離を文書で明確化
+
+## リスク（不可逆4カテゴリの該当有無）
+
+カテゴリ③に該当（AI実効ルール・貼付用role文書の権限・パイプライン契約同期）。
+
+## 影響範囲
+
+- `CLAUDE.md`
+- `docs/harness/roles/chatgpt.md` / `codex.md` / `claude-code.md`
+- 本 Decision Log
+- 変更しない: `AGENTS.md` / `pm-review` / `ai-workflow.mdc` / `cursor.md` / `.claude/settings.json`
+
+## 取り消し手順
+
+1. 本Issueの実装PRを `git revert`
+2. 上記5ファイルを旧契約へ戻す
+3. 本 Decision Log エントリの Status を `Superseded` に更新
+4. #134正本との整合をCodex PMが再確認
+
+## 見直す条件
+
+- #133が中止・仕様変更された場合はCodex PMへ戻す
+- 将来、verdict parser / 機械state machine実装が必要になった場合は別Checkpoint
+- `.claude/settings.json` またはCursor実効ルールの変更が必要と判明した場合はmanifest拡張せず再評価
+
+## 次アクション
+
+- [ ] #133 PR merge後、`approval_contract_sync_pending` 解除を記録
+- [ ] 通常の新規高リスク案件へv2契約を全面適用
+
+---
+
 # Decision: 高リスク承認状態とPM_VERDICT遷移の正本化（Issue #134）
 
 Date: 2026-08-10

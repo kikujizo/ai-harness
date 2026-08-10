@@ -19,6 +19,9 @@ Claude Codeは標準フロー（ChatGPT/Codex/Cursor中心）に**常駐しな�
 
 代理参加時は、**代理した役割・理由をGitHubコメントに明記**する（`AGENTS.md`「GitHubドリヴン記録」）。
 
+例外委譲時も高リスク `implementation_start` のv2承認順序に従う。人間approve前に正式routeを自己確定しない。
+`implementation_start` の承認は merge / settings_apply / execution へ流用しない。
+
 Claude Codeが実装した場合のレビューは Codex ＋ ChatGPT（不足時は独立AIへ再ルーティング。候補がなければ `blocked`）。
 
 ## GitHub書き込み
@@ -47,12 +50,12 @@ Claude Codeが例外委譲時の判断または作業結果をGitHubへ記録す
 - **権限パターンの構文**: Bashの前方一致は `Bash(コマンド:*)`（`:*` が公式構文。`git diff*` のような
   裸の後置ワイルドカードは一致しない）。Read/Edit/Write のパスはgitignore形式で、相対は `./` 始まりが確実
 - `Edit/Write(./.github/workflows/**)`・`./.codex/**`・`./.cursor/**`・`./.claude/**`・`./.agents/**`・
-  `AGENTS.md`・`CLAUDE.md` の**ask**は**高リスクカテゴリ③（権限・パイプライン自己変更）の機械的な裏付け**
+  `AGENTS.md`・`CLAUDE.md` の**ask**は**高リスクカテゴリ③（権限・パイプライン自己変更）のローカル権限追加防御**
   （ルートの `AGENTS.md` のリスク分類参照）。`./.agents/**` はSkillの正本置き場でありAI設定ディレクトリに含まれる。
-  これらは作業ツリー上の編集が即時に効く「生きたガードレール」のため、編集の瞬間が発効点になる—
-  askプロンプトがその発効点の人間approve/denyを機械化する（責務境界の再定義 2026-07-18。
-  非対話実行では拒否として振る舞う）。実装AIと独立したレビュー＋発効点の人間approve＋
-  Decision Log記録は引き続き必須。機械壁は撤廃せずask化して常設する
+  askはローカルツール権限の追加防御であり、`HUMAN_APPROVAL_RECORD: v2` やGitHub監査recordの代替ではない。
+  ask操作だけを新しいv2承認recordと解釈しない。`implementation_start` / merge / settings_apply / execution の
+  承認状態は `AGENTS.md` v2契約で判定する。実装AIと独立したレビュー＋発効点の人間approve＋
+  Decision Log記録は引き続き必須。機械壁（deny/ask）は撤廃せず維持する（settings値は本Issueでは変更しない）
 - `Bash(gh pr merge:*)` の**ask**は、merge＝発効点の人間ゲートの機械的な裏付け。
   通常リスクPRは自動マージ条件（AGENTS.md）充足時にmergeでき、高リスクPRは人間approve後に
   AIがmergeを実行する—どちらもaskプロンプトが最終確認になる

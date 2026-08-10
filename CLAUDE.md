@@ -36,10 +36,12 @@ Claude Codeが対話レーンで起動したときは**指揮者（オーケス�
   （独立なら並列）。ループ非発生の読み取り/即答/真の1行修正だけ指揮者が直接。多段実装ループは委譲必須
   （正本: `docs/harness/ops/orchestration.md` §2）
 - サブエージェントの報告は、採用前に指揮者が一次資料で検証する（重要度の高い指摘は必須）
-- **人間の承認が要るのは、不可逆4カテゴリに触れる不可逆操作の発効点（merge・設定反映・実行の直前）のみ**。
-  可逆な状態変更（ファイル編集・作成・削除・PR作成。カテゴリ③パスのブランチ上の編集を含む）は実行し、
-  出力契約で事後報告する。読み取り・調査・回答は承認不要
-  （この境界の正本はルートの`AGENTS.md`承認節。差分があればそちらが勝つ）
+- **高リスク（不可逆4カテゴリ該当）**は、`PROPOSED_ROUTE` → `APPROVAL_SCOPE: implementation_start` の
+  `pending` + `gate=human_approval` → 人間approve/deny → 有効な `HUMAN_APPROVAL_RECORD: v2` 検証後に
+  `APPROVAL_STATE: approved` と `PM_VERDICT: approve risk=high route=...`（`gate` なし）で正式routeを確定して実装開始する。
+  `implementation_start` の承認は merge / settings_apply / execution へ流用しない（各発効点は別scope・別record）。
+  通常リスクは変更なし（人間の実装開始approveは不要）。詳細はルート `AGENTS.md` 承認節が正本（差分があればそちらが勝つ）
+- **例外委譲時**も人間approve前に正式routeを自己確定しない。`PM_VERDICT` に `route` を付けて実装開始しない
 
 この規律をリポジトリ単位ではなく全リポジトリに効かせたい場合は、同じ内容を
 ユーザーレベル設定（`~/.claude/CLAUDE.md`）に置く。ユーザーレベルに置けば、
@@ -74,9 +76,14 @@ Codex PMへ返す。Issue内の実装詳細は通常どおり継続し、逐次�
 fail-closed 機構の新設・安全契約変更時は、実装前とレビュー時に
 [`docs/criteria/fail-closed.md`](docs/criteria/fail-closed.md) を照合する（根拠不足は `fail`、推測 `pass` 禁止。
 `AGENTS.md`「実装ルール」節参照）。
-カテゴリ③（権限・パイプライン・正本・AI設定）に触れる変更は、専用ブランチで実装してよい（事前承認不要）。
-ただし発効点（merge・設定反映）で人間のapprove/denyを求める（推奨表記: `gate=human_approval`。
-実装AIと独立したレビュー＋Decision Log記録＋approve後のAIによるmerge実行。詳細は `AGENTS.md` verdict 節）。
+カテゴリ③（権限・パイプライン・正本・AI設定）に触れる変更は高リスク（不可逆4カテゴリ③）。
+`implementation_start` の人間approve後にだけ正式routeを確定して実装を開始する。
+発効点（merge・設定反映・実行）は独立レビュー＋`HIGH_RISK_TECH_GATE` 後、別scopeで人間approve/deny
+（推奨表記: `gate=human_approval`）。実装AIと独立したレビュー＋Decision Log記録＋approve後のAIによるmerge実行。
+詳細は `AGENTS.md` verdict 節が正本。
+`.claude/settings.json` の `ask` はローカルツール権限の追加防御であり、
+`HUMAN_APPROVAL_RECORD: v2` の代替・承認源泉ではない。ask表示を回避しないが、
+ask操作だけを新しいv2承認recordと解釈しない。
 「後は頼みます」等の対象物・操作・権限段階を特定しない包括表現を、新規実装割当・独立レビューの代行・
 self-approve・merge許可へ拡張解釈しない。権限確認をclosed questionで人間へ返してよい条件と、
 技術的不確実性をAI PM再ルートまたは`blocked`へ戻す境界は、`AGENTS.md`「実装許可の解釈」節に従う。

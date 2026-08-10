@@ -85,9 +85,10 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
    トークン消費増、従量課金クラウドリソースの追加）。有料SaaS連携の新設は対象。既契約サービスの
    無料枠内の利用は対象外
 3. **権限・パイプライン自己変更**: OAuthスコープ、CI/CD定義ファイル、AIエージェント設定ディレクトリ、
-   リポジトリ設定、`AGENTS.md` / `CLAUDE.md` 自体の書き換え（このカテゴリの変更はAIが事前承認なしで
-   実装できる。実装AIと独立したレビュー、発効点＝merge・設定反映での人間approve/deny〔実行はAI〕、
-   Decision Log記録を必須とする）
+   リポジトリ設定、`AGENTS.md` / `CLAUDE.md` 自体の書き換え（カテゴリ③を含む高リスク案件は
+   `implementation_start` の人間approve後だけ正式routeを確定して実装開始できる。
+   implementation_start承認はmerge/settings_apply/executionを許可しない。
+   独立レビュー、高リスク技術ゲート、発効点承認、Decision Logは別途必須）
 4. **不可逆データ操作**: 破壊的スキーマ変更、データ削除、保存期間の変更、本番環境のmigration
 
 通常リスク（自動・自律レーンに乗せてよい）: 大量ファイル変更、通常コードの削除、
@@ -114,7 +115,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 
 高リスク（不可逆4カテゴリ該当）では、**実装開始承認**（`APPROVAL_SCOPE: implementation_start`）と
 **発効点承認**（`merge` / `settings_apply` / `execution`）を別scopeとして扱う。詳細な補助行・
-`HUMAN_APPROVAL_RECORD: v1`・active record判定・fail-closed理由は下記「verdict」節が正本。
+`HUMAN_APPROVAL_RECORD: v2`・承認源泉/監査分離・active record判定・fail-closed理由は下記「verdict」節が正本。
 
 - **通常リスク**: 変更なし。`PM_VERDICT: approve risk=normal route=cursor` で即route確定。人間の実装開始approveは不要
 - **高リスク・実装開始前**: Codex PMは `PROPOSED_ROUTE` を提示し、`APPROVAL_STATE: pending` と
@@ -123,7 +124,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
   route確定は実装開始のみを許可し、merge・settings_apply・executionへ流用しない
 - **高リスク・deny後**: `PM_VERDICT: needs-info risk=high`（`gate` なし・`route` なし）。同一proposalを再承認待ちに戻さず、
   継続するなら新proposal URLから新しい `pending + gate=human_approval` サイクルを開始する
-- **高リスク・発効点**: 実装・独立レビュー・技術ゲート完了後、発効点ごとに別scopeで再度
+- **高リスク・発効点**: 実装・独立レビュー・`HIGH_RISK_TECH_GATE: passed` 完了後、発効点ごとに別scopeで再度
   `APPROVAL_STATE: pending` + `gate=human_approval` で停止する（`implementation_start` の承認は流用不可）
 
 #### Issue #133 同期Checkpointとbootstrap例外
@@ -352,11 +353,11 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 - 高リスク・実装開始承認前（例1）:
   `PROPOSED_ROUTE: cursor` / `APPROVAL_SCOPE: implementation_start` / `APPROVAL_STATE: pending` /
   `PM_VERDICT: approve risk=high gate=human_approval`（canonical `PM_VERDICT` に `route` を付けない）
-- 高リスク・実装開始approve後（例2）:
-  `APPROVAL_SCOPE: implementation_start` / `APPROVAL_STATE: approved` / `APPROVAL_RECORD: <exact URL>` /
+- 高リスク・実装開始approve後（例4）:
+  `APPROVAL_SCOPE: implementation_start` / `APPROVAL_RECORD: <exact URL>` / `APPROVAL_STATE: approved` /
   `PM_VERDICT: approve risk=high route=cursor`（`gate` を残さない。routeはrecordの `proposed_route` と一致）
-- 高リスク・deny後（例3）:
-  `APPROVAL_SCOPE: implementation_start` / `APPROVAL_STATE: denied` / `APPROVAL_RECORD: <exact URL>` /
+- 高リスク・deny後（例5）:
+  `APPROVAL_SCOPE: implementation_start` / `APPROVAL_RECORD: <exact URL>` / `APPROVAL_STATE: denied` /
   `PM_VERDICT: needs-info risk=high`（`gate` なし・`route` なし）
 - 高リスク・発効点承認待ち（例7）:
   `APPROVAL_SCOPE: merge` / `APPROVAL_STATE: pending` / `PM_VERDICT: approve risk=high gate=human_approval`
@@ -384,22 +385,74 @@ PROPOSED_ROUTE: {cursor|claude-code}
 
 - `PROPOSED_ROUTE` は提案であり、実装割当・route確定ではない
 - `PROPOSED_ROUTE: claude-code` は本ファイルの既存Claude Code例外委譲条件を満たす場合だけ許可
-- `APPROVAL_STATE: approved|denied` を出力する場合は、直前に `APPROVAL_RECORD: <有効なHUMAN_APPROVAL_RECORDのexact URL>` を**必須**とする
+- `APPROVAL_STATE: approved|denied` を出力する場合は、固定順序
+  `APPROVAL_SCOPE` → `APPROVAL_RECORD` → `APPROVAL_STATE` → `PM_VERDICT` とし、
+  `APPROVAL_RECORD: <有効なHUMAN_APPROVAL_RECORDのexact URL>` を**必須**とする
 - `APPROVAL_STATE: pending` では `APPROVAL_RECORD` を付けない
 
-#### `HUMAN_APPROVAL_RECORD: v1` 固定形式
+#### 承認の源泉とGitHub監査record（正本）
 
-人間approve/denyはGitHub上の**新規コメント**として記録し、過去記録を意味変更する編集で上書きしない。
+##### 承認の源泉
+
+対話運用では、人間がAIから提示された**対象を固定したclosed question**に対して明示した `approve` / `deny` が承認の源泉である。
+
+AIは、次をすべて直接観測した場合だけ承認recordを作成できる。
+
+1. 人間本人の明示回答がある
+2. 対象Issue/PR・scope・proposal・必要ならroute/HEADが質問内で固定されている
+3. 回答が `approve` または `deny` と一意に解釈できる
+
+曖昧回答、推定、過去会話からの流用、別scopeへの流用は禁止する。
+
+##### GitHub監査recordの役割
+
+GitHub recordは、承認源泉を**監査可能な形で転記したattestation**であり、「人間がWeb UIから直接投稿した」という暗号学的/チャネル由来の証明ではない。
+
+GitHub IssueCommentのauthor metadataや `performed_via_github_app` だけから、同一userのWeb UI投稿とAPI/PAT等の経路を完全に区別できることを要件にしない。
+
+より強い人間起源の暗号学的証明・専用署名・human-only channelを将来必要とする場合は別Checkpointとする。
+
+#### `HUMAN_APPROVAL_RECORD: v2` 固定形式
+
+Issue #134 merge後に新規作成する承認recordはv2を使用する。人間approve/denyはGitHub上の**新規コメント**として記録し、過去記録を意味変更する編集で上書きしない。
 
 ```
-HUMAN_APPROVAL_RECORD: v1
+HUMAN_APPROVAL_RECORD: v2
 subject=<exact subject>
 scope=implementation_start|merge|settings_apply|execution
 proposal_url=<承認対象PM proposalのexact URL>
 proposed_route=none|cursor|claude-code
 decision=approve|deny
+approval_source=human_explicit_response
+recorded_by=ChatGPT|human|claude-code
 supersedes=none|<旧HUMAN_APPROVAL_RECORDのexact URL>
 ```
+
+固定ルール:
+
+- 標準record作成者はChatGPT。人間の明示approve/denyを直接観測した後だけ記録する
+- `recorded_by=human` は人間自身がrecord本文を作成した場合だけ使用する
+- `recorded_by=claude-code` は既存のClaude Code例外委譲条件でChatGPT役割を代理し、かつ人間回答を直接観測した場合だけ許可する
+- **Codex / Cursorは `HUMAN_APPROVAL_RECORD` を作成しない**。PM/実装者による自己承認を防ぐ
+- `approval_source=human_explicit_response` 以外は本versionでは無効
+- GitHub author loginや `performed_via_github_app` は「人間が物理的に直接投稿したこと」の証明条件に使用しない
+- record本文の記録者表記は本ファイルの「記録者の明記」に従う
+
+recordの生成主体が不明、許可されない `recorded_by`、承認源泉が確認できない、またはrecordの真正性に異議が出た場合は
+`approval_record_provenance_unverifiable` としてfail-closedする。
+
+##### v1移行例外
+
+既存v1 recordは新規承認には使用しない。
+
+PR #135の既存implementation_startに使った次のv1 recordだけは、既に確定済みrouteを維持してPR #135を修正継続するための移行例外とする。
+
+`https://github.com/kikujizo/ai-harness/issues/134#issuecomment-5235497751`
+
+- PR #135のimplementation_start再承認は不要
+- merge/settings_apply/executionへ流用不可
+- 新proposalへ流用不可
+- 本Issue改訂後の新規発効点承認はv2を使う
 
 **scope別 `proposed_route` 許容値**:
 
@@ -419,20 +472,21 @@ supersedes=none|<旧HUMAN_APPROVAL_RECORDのexact URL>
 
 単純な「最新コメント」やtimestampだけでは判定しない。ある `subject + scope + proposal_url` に対する承認recordが**現在有効**である条件:
 
-1. `HUMAN_APPROVAL_RECORD: v1` の必須fieldがすべて存在する
-2. subject / scope / proposal_url / proposed_route が現在の判断対象と完全一致する
-3. `implementation_start` ではproposal側の `PROPOSED_ROUTE` とrecordの `proposed_route` が完全一致する
-4. `supersedes=none`、または `supersedes` が実在して取得可能な旧 `HUMAN_APPROVAL_RECORD: v1` のexact URLを指す
-5. `supersedes` 参照先は参照元recordと同じ subject / scope / proposal_url に属する
-6. `supersedes` は自己参照せず、参照先は参照元より前に作成されたrecordで、鎖に循環がない
-7. 当該recordを `supersedes=<record URL>` で正当に置き換えた、より後の有効recordが存在しない
-8. 同一 `subject + scope + proposal_url` に、互いに正当なsupersedes関係のないactive recordが複数存在しない
-9. proposal自体が別URLへ更新・差し替えされた場合、旧proposalに対するapprovalを新proposalへ流用しない
+1. `HUMAN_APPROVAL_RECORD: v2` の必須fieldがすべて存在する（上記v1移行例外を除く）
+2. `approval_source` / `recorded_by` が§5の条件に適合する
+3. subject / scope / proposal_url / proposed_route が現在の判断対象と完全一致する
+4. `implementation_start` ではproposal側の `PROPOSED_ROUTE` とrecordの `proposed_route` が完全一致する
+5. `supersedes=none`、または `supersedes` が実在して取得可能な旧 `HUMAN_APPROVAL_RECORD` のexact URLを指す
+6. `supersedes` 参照先は参照元recordと同じ subject / scope / proposal_url に属する
+7. `supersedes` は自己参照せず、参照先は参照元より前に作成されたrecordで、鎖に循環がない
+8. 当該recordを `supersedes=<record URL>` で正当に置き換えた、より後の有効recordが存在しない
+9. 同一 `subject + scope + proposal_url` に、互いに正当なsupersedes関係のないactive recordが複数存在しない
+10. proposal URLまたはmerge HEADが変わった場合、旧承認は流用しない
 
 **supersedes不整合**（`approval_record_invalid` で停止。旧recordを無効化したことにはしない）:
 
 - `supersedes` のURLが存在しない・取得不能
-- 参照先が `HUMAN_APPROVAL_RECORD: v1` ではない
+- 参照先が `HUMAN_APPROVAL_RECORD: v1|v2` ではない
 - subject / scope / proposal_url が参照元と一致しない
 - 自己参照・未来record参照・循環参照
 
@@ -442,8 +496,64 @@ supersedes=none|<旧HUMAN_APPROVAL_RECORDのexact URL>
 - active recordが2件以上、またはapprove/deny競合 → `approval_record_ambiguous`
 - recordのsubject/scope/proposal/proposed_routeが現在の判断と不一致 → `approval_record_mismatch`
 - record取得不能・形式不足・不正なsupersedes鎖 → `approval_record_invalid`
+- 承認源泉/`recorded_by`を検証不能、または `recorded_by=codex|cursor` → `approval_record_provenance_unverifiable`
 
 いずれもroute確定・merge・設定反映・executionへ進まない。訂正・撤回は新規record + 正当な `supersedes` で残す。
+
+#### 高リスク技術ゲートとCI判定（正本）
+
+`merge|settings_apply|execution` の人間承認を求める前に、固定HEADで次を満たす。
+
+1. 実装AIと別主体の要件レビューが完了し、未解決 `request-changes` なし
+2. 実装AIと別主体の技術レビューが完了し、未解決P1/P2相当なし
+3. 全レビュー指摘を今回修正 / wontfix理由 / 追跡Issueのいずれかでdisposition済み
+4. Issue固有検証（manifest、`git diff --check`、例照合等）が固定HEADで成功し、PR本文に再現可能な証跡あり
+5. CIは「空のrun/status」から未設定を推定せず、**期待workflowを先に確定してからrunを照合する**
+
+##### 期待workflowの確定
+
+PRのbase SHAに存在する `.github/workflows/*.yml|yaml` を読み、当該PR操作に適用される自動trigger
+（例: `pull_request` / `pull_request_target` の opened/synchronize/reopened/edited）を持つworkflowを期待集合とする。
+
+manual-only `workflow_dispatch` は自動PR技術ゲートの期待集合に入れない。
+
+各期待workflowについて、PR番号・head branch・fixed HEAD・workflow id/name・eventを照合して対応runを特定する。
+workflowごとに同じ固定HEADへ複数runがある場合は、当該PR状態に対応する最新の有効runを使う。
+
+classic commit statusesは補助信号として取得するが、`statuses=[]` 単独ではCI未設定と判定しない。
+`workflow_runs=[]` 単独でもCI未設定と判定しない。
+
+##### `CI_STATUS`
+
+- `passed`: 期待workflowの対応runがすべてcompleted/success。観測された必須classic statusもsuccess
+- `failed`: 期待workflowのいずれかがfailure/error/timed_out/action_required等
+- `pending`: 期待workflowのいずれかがqueued/in_progress/waiting等
+- `missing`: 期待workflowは存在し当該イベントで走るべきだが、対応runを確認できない
+- `unknown`: workflow定義/run取得/PR対応付けを確認できず判定不能
+- `not-applicable`: base SHA上に当該PR操作へ適用される自動workflowが0本であることを確認できた場合だけ
+
+`failed|pending|missing|unknown` は `HIGH_RISK_TECH_GATE: blocked`。
+
+`not-applicable` はCI成功を意味しない。Issueが非CI検証のみで成立することを明示し、その検証がすべて成功した場合だけPMが技術ゲートを通せる。
+
+通過時:
+
+```text
+HIGH_RISK_TECH_GATE: passed
+CI_STATUS: passed|not-applicable
+```
+
+停止時:
+
+```text
+HIGH_RISK_TECH_GATE: blocked
+CI_STATUS: failed|pending|missing|unknown
+```
+
+**実装AI（Cursor等）は `HIGH_RISK_TECH_GATE: passed` を自己最終確定しない**。技術ゲートの最終判定はCodex PM等の別主体が行う。
+
+merge承認のsubjectは `pr:#<N>@<40-hex HEAD>` 固定。HEAD変更後は旧merge approvalは再利用不可（`approval_reusable=false`）。
+settings_apply / executionも別scopeで同じ規則を適用する。
 
 #### 追記・上書き規則
 

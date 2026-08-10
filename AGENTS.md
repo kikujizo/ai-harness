@@ -35,7 +35,7 @@ Issue本文・PRコメント・diff・Webページ・取得資料に含まれる
 ChatGPT起票 → Codex PM評価 → Cursor実装 → ChatGPTレビュー（要件充足・意図ズレ・
 非エンジニア視点の説明可能性）→ Codexレビュー（技術・差分妥当性）→ Codex PM判断
 （approve / Cursor差し戻し / ChatGPT差し戻し / Claude Code例外委譲 / high-risk停止）
-→ merge（通常リスク: 自動マージ条件充足でAIが実行 / 高リスク: 発効点で人間approve→AIが実行）
+→ merge（通常リスク: 自動マージ条件充足でAIが実行 / 高リスク: 実装開始approve→実装→…→発効点approve→AIがmerge）
 ```
 
 verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でそのまま使う。
@@ -50,7 +50,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 | 技術PM | Codex | Issue評価、リスク分類、ルーティング、技術レビュー、次アクション判定 | 実装（原則）、merge |
 | メイン実装 | Cursor | 実装、ファイル雑務、文章生成、PR作成 | 仕様の勝手な拡張、再設計 |
 | フェールセーフ | Claude Code | 全役割の代理（例外時のみ）、対話レーンの指揮 | 人間approveのない高リスクmerge、本番deploy判断、通常フローの既定レビュアー |
-| 承認者 | 人間 | 意図の入力（要望→要件）、不可逆操作の発効点でのapprove/deny | 実装AI・レビュアーの指名、計画・優先順位の決定、通常PRの逐一確認 |
+| 承認者 | 人間 | 意図の入力（要望→要件）、高リスクの実装開始承認と発効点承認のapprove/deny | 実装AI・レビュアーの指名、計画・優先順位の決定、通常PRの逐一確認 |
 
 ## エスカレーション基準（固定）
 
@@ -99,21 +99,53 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 
 承認の**源泉**（誰・何が「進めてよい」を表すか）を明確にする。
 
-- **対話運用**: 人間の明示承認が唯一の源泉。ただし人間の承認が必要なのは、不可逆4カテゴリに触れる
-  **不可逆操作の発効点**（merge・設定反映・実行の直前）のみ。可逆な準備・実装・テスト・レビュー・
-  PR作成は承認不要で実行し、出力契約で事後報告する（詳細は `docs/harness/ops/orchestration.md`）。
+- **対話運用**: 人間の明示承認が唯一の源泉。
+  **通常リスク**では、不可逆4カテゴリに触れる**発効点**（merge・設定反映・実行の直前）以外の
+  可逆な準備・実装・テスト・レビュー・PR作成は承認不要で実行し、出力契約で事後報告する。
+  **高リスク**では、実装開始前に `implementation_start` の人間approveが必須。
+  発効点（merge / settings_apply / execution）は別scopeで再度承認する
+  （詳細は下記「高リスク承認状態（正本）」）。
 - **CI/CD自動化を組む場合**: 状態機械（Issue/PRのラベル等）を第2の承認源泉にできる。
   「特定ラベルが付いた＝そのフェーズを進めてよい」と定義すれば、通常リスクの自動レーンを回せる。
 
 対話中にAIが状態を変える場合は対話レーンの承認（人間）に従う。状態機械の承認で代替しない。
+
+### 高リスク承認状態（正本）
+
+高リスク（不可逆4カテゴリ該当）では、**実装開始承認**（`APPROVAL_SCOPE: implementation_start`）と
+**発効点承認**（`merge` / `settings_apply` / `execution`）を別scopeとして扱う。詳細な補助行・
+`HUMAN_APPROVAL_RECORD: v1`・active record判定・fail-closed理由は下記「verdict」節が正本。
+
+- **通常リスク**: 変更なし。`PM_VERDICT: approve risk=normal route=cursor` で即route確定。人間の実装開始approveは不要
+- **高リスク・実装開始前**: Codex PMは `PROPOSED_ROUTE` を提示し、`APPROVAL_STATE: pending` と
+  `gate=human_approval` で人間approve/denyを待つ。承認前のcanonical `PM_VERDICT` に `route` を付けない
+- **高リスク・実装開始approve後**: 有効な `HUMAN_APPROVAL_RECORD` を根拠に `route` を確定する（`gate` は残さない）。
+  route確定は実装開始のみを許可し、merge・settings_apply・executionへ流用しない
+- **高リスク・deny後**: `PM_VERDICT: needs-info risk=high`（`gate` なし・`route` なし）。同一proposalを再承認待ちに戻さず、
+  継続するなら新proposal URLから新しい `pending + gate=human_approval` サイクルを開始する
+- **高リスク・発効点**: 実装・独立レビュー・技術ゲート完了後、発効点ごとに別scopeで再度
+  `APPROVAL_STATE: pending` + `gate=human_approval` で停止する（`implementation_start` の承認は流用不可）
+
+#### Issue #133 同期Checkpointとbootstrap例外
+
+Issue #133 は #134 の全面運用適用に**必須の同期Checkpoint**（任意の後続ではない）。
+#134 mergeだけで「全AIが新契約へ同期済み」とは扱わない。
+
+- **#133完了前・#133以外の新規高リスク実装開始**: 部分同期中の契約を推測適用せず `blocked`
+  （`stop_reason=approval_contract_sync_pending`）
+- **#133 bootstrap例外**: #133自身は #134 merge後・#133完了前でも本契約
+  （`PROPOSED_ROUTE` → human approve/deny → route確定）を先行適用できる唯一のIssue
+- **全面適用開始条件**: #133がmerge/完了し、同期完了記録がGitHub上で確認できた時点で、
+  #134の新契約を通常の高リスク案件へ全面適用する
+- **旧契約で #133 のrouteを人間approve前に確定する案は採用しない**
 
 どちらの源泉でも、次はAIに許可しない:
 
 - mainへの直接push
 - **発効点の人間approveなし**の高リスク（不可逆4カテゴリ）PRのmerge、および「自動マージ条件」を
   満たさない通常リスクPRのmerge（技術ゲート不成立はAI PMが再ルーティングまたは `blocked` を記録。不可逆案件の発効点のみ人間approve/deny。approve後のmerge実行はAIが行う）
-- **発効点の人間approveなし**の不可逆操作の実行（カテゴリ③を含む。高リスク案件のAI実装自体は
-  事前承認不要だが、実装AIと独立したレビュー＋発効点の人間approve＋Decision Log記録を必須とする）
+- **発効点の人間approveなし**の不可逆操作の実行（カテゴリ③を含む。高リスク案件は
+  `implementation_start` の人間approve後にroute確定し実装を開始し、独立レビュー＋発効点の人間approve＋Decision Log記録を必須とする）
 
 通常リスクのmergeは、人間、または次の「自動マージ条件」を全て満たした場合にAIが実行できる。
 
@@ -308,22 +340,116 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 
 - `PM_VERDICT`: PMがIssue/依頼を評価した最終行。
 - `route`: 作業・レビュー・実装など、**次に処理を担当する主体**（`cursor`・`claude-code`）。
-  AI PMが実装担当を確定して付与する（人間の指名は不要）。
+  通常リスクではAI PMが即確定して付与する（人間の指名は不要）。
+  高リスクでは `implementation_start` の有効approve record確認後のみ確定する（承認前proposalでは付けない）。
   **`route=claude-code` は通常実装ルートではなく、Codex PMが例外委譲を判断した場合のルートである**
 - `gate`: 満たすまで**不可逆操作を実行しない**停止条件。現時点の値は `human_approval` のみ。
-- `human_approval`: 人間が作業するという意味ではない。**不可逆操作の発効点**（merge・設定反映・実行の直前）で
-  人間が実施可否をapprove/denyするゲートを意味する。**実装開始の事前承認ではない** —
-  可逆工程（実装・テスト・レビュー・PR作成）はこのゲートを待たずに進めてよい。
-- 高リスク（不可逆4カテゴリ・カテゴリ③含む）の推奨表記:
-  `PM_VERDICT: approve risk=high route=cursor gate=human_approval`
-  （日本語: PM判断: 承認。実装担当はPMが確定済み。高リスクなので発効点で人間approveを待つ。）
-  AI PMは `gate` と併せて `route`（実装担当）・独立レビュアーを同時確定する。
-  独立レビュー＋発効点の人間approve（merge実行はAI）＋Decision Log記録を必須とする。
+- `human_approval`: **`APPROVAL_STATE: pending` のときだけ**使用できる。そのscopeについて人間approve/deny待ちで
+  停止していることを意味する。`APPROVAL_STATE: approved|denied` と `gate=human_approval` の併記は禁止。
+  高リスク `implementation_start` の承認前proposalでは `gate=human_approval` で実装開始approveを待つ。
+  発効点（`merge` / `settings_apply` / `execution`）でも別scopeで `pending` + `gate=human_approval` を使う。
+- 通常リスクの表記（変更なし）: `PM_VERDICT: approve risk=normal route=cursor`
+- 高リスク・実装開始承認前（例1）:
+  `PROPOSED_ROUTE: cursor` / `APPROVAL_SCOPE: implementation_start` / `APPROVAL_STATE: pending` /
+  `PM_VERDICT: approve risk=high gate=human_approval`（canonical `PM_VERDICT` に `route` を付けない）
+- 高リスク・実装開始approve後（例2）:
+  `APPROVAL_SCOPE: implementation_start` / `APPROVAL_STATE: approved` / `APPROVAL_RECORD: <exact URL>` /
+  `PM_VERDICT: approve risk=high route=cursor`（`gate` を残さない。routeはrecordの `proposed_route` と一致）
+- 高リスク・deny後（例3）:
+  `APPROVAL_SCOPE: implementation_start` / `APPROVAL_STATE: denied` / `APPROVAL_RECORD: <exact URL>` /
+  `PM_VERDICT: needs-info risk=high`（`gate` なし・`route` なし）
+- 高リスク・発効点承認待ち（例7）:
+  `APPROVAL_SCOPE: merge` / `APPROVAL_STATE: pending` / `PM_VERDICT: approve risk=high gate=human_approval`
+  （`implementation_start` の承認は流用不可）
 - `route=human`（**deprecated / 互換表記**）: 過去の `risk=high route=human` は「人間作業」ではなく
   「人間の承認ゲート（現行語義では発効点のapprove/deny）」と読む。今後の推奨は `risk=high gate=human_approval` とする。
   即時削除しない（既存Issue・過去コメントとの互換のため）。
 - `REVIEW_VERDICT`: レビュアーの最終行。merge可能=`approve`、修正必須・保留=`request-changes`。
   高リスク（不可逆4カテゴリ）を新たに検出したら `risk=high` を付ける
+
+### 承認補助行（高リスク・正本）
+
+高リスク承認待ちでは、`PM_VERDICT` 直前に次を必須とする。
+
+```
+APPROVAL_SCOPE: {implementation_start|merge|settings_apply|execution}
+APPROVAL_STATE: {pending|approved|denied}
+```
+
+`APPROVAL_SCOPE: implementation_start` の承認前proposalでは **必ず** 次を置く。
+
+```
+PROPOSED_ROUTE: {cursor|claude-code}
+```
+
+- `PROPOSED_ROUTE` は提案であり、実装割当・route確定ではない
+- `PROPOSED_ROUTE: claude-code` は本ファイルの既存Claude Code例外委譲条件を満たす場合だけ許可
+- `APPROVAL_STATE: approved|denied` を出力する場合は、直前に `APPROVAL_RECORD: <有効なHUMAN_APPROVAL_RECORDのexact URL>` を**必須**とする
+- `APPROVAL_STATE: pending` では `APPROVAL_RECORD` を付けない
+
+#### `HUMAN_APPROVAL_RECORD: v1` 固定形式
+
+人間approve/denyはGitHub上の**新規コメント**として記録し、過去記録を意味変更する編集で上書きしない。
+
+```
+HUMAN_APPROVAL_RECORD: v1
+subject=<exact subject>
+scope=implementation_start|merge|settings_apply|execution
+proposal_url=<承認対象PM proposalのexact URL>
+proposed_route=none|cursor|claude-code
+decision=approve|deny
+supersedes=none|<旧HUMAN_APPROVAL_RECORDのexact URL>
+```
+
+**scope別 `proposed_route` 許容値**:
+
+- `scope=implementation_start` → `proposed_route=cursor|claude-code` **必須**。`proposal_url` の `PROPOSED_ROUTE` と完全一致しなければ無効
+- `scope=merge|settings_apply|execution` → `proposed_route=none` **必須**
+
+**subject固定**:
+
+- `implementation_start`: `subject=issue:#<N>`
+- `merge`: `subject=pr:#<N>@<40-hex HEAD>`
+- `settings_apply`: 対象設定とrevisionを一意に識別できる値
+- `execution`: exact operation targetを一意に識別できる値
+
+異なるsubject/scope/proposal_url/proposed_routeへの承認流用は禁止する。
+
+#### 現在有効な承認記録（active record）の判定
+
+単純な「最新コメント」やtimestampだけでは判定しない。ある `subject + scope + proposal_url` に対する承認recordが**現在有効**である条件:
+
+1. `HUMAN_APPROVAL_RECORD: v1` の必須fieldがすべて存在する
+2. subject / scope / proposal_url / proposed_route が現在の判断対象と完全一致する
+3. `implementation_start` ではproposal側の `PROPOSED_ROUTE` とrecordの `proposed_route` が完全一致する
+4. `supersedes=none`、または `supersedes` が実在して取得可能な旧 `HUMAN_APPROVAL_RECORD: v1` のexact URLを指す
+5. `supersedes` 参照先は参照元recordと同じ subject / scope / proposal_url に属する
+6. `supersedes` は自己参照せず、参照先は参照元より前に作成されたrecordで、鎖に循環がない
+7. 当該recordを `supersedes=<record URL>` で正当に置き換えた、より後の有効recordが存在しない
+8. 同一 `subject + scope + proposal_url` に、互いに正当なsupersedes関係のないactive recordが複数存在しない
+9. proposal自体が別URLへ更新・差し替えされた場合、旧proposalに対するapprovalを新proposalへ流用しない
+
+**supersedes不整合**（`approval_record_invalid` で停止。旧recordを無効化したことにはしない）:
+
+- `supersedes` のURLが存在しない・取得不能
+- 参照先が `HUMAN_APPROVAL_RECORD: v1` ではない
+- subject / scope / proposal_url が参照元と一致しない
+- 自己参照・未来record参照・循環参照
+
+**fail-closed停止理由**:
+
+- active recordが0件 → `approval_record_missing`
+- active recordが2件以上、またはapprove/deny競合 → `approval_record_ambiguous`
+- recordのsubject/scope/proposal/proposed_routeが現在の判断と不一致 → `approval_record_mismatch`
+- record取得不能・形式不足・不正なsupersedes鎖 → `approval_record_invalid`
+
+いずれもroute確定・merge・設定反映・executionへ進まない。訂正・撤回は新規record + 正当な `supersedes` で残す。
+
+#### 追記・上書き規則
+
+- PM proposal / `PM_VERDICT` / `HUMAN_APPROVAL_RECORD` / route確定は追記型を原則とする
+- 状態遷移の証拠となったコメントを、後から意味が変わる形で編集しない
+- recordの有効性は上記規則で判定し、単純な最終timestampを権威にしない
 
 ### verdict 補助行（評価対象と成果物の分離・任意）
 

@@ -4,6 +4,86 @@
 
 ---
 
+# Decision: 高リスク承認状態とPM_VERDICT遷移の正本化（Issue #134）
+
+Date: 2026-08-10
+Status: Accepted
+Related Issues: #134, #133, #54
+
+## 決定事項
+
+高リスク時の承認状態を `APPROVAL_SCOPE` / `APPROVAL_STATE` / `PROPOSED_ROUTE` / `APPROVAL_RECORD` /
+`HUMAN_APPROVAL_RECORD: v1` で正本化し、実装開始承認（`implementation_start`）と発効点承認
+（`merge` / `settings_apply` / `execution`）を分離する。`gate=human_approval` は `pending` 専用とし、
+人間approve後のみ正式 `route` を確定する。`AGENTS.md` と `.agents/skills/pm-review/SKILL.md` を同期する。
+
+## 背景・課題
+
+Issue #133 のPM評価で承認scope・verdict遷移の正本化が先行Checkpointとして必要と判断され、本Issue #134を分離した。
+旧契約では高リスク時にPMが `route` と `gate=human_approval` を同時付与し、実装開始の事前承認が不要と読めた。
+`PROPOSED_ROUTE` 必須条件、active record一意判定、supersedes整合性、#133同期前の移行停止（#133自身の循環）、
+deny後の `gate` 残存矛盾が不足していた。
+
+## 採用する方針
+
+- 高リスク `implementation_start`: `PROPOSED_ROUTE` → `pending` + `gate=human_approval` → 人間approve/deny →
+  有効record確認後に正式 `route`（`gate` なし）
+- 発効点承認は別scope。`implementation_start` の承認は merge/settings_apply/execution へ流用不可
+- `HUMAN_APPROVAL_RECORD: v1` で subject/scope/proposal_url/proposed_route を固定し、
+  active record判定（supersedes・一意性）でfail-closed（`approval_record_missing|invalid|mismatch|ambiguous`）
+- deny後は `needs-info risk=high`（gate/routeなし）。同一proposalを再承認待ちに戻さず新proposal必須
+- 通常リスクは従来どおり即route確定（変更なし）
+- Issue #133 を必須同期Checkpointとし、#133だけbootstrap例外で新契約を先行適用
+
+## 採用しない方針 / 却下した代替案
+
+- **旧契約で #133 のrouteを人間approve前に確定する案**: #133の責務分離（承認契約の同期）と逆行し、
+  bootstrap目的（#133をblockedにしない）を満たさないため却下
+- **#134 mergeだけで全面適用とみなす案**: `CLAUDE.md` / `.cursor/rules/` / `docs/harness/roles/*.md` の
+  同期が未完了のため却下（#133で同期）
+- **verdict parser / CI / state machine の同時実装**: 文書契約先行。機械実装は別Checkpoint
+
+## 判断理由
+
+- 実装開始approveと発効点approveを分離することで、「誰に実装を任せる提案を承認したか」と
+  「merge等を承認したか」を別記録にでき、古い・重複・別proposalの承認流用を防げる
+- `gate=human_approval` を `pending` 専用にすることで、deny後やapprove後の状態矛盾を解消
+- active record + supersedes 方式により、追記型監査を維持しつつ訂正・撤回を可能にする
+- #133 bootstrap例外により、#133同期完了までの移行停止と#133自身の実装開始を両立
+
+## リスク（不可逆4カテゴリの該当有無）
+
+カテゴリ③に該当（`AGENTS.md` と `.agents/skills/pm-review/SKILL.md` の権限・パイプライン契約変更）。
+高リスクのため本Issue自身も人間approve前に実装routeを確定しない。
+
+## 影響範囲
+
+- `AGENTS.md`（承認節・verdict節・承認補助行）
+- `.agents/skills/pm-review/SKILL.md`（手順5ルーティング）
+- 本 Decision Log
+- 後続必須Checkpoint: Issue #133（`CLAUDE.md` / `.cursor/rules/` / `docs/harness/roles/*.md` 同期）
+
+## 取り消し手順
+
+1. 本Issueの実装PRを `git revert`
+2. `AGENTS.md` / `pm-review` を旧verdict契約へ戻す
+3. 本 Decision Log エントリの Status を `Superseded` に更新
+4. #133が同期済みなら、正本revert後に#133由来同期差分も戻す
+5. 誤承認で外部操作が発生済みなら別Issueで影響調査
+
+## 見直す条件
+
+- Issue #133 がmerge/完了し同期完了記録が確認できた時点で、通常の高リスク案件へ全面適用を開始
+- #133が中止・変更された場合は全面適用へ進まず、Codex PMへ戻す
+- 将来、機械parserが必要になった場合は本契約を入力仕様として別Checkpointで実装
+
+## 次アクション
+
+- [ ] Issue #133 で `CLAUDE.md` / `.cursor/rules/` / `docs/harness/roles/*.md` を同期
+- [ ] #133完了後、#134契約の全面適用開始を記録
+
+---
+
 # Decision: GitHub作業Skillの責務境界とCodex PM非実装停止条件
 
 Date: 2026-07-19

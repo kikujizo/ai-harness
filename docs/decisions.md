@@ -4,6 +4,110 @@
 
 ---
 
+# Decision: 高リスク承認状態とPM_VERDICT遷移の正本化（Issue #134）
+
+Date: 2026-08-10
+Status: Accepted
+Related Issues: #134, #133, #54
+
+## 決定事項
+
+高リスク時の承認状態を `APPROVAL_SCOPE` / `APPROVAL_STATE` / `PROPOSED_ROUTE` / `APPROVAL_RECORD` /
+`HUMAN_APPROVAL_RECORD: v2` で正本化し、実装開始承認（`implementation_start`）と発効点承認
+（`merge` / `settings_apply` / `execution`）を分離する。`gate=human_approval` は `pending` 専用とし、
+人間approve後のみ正式 `route` を確定する。承認の源泉とGitHub監査recordを分離し、
+`approval_source=human_explicit_response` / `recorded_by` で源泉を検証する。
+高リスク技術ゲートは expected-workflow-first で `CI_STATUS` を判定する。
+`AGENTS.md` と `.agents/skills/pm-review/SKILL.md` を同期する。
+
+## 背景・課題
+
+Issue #133 のPM評価で承認scope・verdict遷移の正本化が先行Checkpointとして必要と判断され、本Issue #134を分離した。
+旧契約では高リスク時にPMが `route` と `gate=human_approval` を同時付与し、実装開始の事前承認が不要と読めた。
+`PROPOSED_ROUTE` 必須条件、active record一意判定、supersedes整合性、#133同期前の移行停止（#133自身の循環）、
+deny後の `gate` 残存矛盾が不足していた。
+
+PR #135独立レビュー後のPM再評価で、さらに次の2点（P1/P2）が残存した。
+
+- **P1**: GitHub metadata（`performed_via_github_app` 等）だけでは同一userのWeb UI投稿とAPI/PAT経由を一般に証明できない。
+  「人間が物理的に直接投稿したこと」を機械判定条件にする契約は過剰保証になる。
+- **P2**: `workflow_runs=[]` / `statuses=[]` だけではCI未設定・未実行・取得漏れを区別できない。
+
+## 採用する方針
+
+- 高リスク `implementation_start`: `PROPOSED_ROUTE` → `pending` + `gate=human_approval` → 人間approve/deny →
+  有効v2 record確認後に正式 `route`（`gate` なし）。approved/deniedの固定順序は
+  `APPROVAL_SCOPE` → `APPROVAL_RECORD` → `APPROVAL_STATE` → `PM_VERDICT`
+- 発効点承認は別scope。`implementation_start` の承認は merge/settings_apply/execution へ流用不可
+- **承認源泉と監査attestation分離**: 人間の明示 `approve|deny` が源泉。GitHub recordは転記であり物理投稿の暗号学的証明ではない
+- `HUMAN_APPROVAL_RECORD: v2` で subject/scope/proposal_url/proposed_route / `approval_source` / `recorded_by` を固定。
+  Codex/Cursorはrecord作成禁止。源泉不明は `approval_record_provenance_unverifiable` でfail-closed
+- active record判定（supersedes・一意性）でfail-closed（`approval_record_missing|invalid|mismatch|ambiguous|provenance_unverifiable`）
+- deny後は `needs-info risk=high`（gate/routeなし）。同一proposalを再承認待ちに戻さず新proposal必須
+- **v1移行例外**: PR #135 implementation_start のみ
+  `https://github.com/kikujizo/ai-harness/issues/134#issuecomment-5235497751` を有効維持。新規はv2
+- **expected-workflow-first CI**: base SHAから自動PR workflow期待集合を先に確定し、workflowごとに固定HEAD runを照合。
+  `CI_STATUS: passed|failed|pending|missing|unknown|not-applicable`。`failed|pending|missing|unknown` は
+  `HIGH_RISK_TECH_GATE: blocked`
+- 通常リスクは従来どおり即route確定（変更なし）
+- Issue #133 を必須同期Checkpointとし、#133だけbootstrap例外で新契約を先行適用
+- カテゴリ③の該当条件は不変。旧「事前承認なしで実装できる」運用補足のみ `implementation_start` 契約へ置換
+
+## 採用しない方針 / 却下した代替案
+
+- **GitHub metadataだけで人間の物理的UI投稿を証明する要件**: P1により過剰保証のため却下
+- **`statuses=[]` / `workflow_runs=[]` 単独からCI未設定を推定する判定**: P2により区別不能のため却下
+- **旧契約で #133 のrouteを人間approve前に確定する案**: #133の責務分離（承認契約の同期）と逆行し、
+  bootstrap目的（#133をblockedにしない）を満たさないため却下
+- **#134 mergeだけで全面適用とみなす案**: `CLAUDE.md` / `.cursor/rules/` / `docs/harness/roles/*.md` の
+  同期が未完了のため却下（#133で同期）
+- **verdict parser / CI / state machine の同時実装**: 文書契約先行。機械実装は別Checkpoint
+- **実装AIによる `HIGH_RISK_TECH_GATE: passed` 自己最終確定**: 技術ゲート最終判定はCodex PM等の別主体
+
+## 判断理由
+
+- 実装開始approveと発効点approveを分離することで、「誰に実装を任せる提案を承認したか」と
+  「merge等を承認したか」を別記録にでき、古い・重複・別proposalの承認流用を防げる
+- `gate=human_approval` を `pending` 専用にすることで、deny後やapprove後の状態矛盾を解消
+- 承認源泉と監査recordの分離により、GitHub経路の曖昧さを過剰保証せず、AI自己承認をfail-closedできる
+- expected-workflow-firstにより、空配列からの誤判定（CI green扱い）を防げる
+- active record + supersedes 方式により、追記型監査を維持しつつ訂正・撤回を可能にする
+- #133 bootstrap例外により、#133同期完了までの移行停止と#133自身の実装開始を両立
+
+## リスク（不可逆4カテゴリの該当有無）
+
+カテゴリ③に該当（`AGENTS.md` と `.agents/skills/pm-review/SKILL.md` の権限・パイプライン契約変更）。
+高リスクのため本Issue自身も人間approve前に実装routeを確定しない。
+
+## 影響範囲
+
+- `AGENTS.md`（承認節・verdict節・承認補助行・高リスク技術ゲート）
+- `.agents/skills/pm-review/SKILL.md`（手順5ルーティング・v2検証・expected-workflow-first）
+- 本 Decision Log
+- 後続必須Checkpoint: Issue #133（`CLAUDE.md` / `.cursor/rules/` / `docs/harness/roles/*.md` 同期）
+
+## 取り消し手順
+
+1. 本Issueの実装PRを `git revert`
+2. `AGENTS.md` / `pm-review` を旧verdict契約へ戻す
+3. 本 Decision Log エントリの Status を `Superseded` に更新
+4. #133が同期済みなら、正本revert後に#133由来同期差分も戻す
+5. 誤承認で外部操作が発生済みなら別Issueで影響調査
+
+## 見直す条件
+
+- Issue #133 がmerge/完了し同期完了記録が確認できた時点で、通常の高リスク案件へ全面適用を開始
+- #133が中止・変更された場合は全面適用へ進まず、Codex PMへ戻す
+- 将来、暗号学的human-origin証明や機械parserが必要になった場合は本契約を入力仕様として別Checkpointで実装
+- PR #135のv1移行例外recordは新proposal/発効点へ流用しない
+
+## 次アクション
+
+- [ ] Issue #133 で `CLAUDE.md` / `.cursor/rules/` / `docs/harness/roles/*.md` を同期
+- [ ] #133完了後、#134契約の全面適用開始を記録
+
+---
+
 # Decision: GitHub作業Skillの責務境界とCodex PM非実装停止条件
 
 Date: 2026-07-19

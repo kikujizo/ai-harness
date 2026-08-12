@@ -3736,7 +3736,8 @@ cleanup execution に流用しない。
 | Codex独立技術レビュー | request-changes | #5262573648 |
 | ChatGPT要件レビュー（再） | request-changes | #5262610338（#5262525305 を supersede） |
 | Codex PM route | Cursor修正再開 | #5262654977 |
-| fixed HEAD（P1/P2修正前） | `b933b22ca65f275b31a4d3ed5d4983f8274f4050` | 本記録時点 |
+| fixed HEAD（P1/P2修正前） | `b933b22ca65f275b31a4d3ed5d4983f8274f4050` | 差し戻し時点 |
+| fixed HEAD（P1/P2修正後） | `646305cb311526d7e6b929ecf84e312888aacb3e` | Cursor修正push後 |
 | active approval | implementation_start / route=cursor | #5262190892 |
 | merge | 未実施 | `HIGH_RISK_TECH_GATE: passed` 後 merge scope |
 
@@ -3747,6 +3748,7 @@ cleanup execution に流用しない。
 - [x] Codex 独立技術レビュー（#5262573648）
 - [x] ChatGPT 要件レビュー（再・#5262610338）
 - [x] Cursor P1/P2 修正（`"."`/`".."` segment 拒否・レビュー記録同期）
-- [ ] 新 HEAD 再固定（本修正の push 後）
+- [x] 新 HEAD 再固定（`646305cb311526d7e6b929ecf84e312888aacb3e`）
 - [ ] ChatGPT / Codex 再レビュー（fixed HEAD・fail-closed 8基準）
+- [ ] expected workflow 2本の同一HEAD success
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

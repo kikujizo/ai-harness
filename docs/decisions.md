@@ -3585,7 +3585,7 @@ Issue #134 で `AGENTS.md` / `pm-review` に正本化した高リスク承認v2�
 
 ---
 
-# Decision: Cursor一時scratch配置とcleanup技術ゲート・発効点分離（Option 2）
+# Decision: Cursor一時scratch配置とcleanup技術ゲート・発効点分離
 
 Date: 2026-08-07
 Status: Proposed
@@ -3604,7 +3604,7 @@ identity-root resolverを次で固定する。
 - **Windows native**: current SID（`WindowsIdentity.GetCurrent().User.Value`）→
   同一SIDの唯一の `Win32_UserProfile.LocalPath` を `TRUSTED_HOME`。
   排他は `FileShare=None` 相当のexclusive FileStream。
-- **Linux / WSL**: ai-dev-workflow#139 を再利用（`id -u` → `getent passwd <uid>` 第6フィールド）。
+- **Linux / WSL**: `id -u` → `getent passwd <CURRENT_UID>` 第6フィールドを `TRUSTED_HOME`。
   排他は non-blocking exclusive `flock`。
 
 `USERPROFILE` / `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能・unsupported OSでは
@@ -3620,9 +3620,10 @@ GitHubへ記録する方式は撤回**し、absolute local home path・個人情
 
 通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` 1件に対しidentity・exact provenance・
 path safety・inventory・`RUN_LOCK` 取得を含むread-only技術ゲート全成立後にのみ
-closed questionへ進む。人間approve後はlock再取得と全ゲート再検証を行い、削除完了確認まで
-lockを保持する。状態変化時は再承認が必要（approval再利用禁止）。
-カテゴリ③（`.cursor/rules/ai-workflow.mdc` のmerge）とカテゴリ④（実cleanup）は別発効点とする。
+closed questionへ進む。将来の実cleanupは別 `execution` scope の v2 人間approveが必要。
+approve後はlock再取得と全ゲート再検証を行い、削除完了確認までlockを保持する。
+状態変化時は `approval_stale` / `inventory_changed` 等で blocked（approval再利用禁止）。
+カテゴリ③（`.cursor/rules/ai-workflow.mdc` のmerge）とカテゴリ④（実cleanup）は別発効点・別scopeとする。
 
 ## 背景・課題
 
@@ -3631,15 +3632,14 @@ lockを保持する。状態変化時は再承認が必要（approval再利用�
 cleanup排他が構造的に不成立だった。fail-closedのまま常時blockedに縮小するとCheckpointの
 「安全確認後にcleanupのclosed questionへ到達する」目的を失う。
 
-## 採用する方針（Option 2）
+## 採用する方針
 
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
 - `.cursor/rules/ai-workflow.mdc` にidentity-root・path safety・`RUN_LOCK`・exact completion record・
-  cleanup gate（A/B/C制御順序）を短く追記
+  cleanup gate（A/B制御順序）を短く追記
 - `docs/harness/roles/cursor.md` は正本参照を維持し設計意図・run lock必須のみ同期
-- `docs/harness/setup.md` にWindows/Linux・WSLシナリオ・否定例・fail-closed 8基準の実装前照合記録
+- `docs/harness/setup.md` にWindows/Linux・WSLシナリオ・否定例・fail-closed 8基準の実装後照合記録
 - provenanceはpath名推測禁止。exact GitHub record + local再検証の組み合わせ
-- Linux/WSLは ai-dev-workflow#139 の `getent passwd` 契約を再利用
 - Windowsはcurrent SIDと `Win32_UserProfile.LocalPath` の対応をルール契約として記述
 
 ## 採用しない方針 / 却下した代替案
@@ -3651,7 +3651,7 @@ cleanup排他が構造的に不成立だった。fail-closedのまま常時block
 - **本PRでの実cleanup**: カテゴリ④は別発効点のため却下
 - **固定manifest外ファイルの追加**: Issue境界を超えるため却下
 - **環境変数優先またはOS側無条件優先の不一致fallback**: 両方禁止
-- **fail-closedのままcleanupを常時blockedに縮小**: Checkpoint目的と矛盾するため却下（Option 1相当）
+- **fail-closedのままcleanupを常時blockedに縮小**: Checkpoint目的と矛盾するため却下
 
 ## 判断理由
 
@@ -3668,8 +3668,10 @@ cleanup排他が構造的に不成立だった。fail-closedのまま常時block
 - カテゴリ③ **該当**（`.cursor/rules/ai-workflow.mdc` 正本変更）
 - カテゴリ④ 本PR実装は非該当。将来の実cleanupは**別発効点で該当**
 
-`risk=high` `gate=human_approval`。実装・テスト・PR・独立レビューは先行可能。merge直前に人間approve/deny。
-本PRのmerge承認はカテゴリ④の実cleanupへ流用しない。
+`risk=high`。実装は v2 `implementation_start` 承認後に実施。merge は独立レビュー・
+`HIGH_RISK_TECH_GATE: passed` 後の merge scope 人間approveが必要。
+本PRのmerge承認はカテゴリ④の実cleanupへ流用しない。`implementation_start` / merge record を
+cleanup execution に流用しない。
 
 ## このPRの最悪の失敗は何か・それは戻せるか
 
@@ -3710,13 +3712,13 @@ cleanup排他が構造的に不成立だった。fail-closedのまま常時block
 | 項目 | 結果 | 証跡 |
 |---|---|---|
 | Draft PR | 作成済み | PR #132 |
-| ChatGPT要件レビュー | **未実施（新HEAD再レビュー待ち）** | 旧HEAD `7aef433` の判定はIssue再仕様化により流用不可 |
-| Codex独立技術レビュー | **未実施（新HEAD再レビュー待ち）** | PMコメント #5214538741 でroute承認済み。実装後の独立レビューは別ゲート |
-| merge | 未実施 | カテゴリ③・`gate=human_approval` |
+| ChatGPT要件レビュー | 未実施（current main同期後の新HEAD） | - |
+| Codex独立技術レビュー | 未実施（current main同期後の新HEAD） | - |
+| merge | 未実施 | `HIGH_RISK_TECH_GATE: passed` 後 merge scope |
 
 ## 次アクション
 
-- [x] Cursor による実装（本エントリ・4ファイル文書・Option 2）
-- [ ] ChatGPT 要件レビュー（新HEAD固定）
-- [ ] Codex 独立技術レビュー（新HEAD固定・fail-closed 8基準・lock/provenance/path safety）
-- [ ] 人間による merge 判断（発効点・カテゴリ③・`gate=human_approval`）
+- [x] Cursor による実装（本エントリ・4ファイル文書・current main同期）
+- [ ] ChatGPT 要件レビュー（fixed HEAD）
+- [ ] Codex 独立技術レビュー（fixed HEAD・fail-closed 8基準）
+- [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

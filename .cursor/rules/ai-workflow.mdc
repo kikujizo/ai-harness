@@ -31,47 +31,45 @@ Cursor-specific rules only:
 - Never read, print, or commit `.env` or any secret. Never push to main.
 - GitHubへ書き込む人間向けテキストの冒頭に `> **記録者**: Cursor` 等を置く（共通ルールは
   `AGENTS.md`「GitHubドリヴン記録」参照。他AIのサービス名を名乗らない）。
-- **一時scratch / cleanup（Issue #54・Option 2）** — 詳細手順は `docs/harness/setup.md`。
-  対応OSは Windows native / Linux・WSL のみ。それ以外 → `identity_root_unsupported`
-  （scratch・cleanup候補とも禁止。EARLY: mkdir/write・completion record・cleanup禁止）。
-  **パス契約**: `SCRATCH_BASE=<TRUSTED_HOME>/.cache/ai-harness-scratch`、
-  `RUN_ROOT=<SCRATCH_BASE>/<repo_slug>/<run_id>/`、
-  `LOCK_ROOT=<SCRATCH_BASE>/.locks/<repo_slug>/`、
-  `RUN_LOCK=<LOCK_ROOT>/<run_id>.lock`（runtime空ファイル。repo manifestに追加しない。
-  存在は活動/provenance証拠にしない。OS lock成否のみ）。
-  `repo_slug` / `run_id` は `[A-Za-z0-9._-]+` の1 segment。不正 → `invalid_run_segment`。
-  **identity-root**: Windows → `CURRENT_SID` → 同一SIDの `Win32_UserProfile` がちょうど1件の
-  `LocalPath`；Linux/WSL → `id -u` → `getent passwd <uid>` 第6フィールド。不能・0/複数・
-  path不正 → `identity_root_unresolved`。`USERPROFILE` / `HOME` / `~` 等をcanonicalizeして
-  `TRUSTED_HOME` と不一致 → `identity_root_mismatch`（推測fallback禁止）。
-  **scratch開始（A）**: identity成立後、初回mkdir/writeより前に path-chain safety を
-  read-only検証（Linux: symlink/owner/mode/mountpoint/ACL/special/canonical；
-  Windows: ReparsePoint/ACL/canonical）。unsafe/unknown → `path_safety_failed` /
-  `path_safety_unknown`。続けて同一 `RUN_LOCK` を non-blocking exclusive 取得
-  （Linux: flock / Windows: FileShare=None）。不能 → `run_lock_unavailable`、
-  競合 → `run_lock_conflict`（待機・steal・lock file削除禁止）。lock保持中のみ
-  missing component を1段作成→直後再検証。通常作業中はcleanupしない。
-  **run終了**: lock保持のまま exact GitHub completion record 1件を作成
-  （`record_type=scratch-completion/v1`、`repo_full_name`、`repo_slug`、`run_id`、
-  `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`（相対pathのみ）、
-  `run_state=completed`、`residue=present|none`）。`TRUSTED_HOME` や absolute local path、
-  個人情報をGitHubへ書かない。記録失敗は成功丸め禁止・provenance未成立。後でlock解放。
-  **cleanup pre-approval（B）**: identity再実行→segment検証→exact provenance record取得照合
-  （不在/推測/不一致 → `provenance_unknown` / `provenance_mismatch`；
-  `residue=none` は候補外）→path-chain再検証→同一 `RUN_LOCK` 取得→lock保持中に
-  canonical/owner/mode/ACL/symlink|reparse|mount/special/escape/inventory/run_state検証
-  →技術ゲート成立記録→lock解放→`closed_question_for_exact_target`。人間approveは
-  未成立ゲートを代替しない（EARLY: 削除・approve流用・別root/別lock禁止）。
-  **approve後（C）**: identity再実行→exact provenance再取得（変化 → `provenance_mismatch` /
-  `approval_stale`）→`RUN_LOCK` 再取得（旧結果流用禁止）→lock保持中に全ゲート再検証→
-  pre-approval inventory一致かつ不変のときだけ削除→削除完了確認までlock保持→`RUN_ROOT`消失
-  確認後にlock解放。drift/競合/不能 → `blocked`（approval再利用禁止）。
-  **固定 stop_reason**（曖昧な `等` 禁止）:
-  `identity_root_unsupported` `identity_root_unresolved` `identity_root_mismatch`
+- **一時scratch / cleanup（Issue #54）** — 制御順序は変更禁止。詳細観測例は `docs/harness/setup.md`。
+  **EARLY呼禁止**（以下の停止時）: scratch mkdir/write、cleanup delete、lock steal、package install、
+  `HOME`/`USERPROFILE` 信頼、provenance 推測、implementation_start/merge record の cleanup 流用。
+  **A. scratch writer（初回 mkdir/write 前）**
+  1. env check: Windows native または Linux/WSL のみ。それ以外 → `identity_root_unsupported`（EARLY）
+  2. identity-root resolve: Windows → `CURRENT_SID = WindowsIdentity.GetCurrent().User.Value`、
+     `TRUSTED_HOME` = 同一SIDの `Win32_UserProfile` 唯一の `LocalPath`（`USERPROFILE` 等は正本にしない。
+     canonicalize 後不一致 → `identity_root_mismatch`）；Linux/WSL → `CURRENT_UID = id -u`、
+     `TRUSTED_HOME` = `getent passwd <CURRENT_UID>` 第6フィールド（`HOME`/`~` は正本にしない。
+     不一致 → `identity_root_mismatch`）。取得不能/0/複数/path不正 → `identity_root_unresolved`
+  3. segment検証: `repo_slug` / `run_id` は `[A-Za-z0-9._-]+` の1 segmentのみ。不正 → `invalid_run_segment`
+  4. path-chain safety（`TRUSTED_HOME`→`SCRATCH_BASE`→`LOCK_ROOT`→`RUN_ROOT`）: Linux/WSL は
+     symlink/owner==UID/group+world write(0022)/新規mount/special/canonical配下を検証。
+     Windows は reparse/ACL（current SID・SYSTEM・Administrators 以外の write/modify/delete 拒否）/
+     canonical境界を検証。ACL評価不能 → `path_safety_unknown`。unsafe → `path_safety_failed`。
+     証明不能 → blocked。追加package自動導入禁止
+  5. `RUN_LOCK` を初回 mkdir/write **より前**に non-blocking exclusive 取得
+     （Linux: flock on FD / Windows: FileStream FileShare=None）。不能 → `run_lock_unavailable`、
+     競合 → `run_lock_conflict`（待機・steal・lock file削除禁止）
+  6. lock保持中のみ `RUN_ROOT` 配下へ create/write（`SCRATCH_BASE=<TRUSTED_HOME>/.cache/ai-harness-scratch`、
+     `LOCK_ROOT=<SCRATCH_BASE>/.locks/<repo_slug>/`、`RUN_LOCK=<LOCK_ROOT>/<run_id>.lock`。
+     runtime lock fileはrepo manifestに含めない。存在だけを活動/provenance証拠にしない）
+  7. 最終write後もlock保持のまま exact GitHub completion record 1件を作成
+     （`record_type=scratch-completion/v1`、`repo_full_name`、`repo_slug`、`run_id`、
+     `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、`run_state=completed`、
+     `residue=present|none`）。`TRUSTED_HOME`/absolute local path/個人情報はGitHubへ書かない。
+     作成不能 → provenance未成立。後でlock解放。通常作業中はcleanupしない
+  **B. cleanup candidate（本PRは契約のみ。実delete禁止）** pre-approval read-only:
+  1. identity-root再実行 2. segment検証 3. exact provenance record取得・照合（path/repo-wide検索から推測しない。
+     不在/不一致 → `provenance_unknown`/`provenance_mismatch`；`residue=none` は候補外）
+  4. path chain再検証 5. 同一 `RUN_LOCK` non-blocking exclusive 6. lock保持中に
+     target/owner/mode/ACL/reparse/mount/special/escape検証 7. lock保持中 inventory +
+     `run_state=completed` 8. 技術ゲート成立後 lock解放 → exact target+operation の closed question。
+  人間approve（**別 `execution` scope**・本PRの implementation_start/merge record流用禁止）後:
+  identity/provenance/`updated_at`/lock/path/inventoryを再取得。不一致 → `approval_stale`/blocked。
+  削除完了確認までlock保持。中断・部分失敗・結果確認不能は成功扱いしない。
+  **固定 stop_reason**: `identity_root_unsupported` `identity_root_unresolved` `identity_root_mismatch`
   `invalid_run_segment` `path_safety_failed` `path_safety_unknown` `run_lock_unavailable`
   `run_lock_conflict` `provenance_unknown` `provenance_mismatch` `run_state_not_completed`
   `inventory_unavailable` `inventory_changed` `approval_stale` `cleanup_interrupted`
   `cleanup_result_unknown`。各停止は `result=blocked`（成功丸め禁止）。
-  `result` は `blocked` または `closed_question_for_exact_target` のみ。
-  カテゴリ③（本ルールのmerge）とカテゴリ④（実cleanup）は別発効点。本PR mergeは
-  将来のcleanup許可に流用しない。
+  カテゴリ③（本ルールのmerge）とカテゴリ④（実cleanup）は別発効点・別scope。

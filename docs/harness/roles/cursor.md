@@ -26,13 +26,14 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   writerとcleanupは同一 `RUN_LOCK`（`<SCRATCH_BASE>/.locks/<repo_slug>/<run_id>.lock`）を
   non-blocking exclusive で必ず取得する（Linux: flock / Windows: FileShare=None）。
   identity-rootは Windows nativeではcurrent SID→`Win32_UserProfile.LocalPath`、
-  Linux/WSLでは `id -u`→`getent passwd`第6フィールド（#139再利用）。`USERPROFILE` /
+  Linux/WSLでは `id -u`→`getent passwd`第6フィールド。`USERPROFILE` /
   `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能時はscratch作成も
   cleanup候補化もしない（`scratch_created=false`、mkdir/writeより前に停止）。
   scratch初回write前にOS別path-chain safetyを検証する。provenanceの権威入力は
   exact GitHub completion record 1件（相対 `scratch_rel` のみ。absolute homeは記録しない）。
   通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` に対するread-only技術ゲート全成立後に
-  のみ closed questionへ進む。人間approveは技術ゲートを代替しない。approve後はlock再取得と
+  のみ closed questionへ進む。将来の実cleanupは別 `execution` scopeの人間approveが必要。
+  人間approveは技術ゲートを代替しない。approve後はlock再取得と
   全ゲート再検証を行い、削除完了確認までlockを保持する。状態変化時は再承認が必要。
   カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
   詳細・制御順序・否定例の正本は `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`

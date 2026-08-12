@@ -273,11 +273,11 @@ branch `issue-121-ambiguous-comprehensive-instruction-scope`。
 | 実出力（先頭） | `G1〜G6は全て充足済みのため、新しい人間承認は要求しない。本規定は通常リスクPRの既存merge条件（G1〜G6充足→AI merge可）を変更しないため、このPRは既存条件どおりAIがmergeを実行する。本規定のclosed question条件はこのPRには適用しない。適用対象は高リスクの発効点承認、または技術判断が不明で人間の許可を求めたくなる場面であり、本PRはG1〜G6が成立済みで残件も発効点も存在しないため、そもそも人間に問い合わせる局面ではない。` |
 | 合否 | **合格** — 曖昧指示への確認義務を理由に通常リスクへ新しい承認ゲートを追加していない |
 
-#### 一時scratch / cleanup境界（Issue #54 Checkpoint・Option 2・10件）
+#### 一時scratch / cleanup境界（Issue #54 Checkpoint・10件）
 
-制御フロー正本: `.cursor/rules/ai-workflow.mdc`（A: scratch開始 / B: cleanup pre-approval /
-C: approve後）。EARLY停止時は `scratch_created=false`・`cleanup=false`・mkdir/writeより前に
-停止することを各否定例で観測する。
+制御フロー正本: `.cursor/rules/ai-workflow.mdc`（A: scratch writer / B: cleanup candidate）。
+EARLY停止時は `scratch_created=false`・`cleanup=false`・mkdir/write/cleanup deleteより前に
+停止することを各否定例で観測する（`ai-workflow.mdc` の EARLY呼禁止節を構造grepで確認可能）。
 
 - **Windows identity-root・path safety・lock取得成功**: current SID→`Win32_UserProfile.LocalPath` で
   `TRUSTED_HOME` が一意に得られ、path-chain safety検証後、初回mkdir/writeより前に `RUN_LOCK` を
@@ -311,24 +311,25 @@ C: approve後）。EARLY停止時は `scratch_created=false`・`cleanup=false`�
   `stop_reason=cleanup_interrupted` または `cleanup_result_unknown` で `blocked` とし、
   残留再検出と前回approve再利用禁止を確認する。
 
-**試験実施記録（Issue #54・Option 2・実装前・実施: Cursor）**
+**試験実施記録（Issue #54・実装後照合・実施: Cursor）**
 
-共通環境: base SHA `7eec7c69d89e6d120c4df74fa286533149451061`、branch
+共通環境: current base SHA `c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188`、branch
 `cursor/issue-54-scratch-cleanup-boundary`、4ファイル文書のみ（実cleanup・追加script・
 repo内lock実装ファイルなし）。`RUN_LOCK` はruntime空ファイルでありGit diffに含めない。
+merge / settings_apply / execution / cleanup は未実行。
 
-##### fail-closed 8基準（実装前照合・Issue #54 spec-side）
+##### fail-closed 8基準（実装後照合・actual diff根拠）
 
 | criterion | result | basis | next_action |
 |---|---|---|---|
-| `success-propagation` | pass | `blocked`/interrupt/unknownを成功扱いしない固定出力とapprove失効条件を定義。中断・部分失敗・結果確認不能は `blocked` | continue |
-| `identity-root` | pass | Windows: SID→`Win32_UserProfile.LocalPath`、Linux/WSL: `id -u`→`getent`第6フィールド。不一致・解決不能・unsupported OSで `scratch_created=false`（mkdir/write前停止） | continue |
-| `path-chain-safety` | pass | scratch作成前とcleanup前/approve後の両方でOS別にsymlink/reparse/mountpoint/owner/mode/ACL/special/canonical境界を検査。unknownは `path_safety_unknown` でblocked | continue |
-| `persistent-claim-bypass` | not_applicable | 永続claimを導入しない。`RUN_LOCK` fileの存在はclaim/活動証明に使わず、OSが保持する排他handle/FD（flock / FileShare=None）だけを利用 | continue |
-| `verify-before-mutate` | pass | scratch初回write前にidentity/path/lockを検証。cleanupはread-only gate→closed question→approve後lock再取得/全再検証→削除の順に固定 | continue |
-| `provenance-no-fabrication` | pass | exact GitHub completion record 1件を権威入力に固定。相対 `scratch_rel` のみ記録。absolute home・個人情報はGitHubへ書かない。record不明/不一致は `provenance_unknown`/`provenance_mismatch` でblocked | continue |
-| `concurrency-interrupt-residue` | pass | writerとcleanupが同一 `RUN_LOCK` を必須取得。cleanupはapprove後のlock再取得から削除完了まで保持。競合は `run_lock_conflict`、steal/待機/lock file削除禁止 | continue |
-| `override-test-hook-isolation` | not_applicable | override/test hookを導入しない | continue |
+| `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown` を `result=blocked` と固定。approve後 drift は `approval_stale`/`inventory_changed` で再利用禁止 | continue |
+| `identity-root` | pass | Windows SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールド。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
+| `path-chain-safety` | pass | A-4/B-4 で OS別 path-chain（symlink/reparse/mount/ACL/special/canonical）を scratch 初回write前と cleanup 前に固定 | continue |
+| `persistent-claim-bypass` | not_applicable | 永続claim・lock file存在を活動証明に使わない契約のみ。OS排他（flock/FileShare=None）を正本に限定 | continue |
+| `verify-before-mutate` | pass | A-5→A-6 の順で lock 取得後のみ mkdir/write。B は read-only gate 8段の後に closed question | continue |
+| `provenance-no-fabrication` | pass | exact `scratch-completion/v1` record 1件のみ。path/repo-wide 検索推測禁止を `ai-workflow.mdc` B-3 に明記 | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。approve 後は再取得から削除完了まで保持 | continue |
+| `override-test-hook-isolation` | not_applicable | override/test hook を導入しない（4ファイル文書のみ） | continue |
 
 ##### 否定テスト観測例（文書契約・EARLY非実行の証明）
 

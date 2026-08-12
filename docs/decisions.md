@@ -3594,8 +3594,17 @@ Related PRs: #132
 
 Cursorの一時ファイルをOS identity由来のtrusted home配下のrun固有scratch
 （`RUN_ROOT=<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo_slug>/<run_id>/`）に限定する。
-writerとcleanupは同一 `RUN_LOCK`（`<SCRATCH_BASE>/.locks/<repo_slug>/<run_id>.lock`）を
-OS標準の排他プリミティブで必ず取得する（repo内lock実装ファイル・daemon・DBは追加しない）。
+`LOCK_ROOT`（`<SCRATCH_BASE>/.locks/<repo_slug>/`）と `RUN_ROOT` は兄弟系統であり、
+`LOCK_CHAIN`（`TRUSTED_HOME→SCRATCH_BASE→LOCK_BASE→LOCK_ROOT→RUN_LOCK`）と
+`RUN_CHAIN`（`TRUSTED_HOME→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する（単一 `PATH_CHAIN` ではない）。
+writerは lock 系 directory（`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
+`RUN_LOCK` 取得後にのみ `RUN_BASE`/`RUN_ROOT`/payload を作成する。
+writerとcleanupは同一 `RUN_LOCK` を OS標準の排他プリミティブで必ず取得する
+（repo内lock実装ファイル・daemon・DBは追加しない）。
+Linux/WSLのbind mount判定は device ID 照合だけに依存せず mount table/mountinfo を用い、
+評価不能は `path_safety_unknown` で blocked。
+cleanupは filesystem 上に新規 directory/file/lock を一切作成しない read-only 契約。
+Windows cleanup は既存 lock file のみ open し `OpenOrCreate` を使わない。
 
 identity-root resolverを次で固定する。
 
@@ -3606,9 +3615,10 @@ identity-root resolverを次で固定する。
   排他は non-blocking exclusive `flock`。
 
 `USERPROFILE` / `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能・unsupported OSでは
-scratch作成もcleanup候補化もしない（`scratch_created=false`、mkdir/writeより前に停止）。
-scratch初回write前にOS別path-chain safety（symlink/reparse/mountpoint/owner/mode/ACL/special/
-canonical境界）を検証する。
+scratch作成もcleanup候補化もしない（`scratch_created=false`、run側 mkdir/writeより前に停止）。
+scratch初回write前にOS別path safety（symlink/reparse/mountpoint/owner/mode/ACL/special/
+canonical境界）を検証する。Linux/WSLでは mount table/mountinfo で bind mount を判定し、
+device ID 照合だけを mount 不在の十分条件にしない。
 
 provenanceの権威入力はrun終了時の **exact GitHub completion record 1件** とする。
 `record_type=scratch-completion/v1`、`repo_full_name`、`repo_slug`、`run_id`、
@@ -3630,18 +3640,30 @@ approve後はlock再取得と全ゲート再検証を行い、削除完了確認
 cleanup排他が構造的に不成立だった。fail-closedのまま常時blockedに縮小するとCheckpointの
 「安全確認後にcleanupのclosed questionへ到達する」目的を失う。
 
+**再仕様化（P1-1〜P1-3 / P2-1）**: Codex独立技術レビュー `#5261980663` と ChatGPT要件差し戻しにより、
+旧単一 `PATH_CHAIN`（`LOCK_ROOT`→`RUN_ROOT` 直結）と device ID 単独 mount 判定、
+cleanup への writer bootstrap 流用が不十分と判明。`LOCK_CHAIN`/`RUN_CHAIN` 分離、
+lock bootstrap 限定（`RUN_LOCK` 前は lock 系のみ）、cleanup read-only（missing path 作成禁止・
+`OpenOrCreate` 禁止）へ再同期した。
+
 ## 採用する方針
 
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
-- `.cursor/rules/ai-workflow.mdc` にidentity-root・path safety・`RUN_LOCK`・exact completion record・
-  cleanup gate（A/B制御順序）を短く追記
-- `docs/harness/roles/cursor.md` は正本参照を維持し設計意図・run lock必須のみ同期
-- `docs/harness/setup.md` にWindows/Linux・WSLシナリオ・否定例・fail-closed 8基準の実装後照合記録
+- `.cursor/rules/ai-workflow.mdc` にidentity-root・`LOCK_CHAIN`/`RUN_CHAIN` 別検証・
+  lock bootstrap限定・`RUN_LOCK` 取得後run側作成・exact completion record・
+  cleanup read-only gate（A0–A7/B0–B8制御順序）を短く追記
+- `docs/harness/roles/cursor.md` は正本参照を維持し設計意図・chain分離・lock bootstrap順序のみ同期
+- `docs/harness/setup.md` にfresh bootstrap成功・bootstrap安全性不明・bind mount判定不能・
+  lock/run chain分岐・cleanup missing path・post-approve drift・否定例・fail-closed 8基準の実装後照合記録
 - provenanceはpath名推測禁止。exact GitHub record + local再検証の組み合わせ
 - Windowsはcurrent SIDと `Win32_UserProfile.LocalPath` の対応をルール契約として記述
 
 ## 採用しない方針 / 却下した代替案
 
+- **単一 `PATH_CHAIN`（`LOCK_ROOT`→`RUN_ROOT` 直結）**: 兄弟系統を誤検証するため却下
+- **device ID 照合だけでの mount/bind mount 判定**: bind mount 迂回リスクのため却下
+- **cleanup への writer missing-component 作成規則の流用**: read-only 境界違反のため却下
+- **cleanup での `OpenOrCreate`**: missing lock を暗黙作成するため却下
 - **追加resolver script・package・daemon・repo内lock実装ファイル・provenance DB**: 4ファイル文書のみで表現するため却下
 - **環境変数homeを正本化**: 偽装リスクのため却下
 - **canonical absolute scratch rootのGitHub記録**: 個人情報・absolute path漏洩リスクのため撤回

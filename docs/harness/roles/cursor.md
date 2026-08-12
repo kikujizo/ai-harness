@@ -23,14 +23,23 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   指示だけでなくブランチ保護を最終防衛に置く。
 - 一時ファイルはOS identity由来のtrusted home配下のrun固有scratch（
   `RUN_ROOT=<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo_slug>/<run_id>/`）に限定する。
-  writerとcleanupは同一 `RUN_LOCK`（`<SCRATCH_BASE>/.locks/<repo_slug>/<run_id>.lock`）を
-  non-blocking exclusive で必ず取得する（Linux: flock / Windows: FileShare=None）。
+  `LOCK_ROOT`（`<SCRATCH_BASE>/.locks/<repo_slug>/`）と `RUN_ROOT` は兄弟系統であり、
+  `LOCK_CHAIN`（`TRUSTED_HOME→SCRATCH_BASE→LOCK_BASE→LOCK_ROOT→RUN_LOCK`）と
+  `RUN_CHAIN`（`TRUSTED_HOME→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する（単一 `PATH_CHAIN` ではない）。
+  writerは lock 系 directory（`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
+  `RUN_LOCK` 取得後にのみ `RUN_BASE`/`RUN_ROOT`/payload を作成する。
+  writerとcleanupは同一 `RUN_LOCK` を non-blocking exclusive で必ず取得する
+  （Linux: flock / Windows writer: `OpenOrCreate`+`FileShare=None`、
+  Windows cleanup: 既存 lock file のみ open・`OpenOrCreate` 禁止）。
   identity-rootは Windows nativeではcurrent SID→`Win32_UserProfile.LocalPath`、
   Linux/WSLでは `id -u`→`getent passwd`第6フィールド。`USERPROFILE` /
   `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能時はscratch作成も
-  cleanup候補化もしない（`scratch_created=false`、mkdir/writeより前に停止）。
-  scratch初回write前にOS別path-chain safetyを検証する。provenanceの権威入力は
+  cleanup候補化もしない（`scratch_created=false`、run側 mkdir/writeより前に停止）。
+  Linux/WSLのbind mount判定は device ID 照合だけに依存せず mount table/mountinfo を用い、
+  評価不能は `path_safety_unknown` で blocked。
+  scratch初回write前にOS別path safetyを検証する。provenanceの権威入力は
   exact GitHub completion record 1件（相対 `scratch_rel` のみ。absolute homeは記録しない）。
+  cleanupは filesystem 上に新規 directory/file/lock を一切作成しない read-only 契約。
   通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` に対するread-only技術ゲート全成立後に
   のみ closed questionへ進む。将来の実cleanupは別 `execution` scopeの人間approveが必要。
   人間approveは技術ゲートを代替しない。approve後はlock再取得と

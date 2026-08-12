@@ -3601,14 +3601,20 @@ Cursorの一時ファイルをOS identity由来のtrusted home配下のrun固有
 `RUN_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する
 （単一 `PATH_CHAIN` ではない）。
 writerは lock 系 directory（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
-`RUN_LOCK` 取得後にのみ `RUN_BASE`/`RUN_ROOT`/payload を作成する。既存 safe `RUN_ROOT` は
+`RUN_LOCK` 取得後に `RUN_BASE`/`RUN_ROOT` を作成する。既存 safe `RUN_ROOT` は
 `run_root_collision` で blocked（再利用・resume 禁止）。
+**新規 `RUN_ROOT` ごとに OS/runtime 標準 CSPRNG で fresh 256-bit `instance_nonce` を生成し、
+create-new の `RUN_INSTANCE_MARKER`（`scratch-instance/v1`）へ保存・read-back 検証後にのみ payload を書く。**
+**`repo_slug` / `run_id` は path/lock 識別子のみ。provenance 証明に単独では使わない。**
+**completion は `scratch-completion/v2`（`instance_commitment` のみ公開。`instance_nonce` は GitHub へ出さない）。
+`scratch-completion/v1` は cleanup provenance として受理しない。**
 writerとcleanupは同一 `RUN_LOCK` を OS標準の排他プリミティブで必ず取得する
 （repo内lock実装ファイル・daemon・DBは追加しない）。
 Linux/WSLのbind mount判定は device ID 照合だけに依存せず mount table/mountinfo を用い、
 評価不能は `path_safety_unknown` で blocked。
 cleanupは filesystem 上に新規 directory/file/lock を一切作成しない read-only 契約。
-cleanup inventory は `run-inventory/v1` canonical recursive snapshot（pre/post で
+cleanup inventory は `run-inventory/v1` canonical recursive snapshot（`RUN_INSTANCE_MARKER` を含む。
+pre/post で
 `inventory_version`/`inventory_digest`/`entry_count` を exact 比較。不一致は `inventory_changed`）。
 cleanup は `RUN_ROOT` と全 descendant へ recursive path safety を適用する（nested mount/bind mount/
 reparse 拒否）。
@@ -3628,11 +3634,15 @@ scratch初回write前にOS別path safety（symlink/reparse/mountpoint/owner/mode
 canonical境界）を検証する。Linux/WSLでは mount table/mountinfo で bind mount を判定し、
 device ID 照合だけを mount 不在の十分条件にしない。
 
-provenanceの権威入力はrun終了時の **exact GitHub completion record 1件** とする。
-`record_type=scratch-completion/v1`、`repo_full_name`、`repo_slug`、`run_id`、
-相対 `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、`run_state=completed`、
-`residue=present|none` を照合する。**旧仕様の canonical absolute scratch root を
-GitHubへ記録する方式は撤回**し、absolute local home path・個人情報はGitHubへ書かない。
+provenanceの権威入力はrun終了時の **exact GitHub `scratch-completion/v2` 1件** と
+local `scratch-instance/v1` marker から再計算した `instance_commitment` の exact 一致とする。
+`record_type=scratch-completion/v2`、`repo_full_name`、`repo_slug`、`run_id`、
+相対 `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、
+`instance_commitment=sha256:<64 lowercase hex>`、`run_state=completed`、
+`residue=present|none` を照合する。**`scratch-completion/v1` は受理しない。v1 から instance binding を
+推測・補完・昇格しない。** **`run_id` 単独は provenance 証拠にならない。**
+`instance_nonce` は GitHub へ書かない。旧仕様の canonical absolute scratch root を
+GitHubへ記録する方式は撤回し、absolute local home path・個人情報はGitHubへ書かない。
 
 通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` 1件に対しidentity・exact provenance・
 path safety・inventory・`RUN_LOCK` 取得を含むread-only技術ゲート全成立後にのみ
@@ -3650,11 +3660,14 @@ inventory をゼロから再検証し、削除完了確認までlockを保持す
 cleanup排他が構造的に不成立だった。fail-closedのまま常時blockedに縮小するとCheckpointの
 「安全確認後にcleanupのclosed questionへ到達する」目的を失う。
 
-**再仕様化（P1-1〜P1-3 / P2-1）**: Codex独立技術レビュー `#5261980663` と ChatGPT要件差し戻しにより、
-旧単一 `PATH_CHAIN`（`LOCK_ROOT`→`RUN_ROOT` 直結）と device ID 単独 mount 判定、
-cleanup への writer bootstrap 流用が不十分と判明。`LOCK_CHAIN`/`RUN_CHAIN` 分離、
-lock bootstrap 限定（`RUN_LOCK` 前は lock 系のみ）、cleanup read-only（missing path 作成禁止・
-`OpenOrCreate` 禁止）へ再同期した。
+**再仕様化（instance binding / Codex P1/P2）**: Codex独立技術レビュー `#5263502982`（P1:
+`scratch-completion/v1` が local run instance へ束縛されず cross-host/profile 誤結合可能、
+P2: Decision Log/PR本文の HEAD・review disposition 未同期）と ChatGPT再判定 `#5263568325` により、
+local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-instance/v1` marker、
+`scratch-completion/v2`、v1 非受理・推測昇格禁止へ再同期した。旧 proposal `#5263051242` /
+旧 approval `#5263099857` は本再仕様化後の実装許可として流用しない。新 proposal `#5263694044`、
+新 `HUMAN_APPROVAL_RECORD: v2` `#5263876000`、Codex PM route `#5263894169`（route=cursor）が
+本再仕様化後の実装開始正本。
 
 ## 採用する方針
 
@@ -3742,26 +3755,29 @@ cleanup execution に流用しない。
 | 項目 | 結果 | 証跡 |
 |---|---|---|
 | Draft PR | 作成済み | PR #132 |
-| canonical proposal（再仕様化） | 固定 | #5263051242 |
-| HUMAN_APPROVAL_RECORD | implementation_start approved | #5263099857 |
-| Codex PM route | route=cursor | #5263113733 |
-| 旧 implementation_start approval | **inactive / 流用不可**（旧proposal用監査記録） | #5262190892 |
-| ChatGPT要件レビュー | pending | 未実施（本再仕様化後） |
-| Codex独立技術レビュー | pending | 未実施（本再仕様化後） |
-| `HIGH_RISK_TECH_GATE` | pending | 両レビュー完了前に進まない |
+| canonical proposal（再仕様化後） | 固定 | #5263694044 |
+| HUMAN_APPROVAL_RECORD: v2 | implementation_start approved | #5263876000 |
+| Codex PM route（再仕様化後） | route=cursor | #5263894169 |
+| 旧 canonical proposal | **非流用**（再仕様化前監査記録） | #5263051242 |
+| 旧 `implementation_start` approval | **非流用**（再仕様化前監査記録） | #5263099857 |
+| 旧 Codex PM route | inactive（旧proposal用） | #5263113733 |
+| Codex独立技術レビュー（P1/P2指摘時） | request-changes risk=high | #5263502982 |
+| ChatGPT再判定（P1 supersede） | request-changes risk=high | #5263568325 |
+| ChatGPT要件レビュー（本実装 fixed HEAD） | **未実施** | 新 fixed HEAD 待ち |
+| Codex独立技術レビュー（本実装 fixed HEAD） | **未実施** | 新 fixed HEAD 待ち |
+| `HIGH_RISK_TECH_GATE` | blocked / pending | 両レビュー完了前に進まない |
 | merge scope | 未承認 | `HIGH_RISK_TECH_GATE: passed` 後 |
 | `settings_apply` | 未承認 | — |
 | `execution` / 実cleanup | 未承認・未実行 | カテゴリ④別 scope |
-| fixed HEAD（再仕様化実装） | `797c77cbc175c205b34360057469ac6071b48663` | Cursor再仕様化commit |
-| fixed tip（branch） | `5743570e4cf36eef91b064e709bd6a85977278c7` | decisions同期後 tip（検証・CI対象） |
+| fixed tip（branch） | `e8658f066bf5ddc1f65414573b70bea27846b7d9` | instance binding 実装 fixed HEAD |
 
 ## 次アクション
 
-- [x] Codex PM 再proposal（#5263051242）
-- [x] 人間 `implementation_start` approve（#5263099857）
-- [x] Codex PM route 確定（#5263113733 / route=cursor）
-- [x] Cursor による再仕様化実装（本エントリ・4ファイル文書）
-- [x] fixed HEAD で expected workflow 2本 success（`5743570` / runs `31570710949`・`31570696270`）
-- [ ] ChatGPT 要件レビュー（本再仕様化後）
-- [ ] Codex 独立技術レビュー（本再仕様化後）
+- [x] Codex PM 新proposal（#5263694044）
+- [x] 人間 `implementation_start` approve（#5263876000 / HUMAN_APPROVAL_RECORD: v2）
+- [x] Codex PM route 確定（#5263894169 / route=cursor）
+- [x] Cursor による instance binding 再仕様化実装（固定4ファイル）
+- [ ] fixed HEAD で expected workflow 2本 success（commit/push 後に同期）
+- [ ] ChatGPT 要件レビュー（本実装 fixed HEAD）
+- [ ] Codex 独立技術レビュー（本実装 fixed HEAD）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

@@ -23,15 +23,22 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   指示だけでなくブランチ保護を最終防衛に置く。
 - 一時ファイルはOS identity由来のtrusted home配下のrun固有scratch（
   `CACHE_ROOT=<TRUSTED_HOME>/.cache`、`SCRATCH_BASE=<CACHE_ROOT>/ai-harness-scratch`、
-  `RUN_ROOT=<SCRATCH_BASE>/<repo_slug>/<run_id>/`）に限定する。
+  `RUN_ROOT=<SCRATCH_BASE>/<repo_slug>/<run_id>/`、
+  `RUN_INSTANCE_MARKER=<RUN_ROOT>/.ai-harness-run-instance`）に限定する。
+  **`repo_slug` / `run_id` は path/lock 識別子のみ。それ単独を provenance 証明に使わない。**
+  **local `scratch-instance/v1` marker の nonce から再計算した commitment と
+  `scratch-completion/v2` の `instance_commitment` exact 一致が cleanup provenance の必須条件。**
+  `instance_nonce` は local-only（GitHub・ログへ出さない）。commitment のみ公開記録可。
   `LOCK_ROOT`（`<SCRATCH_BASE>/.locks/<repo_slug>/`）と `RUN_ROOT` は兄弟系統であり、
   `COMMON_PREFIX`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE`）、
   `LOCK_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→LOCK_BASE→LOCK_ROOT→RUN_LOCK`）と
   `RUN_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する
   （単一 `PATH_CHAIN` ではない）。
   writerは lock 系 directory（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
-  `RUN_LOCK` 取得後にのみ `RUN_BASE`/`RUN_ROOT`/payload を作成する。既存 safe `RUN_ROOT` は
-  `run_root_collision` で blocked（再利用・resume 禁止）。
+  `RUN_LOCK` 取得後に `RUN_BASE`/`RUN_ROOT` を作成し、**payload 前に fresh 256-bit `instance_nonce` と
+  `RUN_INSTANCE_MARKER`（create-new/read-back）を作成**する。既存 safe `RUN_ROOT` は
+  `run_root_collision` で blocked（再利用・resume 禁止）。completion は `scratch-completion/v2`
+  （`instance_commitment` のみ。v1 非受理）。
   writerとcleanupは同一 `RUN_LOCK` を non-blocking exclusive で必ず取得する
   （Linux: flock / Windows writer: `OpenOrCreate`+`FileShare=None`、
   Windows cleanup: 既存 lock file のみ open・`OpenOrCreate` 禁止）。
@@ -42,10 +49,11 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   Linux/WSLのbind mount判定は device ID 照合だけに依存せず mount table/mountinfo を用い、
   評価不能は `path_safety_unknown` で blocked。
   scratch初回write前にOS別path safetyを検証する。provenanceの権威入力は
-  exact GitHub completion record 1件（相対 `scratch_rel` のみ。absolute homeは記録しない）。
+  exact GitHub **`scratch-completion/v2`** 1件と local marker からの commitment 再計算の exact 一致
+  （相対 `scratch_rel` のみ。absolute homeは記録しない。`run_id` 単独・v1・path名推測は不可）。
   cleanupは filesystem 上に新規 directory/file/lock を一切作成しない read-only 契約。
-  cleanup inventory は `run-inventory/v1` canonical snapshot（`inventory_version`/`inventory_digest`/
-  `entry_count` の3点exact比較。full entry list は GitHub へ書かない）。
+  cleanup inventory は `run-inventory/v1` canonical snapshot（`RUN_INSTANCE_MARKER` を含む。
+  pre/post で `inventory_version`/`inventory_digest`/`entry_count` の3点exact比較。不一致は `inventory_changed`）。
   cleanup は `RUN_ROOT` と全 descendant へ recursive path safety を適用する（nested mount/bind mount/
   reparse 拒否。詳細は正本参照）。
   通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` に対するread-only技術ゲート全成立後に

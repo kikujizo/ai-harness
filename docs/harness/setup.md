@@ -282,20 +282,29 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
 
 - **fresh `.cache` missing — writer成功**: `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` が
   missing でも、writer が `CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` を各1段作成→直後再検証後、
-  `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→payload write→
-  completion record 作成を確認する（`RUN_LOCK` 前に run 側を作成しない）。
+  `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→
+  **fresh 256-bit `instance_nonce` 生成→`RUN_INSTANCE_MARKER` create-new/read-back→commitment 算出**→
+  payload write→`scratch-completion/v2`（`instance_commitment` のみ）作成を確認する
+  （`RUN_LOCK` 前に run 側を作成しない。marker 検証前に payload を書かない）。
 - **fresh writer bootstrap成功**: `LOCK_ROOT` missing かつ `RUN_ROOT` missing で、
   lock bootstrap（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` のみ1段作成→直後再検証）後に
-  `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→payload write→
-  completion record 作成を確認する。
+  `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→
+  marker 作成・検証→payload write→`scratch-completion/v2` 作成を確認する。
 - **bootstrap安全性不明（否定例・EARLY）**: `LOCK_ROOT` 親の path safety を証明できない状況を渡し、
   `result=blocked` `stop_reason=path_safety_unknown` `run_lock_created=false`
   `run_root_created=false` とし、`RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 作成が行われないことを確認する。
 - **existing `RUN_ROOT` collision（否定例・EARLY）**: `RUN_LOCK` exclusive 取得後、
   `RUN_ROOT` が既に safe directory として存在する状況を渡し、`result=blocked`
-  `stop_reason=run_root_collision` `payload_written=false` `completion_record_created=false`
-  `existing_run_root_modified=false` とし、payload write・completion record・既存 root 変更が
-  行われないことを確認する（A6 collision 分岐は path safety 優先と排他。collision 後に payload write へ進まない）。
+  `stop_reason=run_root_collision` `instance_marker_created=false` `payload_written=false`
+  `completion_record_created=false` `existing_run_root_modified=false` とし、payload write・
+  marker 作成・completion record・既存 root 変更が行われないことを確認する。
+- **cross-host/profile 同 `repo_slug/run_id` — provenance mismatch（否定例）**:
+  GitHub `scratch-completion/v2` の `instance_commitment` と local marker nonce から再計算した
+  commitment が不一致の状況を渡し、`result=blocked` `stop_reason=provenance_mismatch`
+  `cleanup=false` `approval_reusable=false` となることを確認する（`run_id` 単独では受理しない）。
+- **marker missing / unreadable / invalid（否定例）**: exact completion v2 が存在し `RUN_ROOT` 存在、
+  `RUN_INSTANCE_MARKER` missing/unreadable/invalid を渡し、`result=blocked`
+  `stop_reason=provenance_unknown` `cleanup=false` となることを確認する。
 - **nested mount / bind mount / reparse（否定例・cleanup）**: `RUN_ROOT` 自体は safe だが subtree に
   Linux bind mount または Windows reparse point が存在する状況を渡し、`result=blocked`
   `stop_reason=path_safety_failed` `inventory_accepted=false` `cleanup=false` となることを確認する。
@@ -332,8 +341,9 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `path_created=false` とし、cleanup で directory/file/lock を新規作成しないことを確認する。
 - **cleanup OpenOrCreate禁止（否定例）**: Windows cleanup で `RUN_LOCK` missing を渡し、
   `OpenOrCreate` を使わず blocked となること。writer bootstrap 規則を cleanup へ流用しないことを確認する。
-- **provenance不足（否定例）**: `provenance_record_url=missing_or_unreadable` を渡し、
-  `result=blocked`、`stop_reason=provenance_unknown`、`cleanup=false` となることを確認する。
+- **provenance不足（否定例）**: completion v2 不在/v1のみ/unreadable または marker 不在を渡し、
+  `result=blocked`、`stop_reason=provenance_unknown`、`cleanup=false` となることを確認する
+  （`scratch-completion/v1` を v2 へ推測昇格しない）。
 - **cleanup技術ゲート未成立停止**: `identity_root=unknown`、`provenance=unknown`、
   `run_state=active_or_unknown`、`path_safety=unknown`、または `inventory_changed=true` を渡し、
   人間approveがあっても `result=blocked`、`cleanup=false` となることを確認する。
@@ -358,37 +368,38 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
 共通環境: current base SHA `c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188`、branch
 `cursor/issue-54-scratch-cleanup-boundary`、4ファイル文書のみ（実cleanup・追加script・
 repo内lock実装ファイルなし）。`RUN_LOCK` はruntime空ファイルでありGit diffに含めない。
-merge / settings_apply / execution / cleanup は未実行。
+merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は GitHub へ記録しない。
 
 ##### fail-closed 8基準（実装後照合・actual diff根拠）
 
 | criterion | result | basis | next_action |
 |---|---|---|---|
-| `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止 | continue |
+| `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift・marker/commitment mismatch を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止 | continue |
 | `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールド。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
-| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否）。A1/B1 `.`/`..` exact拒否 | continue |
-| `persistent-claim-bypass` | not_applicable | Issue #54 は永続claim・lock file存在を活動証明に使わない契約のみ導入。persistent-claim-bypass機構は未導入 | continue |
-| `verify-before-mutate` | pass | A4 `CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` 1段bootstrap→A5 lock→A6 run側作成（既存safe `RUN_ROOT`はcollisionで無変更）。B pre/post revalidation・inventory exact比較後のみdelete | continue |
-| `provenance-no-fabrication` | pass | exact `scratch-completion/v1` record 1件のみ。path/repo-wide 検索推測禁止を `ai-workflow.mdc` B2 に明記 | continue |
-| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。post-approve non-blocking exclusive 再取得・inventory drift 検出 | continue |
+| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
+| `persistent-claim-bypass` | pass | local marker は create-new/no-overwrite・collision・payload による marker 変更禁止・completion v2 exact binding・pre/post 再取得で bypass 不可（Issue #54 §fail-closed 8） | continue |
+| `verify-before-mutate` | pass | A4 bootstrap→A5 lock→A6 run 作成→**A7 marker create/verify→A8 payload**。cleanup pre/post で marker binding・inventory exact 比較後のみ将来 delete | continue |
+| `provenance-no-fabrication` | pass | `scratch-completion/v2` + local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。post-approve reacquire・marker/commitment mismatch・inventory drift 検出 | continue |
 | `override-test-hook-isolation` | not_applicable | Issue #54 は override/test hook を導入しない（4ファイル文書のみ） | continue |
 
 ##### 否定テスト観測例（文書契約・EARLY非実行の証明）
 
 | 入力 | 期待出力 | EARLY証明 |
 |---|---|---|
-| fresh `.cache` missing（writer） | `scratch_created=true`（`CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` bootstrap後 lock取得） | `RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成 |
-| existing safe `RUN_ROOT`（writer） | `result=blocked` `stop_reason=run_root_collision` `payload_written=false` `existing_run_root_modified=false` | A6 collision 分岐。path safety 後・payload write 前に停止 |
+| fresh `.cache` missing（writer） | `scratch_created=true`（bootstrap 後 lock→run 作成→marker→payload） | `RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成。marker 検証前 payload 未作成 |
+| existing safe `RUN_ROOT`（writer） | `result=blocked` `stop_reason=run_root_collision` `instance_marker_created=false` `payload_written=false` | A6 collision。marker/payload 前に停止 |
+| cross-host/profile 同 `repo_slug/run_id` | `result=blocked` `stop_reason=provenance_mismatch` `cleanup=false` `approval_reusable=false` | B6 marker commitment と v2 不一致で inventory/cleanup 未宣言 |
+| marker missing/invalid | `result=blocked` `stop_reason=provenance_unknown` `cleanup=false` | B4/B6 で marker 必須。v1 受理・推測昇格なし |
 | nested mount / bind mount / reparse（cleanup） | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B6 recursive safety 完了前に inventory/cleanup 未宣言 |
 | post-approve `RUN_LOCK` conflict | `result=blocked` `stop_reason=run_lock_conflict` `cleanup=false` `approval_reusable=false` | B8 既存 lock のみ open・新規作成なし |
-| `repo_slug=..` または `run_id=..` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` `run_root_created=false` `path_created=false` | A1/B1 失敗後 lock bootstrap・`RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 未作成 |
-| `repo_slug=.` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` `run_root_created=false` `path_created=false` | 同上（`"."` exact 拒否） |
-| `LOCK_ROOT` 親 safety 不明 | `result=blocked` `stop_reason=path_safety_unknown` `run_root_created=false` | lock bootstrap 失敗後 `RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 未作成 |
+| `repo_slug=..` または `run_id=..` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` | A1/B1 失敗後 lock bootstrap・marker・payload 未作成 |
+| `LOCK_ROOT` 親 safety 不明 | `result=blocked` `stop_reason=path_safety_unknown` `run_root_created=false` | bootstrap 失敗後 marker/payload 未作成 |
 | mountinfo 評価不能 | `result=blocked` `stop_reason=path_safety_unknown` `scratch_created=false` | device ID 照合だけで pass しない |
-| `USERPROFILE`/`HOME` が `TRUSTED_HOME` と不一致 | `result=blocked` `stop_reason=identity_root_mismatch` `scratch_created=false` `cleanup=false` | mkdir/write・completion record・cleanupより前に停止 |
-| cleanup で `RUN_ROOT` missing | `result=blocked` `cleanup=false` `path_created=false` | cleanup で path/lock 新規作成なし |
-| 同一runで `run_lock=conflict` | `result=blocked` `stop_reason=run_lock_conflict` `cleanup=false` | steal・待機・lock file削除なし |
-| approve後 `inventory_changed=true` | `result=blocked` `stop_reason=inventory_changed` `approval_reusable=false` | 古いapproveでの削除継続なし |
+| `USERPROFILE`/`HOME` が `TRUSTED_HOME` と不一致 | `result=blocked` `stop_reason=identity_root_mismatch` | mkdir/marker/payload/cleanup より前に停止 |
+| cleanup で `RUN_ROOT` または marker missing | `result=blocked` `cleanup=false` `path_created=false` | cleanup で path/lock/marker 新規作成なし |
+| `scratch-completion/v1` のみ | `result=blocked` `stop_reason=provenance_unknown` `cleanup=false` | v1 受理・v2 推測昇格禁止（B2） |
+| approve後 `inventory_changed=true` | `result=blocked` `stop_reason=inventory_changed` `approval_reusable=false` | 古い approve で削除継続なし |
 | approve後 provenance drift | `result=blocked` `stop_reason=approval_stale` `cleanup=false` | post-approve 再検証で drift 検出 |
 
 ## 既存リポジトリへの導入（差分マージ方式）

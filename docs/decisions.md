@@ -3511,8 +3511,6 @@ Issue #85 / #128 で、harness-sync 同期 PR の base が `main` 以外（featu
 
 ---
 
----
-
 # Decision: 高リスク承認v2契約の実効ルール同期（Issue #133）
 
 Date: 2026-08-10

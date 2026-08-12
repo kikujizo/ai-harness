@@ -42,11 +42,22 @@ Cursor-specific rules only:
      `TRUSTED_HOME` = `getent passwd <CURRENT_UID>` 第6フィールド（`HOME`/`~` は正本にしない。
      不一致 → `identity_root_mismatch`）。取得不能/0/複数/path不正 → `identity_root_unresolved`
   3. segment検証: `repo_slug` / `run_id` は `[A-Za-z0-9._-]+` の1 segmentのみ。不正 → `invalid_run_segment`
-  4. path-chain safety（`TRUSTED_HOME`→`SCRATCH_BASE`→`LOCK_ROOT`→`RUN_ROOT`）: Linux/WSL は
-     symlink/owner==UID/group+world write(0022)/新規mount/special/canonical配下を検証。
-     Windows は reparse/ACL（current SID・SYSTEM・Administrators 以外の write/modify/delete 拒否）/
-     canonical境界を検証。ACL評価不能 → `path_safety_unknown`。unsafe → `path_safety_failed`。
-     証明不能 → blocked。追加package自動導入禁止
+  4. path-chain safety — `PATH_CHAIN = TRUSTED_HOME → SCRATCH_BASE → LOCK_ROOT → RUN_ROOT`
+     （`SCRATCH_BASE=<TRUSTED_HOME>/.cache/ai-harness-scratch`）。
+     既存 component ごとに read-only 検証を先に実行（EARLY: unknown を safe 扱いしない・package 導入禁止）:
+     **Linux/WSL**: symlink 拒否；owner UID == `CURRENT_UID`；group/world write bits `0022` 拒否；
+     `TRUSTED_HOME` より下の新規 mountpoint/bind mount 拒否（device ID 照合）；
+     ACL 評価可能なら `CURRENT_UID` 以外への write 拒否、**評価不能 → `path_safety_unknown`**
+     （soft-skip 禁止）；regular file/directory 以外の special entry 拒否；
+     canonical path は `TRUSTED_HOME` 配下から出ない。
+     **Windows**: reparse（symlink/junction/volume mountpoint 等）拒否；**owner と ACL** を取得し、
+     current SID / SYSTEM / BUILTIN\Administrators 以外 principal への write/modify/delete 相当を拒否；
+     ACL/owner 評価不能 → `path_safety_unknown`；通常 file/directory 以外または type 不明を拒否；
+     canonical full path は `TRUSTED_HOME` の component 境界内。
+     いずれか失敗 → `path_safety_failed` または `path_safety_unknown` → `result=blocked`（EARLY）。
+     **missing component**: 検証済み safe 親の直下に **1 段だけ** 作成 → **直後に同一 OS 検査で再検証**。
+     複数段を intervening re-verify なしで作成禁止。re-verify 省略禁止。再検証後のみ次段へ。
+     path-chain 未成立のまま A-5 以降（lock 取得・mkdir/write）へ進まない（EARLY呼禁止）
   5. `RUN_LOCK` を初回 mkdir/write **より前**に non-blocking exclusive 取得
      （Linux: flock on FD / Windows: FileStream FileShare=None）。不能 → `run_lock_unavailable`、
      競合 → `run_lock_conflict`（待機・steal・lock file削除禁止）
@@ -61,7 +72,8 @@ Cursor-specific rules only:
   **B. cleanup candidate（本PRは契約のみ。実delete禁止）** pre-approval read-only:
   1. identity-root再実行 2. segment検証 3. exact provenance record取得・照合（path/repo-wide検索から推測しない。
      不在/不一致 → `provenance_unknown`/`provenance_mismatch`；`residue=none` は候補外）
-  4. path chain再検証 5. 同一 `RUN_LOCK` non-blocking exclusive 6. lock保持中に
+  4. path chain再検証（A-4 と同一の `PATH_CHAIN`・OS別検査・missing は1段作成+直後再検証のみ。
+     `path_safety_failed`/`path_safety_unknown` → EARLY blocked）5. 同一 `RUN_LOCK` non-blocking exclusive 6. lock保持中に
      target/owner/mode/ACL/reparse/mount/special/escape検証 7. lock保持中 inventory +
      `run_state=completed` 8. 技術ゲート成立後 lock解放 → exact target+operation の closed question。
   人間approve（**別 `execution` scope**・本PRの implementation_start/merge record流用禁止）後:

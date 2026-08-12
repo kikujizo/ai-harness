@@ -3772,6 +3772,15 @@ cleanup execution に流用しない。
 | implementation tip | `a3aeac84725cd7be0313c2049dabb48651b41c94` | instance binding 実装（中間 `e8658f0` は権威化しない） |
 | Fail-closed success propagation @ `a3aeac8` | **success** | run `31577773018` |
 | Issue manifest diff @ `a3aeac8` | **FAIL** `manifest_missing` | run `31577792954`。Issue #54 本文に `issue-change-manifest:v1` 欠落。復旧は Issue 本文更新（固定4ファイル外）→ Codex PM |
+| Issue #54 本文 `issue-change-manifest:v1` 復旧 | 完了 | 固定4ファイルmanifestとして復旧済み（Codex PM route再評価 #5264655488 で照合済み） |
+| PR #132 本文構造復旧 | 完了 | 本文が単一行化・文字化けしていた構造破損を、ChatGPTがmetadataのみで復旧（HEAD変更なし） |
+| **現 fixed tip（PR #132 HEAD）** | `1bd64cb19b5187a1ba104f8fd3dd09c1c6f3d577` | tip `a3aeac8` と CI disposition を同期したdocsコミット。以後 manifest復旧・本文復旧を経てもHEAD不変 |
+| Fail-closed success propagation @ `1bd64cb` | **success** | run [31578332485](https://github.com/kikujizo/ai-harness/actions/runs/31578332485) |
+| Issue manifest diff @ `1bd64cb` | **success** | run [31580948676](https://github.com/kikujizo/ai-harness/actions/runs/31580948676)（manifest復旧・PR本文復旧後の再実行） |
+| ChatGPT要件レビュー（fixed HEAD `1bd64cb`） | **request-changes** risk=high | [#5264631720](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5264631720)。AC1/AC2/AC3/AC5 ○、**AC4 ×**（本Decision Logの最終HEAD・CI・review disposition未同期） |
+| Claude Code 例外委譲（CI復旧確認・記録限定） | 完了 | [#5264479320](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264479320) 委譲 → [#5264545733](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264545733) 記録 |
+| Codex PM route再評価（AC4修正のactor候補） | `PM_VERDICT: approve risk=high gate=human_approval` / `PROPOSED_ROUTE: claude-code` | [#5264655488](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264655488) / proposal本文 [#5264648223](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5264648223)。既存承認 `#5263876000`（`proposed_route=cursor`）はactor変更へ流用不可のため新規承認が必要と判定 |
+| HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=docs/decisions.md最小同期） | **approve** | [#5264680032](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264680032)。`docs/decisions.md`のみが対象。他3ファイル・merge・settings_apply・execution・実cleanupへは流用しない |
 
 ## 次アクション
 
@@ -3779,8 +3788,13 @@ cleanup execution に流用しない。
 - [x] 人間 `implementation_start` approve（#5263876000 / HUMAN_APPROVAL_RECORD: v2）
 - [x] Codex PM route 確定（#5263894169 / route=cursor）
 - [x] Cursor による instance binding 再仕様化実装（固定4ファイル）
-- [ ] Codex PM: Issue #54 本文へ `issue-change-manifest:v1` を復旧（4ファイル外・`manifest_missing` 解消）
-- [ ] fixed HEAD で expected workflow 2本 success
-- [ ] ChatGPT 要件レビュー（本実装 fixed HEAD）
+- [x] Codex PM: Issue #54 本文へ `issue-change-manifest:v1` を復旧（4ファイル外・`manifest_missing` 解消）
+- [x] fixed HEAD `1bd64cb` で expected workflow 2本 success（manifest diff run `31580948676` / success propagation run `31578332485`）
+- [x] ChatGPT 要件レビュー（fixed HEAD `1bd64cb`、#5264631720）→ **request-changes risk=high**（AC4のみ未充足）
+- [x] Codex PM route再評価・新HUMAN_APPROVAL_RECORD: v2（route=claude-code、#5264680032）→ `docs/decisions.md` 最小同期をClaude Codeへ委譲確定
+- [x] Claude Code による `docs/decisions.md` 最小同期（本コミット。他3ファイルは変更しない）
+- [ ] 新HEAD（本コミット後）で `git diff --check` と固定4ファイル以内であることを確認
+- [ ] 新HEADで expected workflow 2本 success再確認
+- [ ] ChatGPT 再要件レビュー（AC4解消確認）
 - [ ] Codex 独立技術レビュー（本実装 fixed HEAD）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

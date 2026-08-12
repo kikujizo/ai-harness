@@ -3752,7 +3752,7 @@ cleanup execution に流用しない。
 | merge scope | 未承認 | `HIGH_RISK_TECH_GATE: passed` 後 |
 | `settings_apply` | 未承認 | — |
 | `execution` / 実cleanup | 未承認・未実行 | カテゴリ④別 scope |
-| fixed HEAD（再仕様化実装） | （commit後に記入） | — |
+| fixed HEAD（再仕様化実装） | `797c77cbc175c205b34360057469ac6071b48663` | Cursor再仕様化commit |
 
 ## 次アクション
 

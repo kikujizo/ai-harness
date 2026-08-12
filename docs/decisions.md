@@ -3763,13 +3763,15 @@ cleanup execution に流用しない。
 | 旧 Codex PM route | inactive（旧proposal用） | #5263113733 |
 | Codex独立技術レビュー（P1/P2指摘時） | request-changes risk=high | #5263502982 |
 | ChatGPT再判定（P1 supersede） | request-changes risk=high | #5263568325 |
-| ChatGPT要件レビュー（本実装 fixed HEAD） | **未実施** | 新 fixed HEAD 待ち |
-| Codex独立技術レビュー（本実装 fixed HEAD） | **未実施** | 新 fixed HEAD 待ち |
+| ChatGPT要件レビュー（本実装 fixed HEAD） | **未実施** | implementation tip `a3aeac8` 待ち（AC5未充足） |
+| Codex独立技術レビュー（本実装 fixed HEAD） | **未実施** | 同上 |
 | `HIGH_RISK_TECH_GATE` | blocked / pending | 両レビュー完了前に進まない |
 | merge scope | 未承認 | `HIGH_RISK_TECH_GATE: passed` 後 |
 | `settings_apply` | 未承認 | — |
 | `execution` / 実cleanup | 未承認・未実行 | カテゴリ④別 scope |
-| fixed tip（branch） | `e8658f066bf5ddc1f65414573b70bea27846b7d9` | instance binding 実装 fixed HEAD |
+| implementation tip | `a3aeac84725cd7be0313c2049dabb48651b41c94` | instance binding 実装（中間 `e8658f0` は権威化しない） |
+| Fail-closed success propagation @ `a3aeac8` | **success** | run `31577773018` |
+| Issue manifest diff @ `a3aeac8` | **FAIL** `manifest_missing` | run `31577792954`。Issue #54 本文に `issue-change-manifest:v1` 欠落。復旧は Issue 本文更新（固定4ファイル外）→ Codex PM |
 
 ## 次アクション
 
@@ -3777,7 +3779,8 @@ cleanup execution に流用しない。
 - [x] 人間 `implementation_start` approve（#5263876000 / HUMAN_APPROVAL_RECORD: v2）
 - [x] Codex PM route 確定（#5263894169 / route=cursor）
 - [x] Cursor による instance binding 再仕様化実装（固定4ファイル）
-- [ ] fixed HEAD で expected workflow 2本 success（commit/push 後に同期）
+- [ ] Codex PM: Issue #54 本文へ `issue-change-manifest:v1` を復旧（4ファイル外・`manifest_missing` 解消）
+- [ ] fixed HEAD で expected workflow 2本 success
 - [ ] ChatGPT 要件レビュー（本実装 fixed HEAD）
 - [ ] Codex 独立技術レビュー（本実装 fixed HEAD）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

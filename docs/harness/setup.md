@@ -303,6 +303,10 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `USERPROFILE=C:\Temp\fake`、または getent home=`/home/alice` かつ `HOME=/tmp/fake` を渡し、
   `result=blocked`、`stop_reason=identity_root_mismatch`、`scratch_created=false`、`cleanup=false`
   とし、mkdir/write・completion record・cleanupが呼ばれないことを確認する。
+- **invalid segment（否定例・EARLY）**: `repo_slug=.` または `repo_slug=..`、または
+  `run_id=.` / `run_id=..` を渡し、`result=blocked` `stop_reason=invalid_run_segment`
+  `scratch_created=false` `run_root_created=false` `path_created=false` `cleanup=false` とし、
+  A1/B1 失敗後に A4–A6 / B3–B5 へ進まないことを確認する（`"."`/`".."` は regex より先に exact 拒否）。
 - **run lock競合（否定例・EARLY）**: 同一 `repo_slug/run_id` で `run_lock=conflict` を渡し、
   `result=blocked`、`stop_reason=run_lock_conflict`、`cleanup=false` とし、待機・steal・
   lock file削除による突破がないことを確認する。
@@ -345,9 +349,9 @@ merge / settings_apply / execution / cleanup は未実行。
 |---|---|---|---|
 | `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止 | continue |
 | `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールド。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
-| `path-chain-safety` | pass | A3/B3 で `LOCK_CHAIN`/`RUN_CHAIN` 別検証。Linux mountinfo 必須・device ID 単独依存禁止。ACL unknown / bind mount 判定不能 → `path_safety_unknown` | continue |
+| `path-chain-safety` | pass | A1/B1 で `"."`/`".."` exact 拒否→regex 1 segment。A3/B3 で `LOCK_CHAIN`/`RUN_CHAIN` 別検証。Linux mountinfo 必須・device ID 単独依存禁止。ACL unknown / bind mount 判定不能 → `path_safety_unknown` | continue |
 | `persistent-claim-bypass` | not_applicable | 永続claim・lock file存在を活動証明に使わない契約のみ。OS排他（flock/FileShare=None）を正本に限定 | continue |
-| `verify-before-mutate` | pass | A4 lock bootstrap→A5 lock取得→A6 run側作成の順。B は read-only・missing path 作成禁止・`OpenOrCreate` cleanup 禁止 | continue |
+| `verify-before-mutate` | pass | A1/B1 segment 検証（`"."`/`".."` exact 拒否）後のみ A4 lock bootstrap→A5 lock取得→A6 run側作成。B は read-only・missing path 作成禁止・`OpenOrCreate` cleanup 禁止 | continue |
 | `provenance-no-fabrication` | pass | exact `scratch-completion/v1` record 1件のみ。path/repo-wide 検索推測禁止を `ai-workflow.mdc` B2 に明記 | continue |
 | `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。approve 後は再取得から削除完了まで保持 | continue |
 | `override-test-hook-isolation` | not_applicable | override/test hook を導入しない（4ファイル文書のみ） | continue |
@@ -356,6 +360,8 @@ merge / settings_apply / execution / cleanup は未実行。
 
 | 入力 | 期待出力 | EARLY証明 |
 |---|---|---|
+| `repo_slug=..` または `run_id=..` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` `run_root_created=false` `path_created=false` | A1/B1 失敗後 lock bootstrap・`RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 未作成 |
+| `repo_slug=.` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` `run_root_created=false` `path_created=false` | 同上（`"."` exact 拒否） |
 | `LOCK_ROOT` 親 safety 不明 | `result=blocked` `stop_reason=path_safety_unknown` `run_root_created=false` | lock bootstrap 失敗後 `RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 未作成 |
 | mountinfo 評価不能 | `result=blocked` `stop_reason=path_safety_unknown` `scratch_created=false` | device ID 照合だけで pass しない |
 | `USERPROFILE`/`HOME` が `TRUSTED_HOME` と不一致 | `result=blocked` `stop_reason=identity_root_mismatch` `scratch_created=false` `cleanup=false` | mkdir/write・completion record・cleanupより前に停止 |

@@ -35,12 +35,13 @@ Cursor-specific rules only:
   **role**: `writer` | `cleanup`（bootstrap規則の流用禁止。cleanupはwriterのmissing作成規定を適用しない）。
   **chain種別**: `LOCK_CHAIN` | `RUN_CHAIN` | `COMMON_PREFIX`（単一 `PATH_CHAIN` へ戻さない）。
   **配置**（`LOCK_ROOT` と `RUN_ROOT` は兄弟系統。単一chainとして扱わない）:
-  `SCRATCH_BASE=<TRUSTED_HOME>/.cache/ai-harness-scratch`、`LOCK_BASE=<SCRATCH_BASE>/.locks`、
-  `LOCK_ROOT=<LOCK_BASE>/<repo_slug>/`、`RUN_LOCK=<LOCK_ROOT>/<run_id>.lock`、
-  `RUN_BASE=<SCRATCH_BASE>/<repo_slug>/`、`RUN_ROOT=<RUN_BASE>/<run_id>/`。
-  `COMMON_PREFIX = TRUSTED_HOME → SCRATCH_BASE`。
-  `LOCK_CHAIN = TRUSTED_HOME → SCRATCH_BASE → LOCK_BASE → LOCK_ROOT → RUN_LOCK`。
-  `RUN_CHAIN  = TRUSTED_HOME → SCRATCH_BASE → RUN_BASE → RUN_ROOT`。
+  `CACHE_ROOT=<TRUSTED_HOME>/.cache`、`SCRATCH_BASE=<CACHE_ROOT>/ai-harness-scratch`、
+  `LOCK_BASE=<SCRATCH_BASE>/.locks`、`LOCK_ROOT=<LOCK_BASE>/<repo_slug>/`、
+  `RUN_LOCK=<LOCK_ROOT>/<run_id>.lock`、`RUN_BASE=<SCRATCH_BASE>/<repo_slug>/`、
+  `RUN_ROOT=<RUN_BASE>/<run_id>/`。
+  `COMMON_PREFIX = TRUSTED_HOME → CACHE_ROOT → SCRATCH_BASE`。
+  `LOCK_CHAIN = TRUSTED_HOME → CACHE_ROOT → SCRATCH_BASE → LOCK_BASE → LOCK_ROOT → RUN_LOCK`。
+  `RUN_CHAIN  = TRUSTED_HOME → CACHE_ROOT → SCRATCH_BASE → RUN_BASE → RUN_ROOT`。
   `LOCK_ROOT` と `RUN_ROOT` を同一祖先chainとして検証しない。
   **EARLY呼禁止**（以下の停止時）: `RUN_BASE`/`RUN_ROOT`/payload の lock 取得前作成、cleanup での
   directory/file/lock 新規作成、`OpenOrCreate` を cleanup で使うこと、wait/steal/lock file 削除、
@@ -67,7 +68,7 @@ Cursor-specific rules only:
   ACL/owner 評価不能 → `path_safety_unknown`；通常 file/directory 以外または type 不明を拒否；
   canonical full path は `TRUSTED_HOME` の component 境界内。
   いずれか失敗 → `path_safety_failed` または `path_safety_unknown` → `result=blocked`（EARLY）
-  A4 lock bootstrap ONLY（`RUN_LOCK` 取得前。作成可は `SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` のみ。
+  A4 lock bootstrap ONLY（`RUN_LOCK` 取得前。作成可は `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` のみ。
   **`RUN_BASE`/`RUN_ROOT`/payload は作成禁止**。各 missing component について:
   (1) safe 親を read-only 検証 (2) **1 段だけ** 作成 (3) 直後に同一 OS 検査で再検証。
   複数段一括作成・再検証省略・別 path 作成は禁止。他 process が先に作成した場合は新規成功とみなさず
@@ -76,8 +77,15 @@ Cursor-specific rules only:
   A5 `RUN_LOCK` を open/create し non-blocking exclusive 取得
   （Linux: flock on FD / Windows writer: `FileMode=OpenOrCreate` + `FileShare=None`）。
   不能 → `run_lock_unavailable`、競合 → `run_lock_conflict`（待機・steal・lock file 削除禁止）
-  A6 **lock 保持後のみ** `RUN_CHAIN` を検証。missing は lock 保持中に safe 親直下へ **1 段作成→直後再検証**。
-  `RUN_ROOT` 安全成立後のみ scratch payload を create/write。scratch 活動終了まで lock 保持
+  A6 **lock 保持後のみ** `RUN_CHAIN` を検証。`RUN_BASE` missing は lock 保持中に safe 親直下へ
+  **1 段作成→直後再検証**可。`RUN_ROOT` missing も同様に safe `RUN_BASE` 直下へ **1 段作成→直後再検証**可。
+  **`RUN_ROOT` が既に存在し安全な directory であっても再利用・resume・上書きしない** →
+  `result=blocked` `stop_reason=run_root_collision` `payload_written=false`
+  `completion_record_created=false` `existing_run_root_modified=false`（collision 時は既存 root 無変更）。
+  `RUN_ROOT` が unsafe/type 不一致なら collision より path safety を優先し
+  `path_safety_failed|path_safety_unknown`。check→create 間に他 process が `RUN_ROOT` を作った場合も
+  再検証後 `run_root_collision` で blocked。`RUN_ROOT` 新規作成成功後のみ scratch payload を create/write。
+  scratch 活動終了まで lock 保持
   A7 lock 保持のまま exact GitHub completion record 1件を作成
   （`record_type=scratch-completion/v1`、`repo_full_name`、`repo_slug`、`run_id`、
   `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、`run_state=completed`、
@@ -95,16 +103,49 @@ Cursor-specific rules only:
   B5 **既存** `RUN_LOCK` を新規作成せず open し non-blocking exclusive 取得
   （Linux: open existing FD / Windows cleanup: **既存 lock file のみ open**。`OpenOrCreate` 禁止）。
   conflict/missing → blocked
-  B6 lock 保持中: path safety / inventory / `run_state=completed` を再検証
-  B7 技術ゲート成立後 lock 解放 → exact target + operation の closed question
+  B6 lock 保持中: `RUN_ROOT` 自体と**全 descendant** へ recursive path safety（no-follow）を適用し、
+  完了後に canonical inventory を取得し `run_state=completed` を確認する。
+  **Linux/WSL descendant**: symlink 拒否；owner UID == `CURRENT_UID`；group/world write bits `0022` 拒否；
+  mount table/mountinfo で `RUN_ROOT` 配下の nested mount / bind mount 拒否（取得・完全評価不能 →
+  `path_safety_unknown`）；ACL 評価可能なら current UID 以外 write 拒否（評価不能 → `path_safety_unknown`）；
+  special entry 拒否；canonical boundary 外拒否。
+  **Windows descendant**: reparse（symlink/junction/volume mountpoint 等）拒否；owner/ACL で current SID /
+  SYSTEM / BUILTIN\Administrators 以外 principal への write/modify/delete 相当拒否（評価不能 →
+  `path_safety_unknown`）；通常 file/directory 以外または type 不明拒否；canonical boundary 外拒否。
+  enumeration 中に entry 消失・増加・type 変化・確認不能は safe と推測しない。recursive safety 完了前に
+  inventory success や cleanup success を宣言しない。
+  **inventory（run-inventory/v1）**: `RUN_ROOT` 配下全 descendant の canonical recursive snapshot。
+  header=`run-inventory/v1\n`；directory: `D\t<path_b64>\n`；regular file:
+  `F\t<path_b64>\t<size_bytes>\t<sha256_lower_hex>\n`（`path_b64` = `RUN_ROOT` からの relative path を
+  separator `/` 正規化後 UTF-8 bytes を base64）。entry は `path_b64` ASCII 昇順 sort。header + 全 entry 行
+  UTF-8 連結 bytes の SHA-256 を `inventory_digest=sha256:<lower_hex>`、`entry_count` も保持。
+  GitHub へ記録してよいのは `inventory_version` / `inventory_digest` / `entry_count` のみ（full entry list・
+  absolute local path・payload 内容は書かない）。snapshot 取得不能 → `inventory_unavailable` `cleanup=false`。
+  B7 技術ゲート成立後 lock 解放 → exact target + operation + provenance identity + inventory digest/count を
+  含む closed question（`APPROVAL_SCOPE=execution`）
   B8 人間 approve（**別 `execution` scope**・implementation_start/merge record 流用禁止）後:
-  identity/provenance/`updated_at`/existing lock/path safety/run state/inventory を再取得。
-  drift → `approval_stale` blocked。削除開始までも **path 作成禁止**（実 cleanup は本 PR スコープ外）。
-  削除完了確認まで lock 保持。中断・部分失敗・結果確認不能は成功扱いしない。
-  **固定 stop_reason**（文字列コード。bool へ潰さない。新設禁止）:
+  (1) old FD/handle・old validation・old inventory result を捨てる。
+  (2) identity-root / provenance / `updated_at` を再取得。drift → `approval_stale` blocked。
+  (3) **既存** `RUN_LOCK` を B5 と同じ non-blocking exclusive 方式で再取得（新規作成・待機・steal・
+  lock file 削除禁止）。missing/conflict/unavailable → `run_lock_conflict` 等で blocked `cleanup=false`
+  `approval_reusable=false`。
+  (4) lock 保持中に named chains と `RUN_ROOT` subtree recursive path safety をゼロから再検証。
+  (5) lock 保持中に canonical inventory をゼロから再取得し、approved `inventory_version` /
+  `inventory_digest` / `entry_count` と exact 比較。不一致 → `inventory_changed` `cleanup=false`
+  `approval_reusable=false`。取得不能 → `inventory_unavailable` `cleanup=false`。
+  (6) `run_state=completed` / exact target / operation を再確認。全項目一致時のみ将来 executor が exact
+  `RUN_ROOT` 1件削除可能（本 PR は実 delete 禁止）。削除完了確認まで **同じ exclusive lock を保持**。
+  削除開始までも **path 作成禁止**。中断・部分失敗・結果確認不能は成功扱いしない。
+  **固定 stop_reason**（文字列コード。bool へ潰さない。本再仕様化で追加する新規 reason は
+  `run_root_collision` のみ）:
   `identity_root_unsupported` `identity_root_unresolved` `identity_root_mismatch`
   `invalid_run_segment` `path_safety_failed` `path_safety_unknown` `run_lock_unavailable`
-  `run_lock_conflict` `provenance_unknown` `provenance_mismatch` `run_state_not_completed`
-  `inventory_unavailable` `inventory_changed` `approval_stale` `cleanup_interrupted`
-  `cleanup_result_unknown`。各停止は `result=blocked`（成功丸め禁止）。
+  `run_lock_conflict` `run_root_collision` `provenance_unknown` `provenance_mismatch`
+  `run_state_not_completed` `inventory_unavailable` `inventory_changed` `approval_stale`
+  `cleanup_interrupted` `cleanup_result_unknown`。各停止は `result=blocked`（成功丸め禁止）。
+  評価順序: identity → segment → existing path safety / writer bootstrap → writer `RUN_LOCK` →
+  writer `RUN_ROOT` collision / `RUN_CHAIN` create → completion provenance → cleanup provenance /
+  named chain read-only → cleanup existing `RUN_LOCK` → recursive path safety → inventory / run_state →
+  execution approval → post-approve provenance / existing `RUN_LOCK` reacquire → post-approve recursive
+  path safety / inventory → exact deletion / result confirmation。後段理由で前段失敗を上書きしない。
   カテゴリ③（本ルールの merge）とカテゴリ④（実 cleanup）は別発効点・別 scope。

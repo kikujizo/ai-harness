@@ -3593,17 +3593,25 @@ Related PRs: #132
 ## 決定事項
 
 Cursorの一時ファイルをOS identity由来のtrusted home配下のrun固有scratch
-（`RUN_ROOT=<TRUSTED_HOME>/.cache/ai-harness-scratch/<repo_slug>/<run_id>/`）に限定する。
+（`CACHE_ROOT=<TRUSTED_HOME>/.cache`、`SCRATCH_BASE=<CACHE_ROOT>/ai-harness-scratch`、
+`RUN_ROOT=<SCRATCH_BASE>/<repo_slug>/<run_id>/`）に限定する。
 `LOCK_ROOT`（`<SCRATCH_BASE>/.locks/<repo_slug>/`）と `RUN_ROOT` は兄弟系統であり、
-`LOCK_CHAIN`（`TRUSTED_HOME→SCRATCH_BASE→LOCK_BASE→LOCK_ROOT→RUN_LOCK`）と
-`RUN_CHAIN`（`TRUSTED_HOME→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する（単一 `PATH_CHAIN` ではない）。
-writerは lock 系 directory（`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
-`RUN_LOCK` 取得後にのみ `RUN_BASE`/`RUN_ROOT`/payload を作成する。
+`COMMON_PREFIX`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE`）、
+`LOCK_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→LOCK_BASE→LOCK_ROOT→RUN_LOCK`）と
+`RUN_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する
+（単一 `PATH_CHAIN` ではない）。
+writerは lock 系 directory（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
+`RUN_LOCK` 取得後にのみ `RUN_BASE`/`RUN_ROOT`/payload を作成する。既存 safe `RUN_ROOT` は
+`run_root_collision` で blocked（再利用・resume 禁止）。
 writerとcleanupは同一 `RUN_LOCK` を OS標準の排他プリミティブで必ず取得する
 （repo内lock実装ファイル・daemon・DBは追加しない）。
 Linux/WSLのbind mount判定は device ID 照合だけに依存せず mount table/mountinfo を用い、
 評価不能は `path_safety_unknown` で blocked。
 cleanupは filesystem 上に新規 directory/file/lock を一切作成しない read-only 契約。
+cleanup inventory は `run-inventory/v1` canonical recursive snapshot（pre/post で
+`inventory_version`/`inventory_digest`/`entry_count` を exact 比較。不一致は `inventory_changed`）。
+cleanup は `RUN_ROOT` と全 descendant へ recursive path safety を適用する（nested mount/bind mount/
+reparse 拒否）。
 Windows cleanup は既存 lock file のみ open し `OpenOrCreate` を使わない。
 
 identity-root resolverを次で固定する。
@@ -3629,8 +3637,10 @@ GitHubへ記録する方式は撤回**し、absolute local home path・個人情
 通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` 1件に対しidentity・exact provenance・
 path safety・inventory・`RUN_LOCK` 取得を含むread-only技術ゲート全成立後にのみ
 closed questionへ進む。将来の実cleanupは別 `execution` scope の v2 人間approveが必要。
-approve後はlock再取得と全ゲート再検証を行い、削除完了確認までlockを保持する。
-状態変化時は `approval_stale` / `inventory_changed` 等で blocked（approval再利用禁止）。
+approve後は既存 `RUN_LOCK` を non-blocking exclusive で再取得し、recursive path safety と
+inventory をゼロから再検証し、削除完了確認までlockを保持する。
+状態変化時は `approval_stale` / `inventory_changed` / `run_lock_conflict` 等で blocked
+（approval再利用禁止）。
 カテゴリ③（`.cursor/rules/ai-workflow.mdc` のmerge）とカテゴリ④（実cleanup）は別発効点・別scopeとする。
 
 ## 背景・課題
@@ -3732,23 +3742,25 @@ cleanup execution に流用しない。
 | 項目 | 結果 | 証跡 |
 |---|---|---|
 | Draft PR | 作成済み | PR #132 |
-| ChatGPT要件レビュー（初回） | approve（後に #5262610338 で supersede） | #5262525305 |
-| Codex独立技術レビュー | request-changes | #5262573648 |
-| ChatGPT要件レビュー（再） | request-changes | #5262610338（#5262525305 を supersede） |
-| Codex PM route | Cursor修正再開 | #5262654977 |
-| fixed HEAD（P1/P2修正前） | `b933b22ca65f275b31a4d3ed5d4983f8274f4050` | 差し戻し時点 |
-| fixed HEAD（P1/P2修正後） | `646305cb311526d7e6b929ecf84e312888aacb3e` | Cursor修正push後 |
-| active approval | implementation_start / route=cursor | #5262190892 |
-| merge | 未実施 | `HIGH_RISK_TECH_GATE: passed` 後 merge scope |
+| canonical proposal（再仕様化） | 固定 | #5263051242 |
+| HUMAN_APPROVAL_RECORD | implementation_start approved | #5263099857 |
+| Codex PM route | route=cursor | #5263113733 |
+| 旧 implementation_start approval | **inactive / 流用不可**（旧proposal用監査記録） | #5262190892 |
+| ChatGPT要件レビュー | pending | 未実施（本再仕様化後） |
+| Codex独立技術レビュー | pending | 未実施（本再仕様化後） |
+| `HIGH_RISK_TECH_GATE` | pending | 両レビュー完了前に進まない |
+| merge scope | 未承認 | `HIGH_RISK_TECH_GATE: passed` 後 |
+| `settings_apply` | 未承認 | — |
+| `execution` / 実cleanup | 未承認・未実行 | カテゴリ④別 scope |
+| fixed HEAD（再仕様化実装） | （commit後に記入） | — |
 
 ## 次アクション
 
-- [x] Cursor による実装（本エントリ・4ファイル文書・current main同期）
-- [x] ChatGPT 要件レビュー（初回・#5262525305）
-- [x] Codex 独立技術レビュー（#5262573648）
-- [x] ChatGPT 要件レビュー（再・#5262610338）
-- [x] Cursor P1/P2 修正（`"."`/`".."` segment 拒否・レビュー記録同期）
-- [x] 新 HEAD 再固定（`646305cb311526d7e6b929ecf84e312888aacb3e`）
-- [ ] ChatGPT / Codex 再レビュー（fixed HEAD・fail-closed 8基準）
-- [ ] expected workflow 2本の同一HEAD success
+- [x] Codex PM 再proposal（#5263051242）
+- [x] 人間 `implementation_start` approve（#5263099857）
+- [x] Codex PM route 確定（#5263113733 / route=cursor）
+- [x] Cursor による再仕様化実装（本エントリ・4ファイル文書）
+- [ ] fixed HEAD で expected workflow 2本 success
+- [ ] ChatGPT 要件レビュー（本再仕様化後）
+- [ ] Codex 独立技術レビュー（本再仕様化後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

@@ -280,17 +280,34 @@ branch `issue-121-ambiguous-comprehensive-instruction-scope`。
 EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write/cleanup deleteより前に
 停止することを各否定例で観測する（`ai-workflow.mdc` の EARLY呼禁止節を構造grepで確認可能）。
 
+- **fresh `.cache` missing — writer成功**: `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` が
+  missing でも、writer が `CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` を各1段作成→直後再検証後、
+  `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→payload write→
+  completion record 作成を確認する（`RUN_LOCK` 前に run 側を作成しない）。
 - **fresh writer bootstrap成功**: `LOCK_ROOT` missing かつ `RUN_ROOT` missing で、
-  lock bootstrap（`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` のみ1段作成→直後再検証）後に
+  lock bootstrap（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` のみ1段作成→直後再検証）後に
   `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→payload write→
   completion record 作成を確認する。
 - **bootstrap安全性不明（否定例・EARLY）**: `LOCK_ROOT` 親の path safety を証明できない状況を渡し、
   `result=blocked` `stop_reason=path_safety_unknown` `run_lock_created=false`
   `run_root_created=false` とし、`RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 作成が行われないことを確認する。
+- **existing `RUN_ROOT` collision（否定例・EARLY）**: `RUN_LOCK` exclusive 取得後、
+  `RUN_ROOT` が既に safe directory として存在する状況を渡し、`result=blocked`
+  `stop_reason=run_root_collision` `payload_written=false` `completion_record_created=false`
+  `existing_run_root_modified=false` とし、payload write・completion record・既存 root 変更が
+  行われないことを確認する（A6 collision 分岐は path safety 優先と排他。collision 後に payload write へ進まない）。
+- **nested mount / bind mount / reparse（否定例・cleanup）**: `RUN_ROOT` 自体は safe だが subtree に
+  Linux bind mount または Windows reparse point が存在する状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed` `inventory_accepted=false` `cleanup=false` となることを確認する。
+- **post-approve lock競合（否定例）**: pre-approval gate 通過・human execution approval 存在後、
+  approve 待ち中に writer が同じ `RUN_LOCK` を exclusive 保持する状況を渡し、既存 `RUN_LOCK` を
+  新規作成せず open した non-blocking exclusive 再取得が失敗し、`result=blocked`
+  `stop_reason=run_lock_conflict` `cleanup=false` `approval_reusable=false` となることを確認する。
 - **bind mount判定不能（否定例・EARLY）**: Linux/WSL で mount table/mountinfo を取得・評価できない状況を渡し、
   `result=blocked` `stop_reason=path_safety_unknown` `scratch_created=false` `cleanup=false` とし、
   device ID 照合だけで pass しないことを確認する。
-- **lock/run chain分岐**: `LOCK_CHAIN`（`LOCK_BASE`→`LOCK_ROOT`→`RUN_LOCK`）と
+- **lock/run chain分岐**: `COMMON_PREFIX`（`TRUSTED_HOME`→`CACHE_ROOT`→`SCRATCH_BASE`）、
+  `LOCK_CHAIN`（`LOCK_BASE`→`LOCK_ROOT`→`RUN_LOCK`）と
   `RUN_CHAIN`（`RUN_BASE`→`RUN_ROOT`）が別定義・別検証であり、
   `LOCK_ROOT` と `RUN_ROOT` を単一祖先chainとして扱わないことを確認する。
 - **Windows identity-root・lock取得成功**: current SID→`Win32_UserProfile.LocalPath` で
@@ -349,17 +366,21 @@ merge / settings_apply / execution / cleanup は未実行。
 |---|---|---|---|
 | `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止 | continue |
 | `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールド。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
-| `path-chain-safety` | pass | A1/B1 で `"."`/`".."` exact 拒否→regex 1 segment。A3/B3 で `LOCK_CHAIN`/`RUN_CHAIN` 別検証。Linux mountinfo 必須・device ID 単独依存禁止。ACL unknown / bind mount 判定不能 → `path_safety_unknown` | continue |
-| `persistent-claim-bypass` | not_applicable | 永続claim・lock file存在を活動証明に使わない契約のみ。OS排他（flock/FileShare=None）を正本に限定 | continue |
-| `verify-before-mutate` | pass | A1/B1 segment 検証（`"."`/`".."` exact 拒否）後のみ A4 lock bootstrap→A5 lock取得→A6 run側作成。B は read-only・missing path 作成禁止・`OpenOrCreate` cleanup 禁止 | continue |
+| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否）。A1/B1 `.`/`..` exact拒否 | continue |
+| `persistent-claim-bypass` | not_applicable | Issue #54 は永続claim・lock file存在を活動証明に使わない契約のみ導入。persistent-claim-bypass機構は未導入 | continue |
+| `verify-before-mutate` | pass | A4 `CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` 1段bootstrap→A5 lock→A6 run側作成（既存safe `RUN_ROOT`はcollisionで無変更）。B pre/post revalidation・inventory exact比較後のみdelete | continue |
 | `provenance-no-fabrication` | pass | exact `scratch-completion/v1` record 1件のみ。path/repo-wide 検索推測禁止を `ai-workflow.mdc` B2 に明記 | continue |
-| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。approve 後は再取得から削除完了まで保持 | continue |
-| `override-test-hook-isolation` | not_applicable | override/test hook を導入しない（4ファイル文書のみ） | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。post-approve non-blocking exclusive 再取得・inventory drift 検出 | continue |
+| `override-test-hook-isolation` | not_applicable | Issue #54 は override/test hook を導入しない（4ファイル文書のみ） | continue |
 
 ##### 否定テスト観測例（文書契約・EARLY非実行の証明）
 
 | 入力 | 期待出力 | EARLY証明 |
 |---|---|---|
+| fresh `.cache` missing（writer） | `scratch_created=true`（`CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` bootstrap後 lock取得） | `RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成 |
+| existing safe `RUN_ROOT`（writer） | `result=blocked` `stop_reason=run_root_collision` `payload_written=false` `existing_run_root_modified=false` | A6 collision 分岐。path safety 後・payload write 前に停止 |
+| nested mount / bind mount / reparse（cleanup） | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B6 recursive safety 完了前に inventory/cleanup 未宣言 |
+| post-approve `RUN_LOCK` conflict | `result=blocked` `stop_reason=run_lock_conflict` `cleanup=false` `approval_reusable=false` | B8 既存 lock のみ open・新規作成なし |
 | `repo_slug=..` または `run_id=..` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` `run_root_created=false` `path_created=false` | A1/B1 失敗後 lock bootstrap・`RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 未作成 |
 | `repo_slug=.` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` `run_root_created=false` `path_created=false` | 同上（`"."` exact 拒否） |
 | `LOCK_ROOT` 親 safety 不明 | `result=blocked` `stop_reason=path_safety_unknown` `run_root_created=false` | lock bootstrap 失敗後 `RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 未作成 |

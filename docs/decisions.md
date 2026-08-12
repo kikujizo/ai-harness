@@ -3753,6 +3753,7 @@ cleanup execution に流用しない。
 | `settings_apply` | 未承認 | — |
 | `execution` / 実cleanup | 未承認・未実行 | カテゴリ④別 scope |
 | fixed HEAD（再仕様化実装） | `797c77cbc175c205b34360057469ac6071b48663` | Cursor再仕様化commit |
+| fixed tip（branch） | `5743570e4cf36eef91b064e709bd6a85977278c7` | decisions同期後 tip（検証・CI対象） |
 
 ## 次アクション
 
@@ -3760,7 +3761,7 @@ cleanup execution に流用しない。
 - [x] 人間 `implementation_start` approve（#5263099857）
 - [x] Codex PM route 確定（#5263113733 / route=cursor）
 - [x] Cursor による再仕様化実装（本エントリ・4ファイル文書）
-- [ ] fixed HEAD で expected workflow 2本 success
+- [x] fixed HEAD で expected workflow 2本 success（`5743570` / runs `31570710949`・`31570696270`）
 - [ ] ChatGPT 要件レビュー（本再仕様化後）
 - [ ] Codex 独立技術レビュー（本再仕様化後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

@@ -403,6 +403,28 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   writerが `residue=none` のcompletion recordを作成しようとする状況を渡し、
   `completion_record_created=false` `result=blocked` `stop_reason=provenance_unknown` となり、
   `residue=none` を成立させる別writerフローが存在しないことを確認する。
+- **PATH偽装identityコマンド拒否（否定例・A0）**: Linux/WSLで攻撃者またはラッパーが `PATH` 上の
+  `id`/`getent` を差し替え可能な状況を渡し、trusted execution path（syscall/NSS APIまたは実体検証済みの
+  絶対パスcommand）で解決できない場合は `result=blocked` `stop_reason=identity_root_unresolved` となり、
+  差し替え可能な `PATH` 上のcommand結果を `CURRENT_UID`/`TRUSTED_HOME` の正本として採用しないことを
+  確認する。
+- **umask=0002下でのmarker safe mode成功**: `umask 0002` 環境で `RUN_INSTANCE_MARKER` を作成する状況を
+  渡し、requested/observed modeがumaskに関わらず `0600` exactで作成され、直後のpath safety再検証に
+  合格し、payload/completionへ進めることを確認する（正例）。
+- **marker unsafe mode拒否（否定例・A7）**: `RUN_INSTANCE_MARKER` の作成直後のobserved modeが `0600`
+  exactでない（例: umask由来の `0664`）状況を渡し、`result=blocked` `stop_reason=path_safety_failed`
+  `payload_written=false` `completion_record_created=false` となり、unsafe markerを正常completionへ
+  昇格させないことを確認する。
+- **unsafe payload descendant拒否（否定例・A8）**: `umask 0002` 環境でpayload descendantが安全属性
+  指定なしで作成され `0664`/`0775` 相当になる状況を渡し、completion record作成前の全descendant
+  再走査で group/world write bitを検出し、`result=blocked` `stop_reason=path_safety_failed`
+  `completion_record_created=false` となることを確認する（`residue=present` が成立した後にcleanupが
+  恒久的に失敗する経路を残さない）。
+- **inventory後のchild差し替え拒否（否定例・B8(9)）**: post-approvalの(6)でinventoryを取得した後、
+  最初の削除mutationまでの間に同一UIDの別processがdescendantを追加または置換した状況を渡し、
+  `RUN_LOCK` のhandle/path identity再確認だけでは検出されないことを前提としたうえで、child単位の
+  no-follow実体identity再確認で不一致を検出し、`result=blocked` `stop_reason=path_safety_failed`
+  `cleanup=false` となり、承認されたsnapshotにない対象を削除しないことを確認する。
 
 **試験実施記録（Issue #54・実装後照合・実施: Cursor）**
 
@@ -416,12 +438,12 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | criterion | result | basis | next_action |
 |---|---|---|---|
 | `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift・marker/commitment mismatch・handle/path identity不一致を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止。`residue=present` only化により、`RUN_ROOT`/marker存在時に`residue=none`を成功として取りこぼす経路が塞がれた | continue |
-| `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールド。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
-| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A4/A6 新規directoryをLinux/WSL `0700`固定・Windows safe owner/DACLで1段create→直後再検証。A5/B5/B8 `RUN_LOCK`のcreate-new/open-existing区別＋取得直後・completion直前・post-approval再取得直後・削除mutation直前のhandle/path identity exact binding。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
+| `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールドを**`PATH`検索に依存しないtrusted execution path（syscall/NSS APIまたは実体検証済みcommand）で解決**し、差し替え可能な`PATH`上の`id`/`getent`を正本にしない（A0）。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
+| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A4/A6 新規directoryをLinux/WSL `0700`固定・Windows safe owner/DACLで1段create→直後再検証。A5/B5/B8 `RUN_LOCK`のcreate-new/open-existing区別＋取得直後・completion直前・post-approval再取得直後・削除mutation直前のhandle/path identity exact binding。**A7 `RUN_INSTANCE_MARKER`もLinux/WSL `0600`固定・Windows safe owner/DACLで作成直後再検証。A8 payload descendantもB6互換の安全属性で作成**。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
 | `persistent-claim-bypass` | pass | local marker は create-new/no-overwrite・collision・payload による marker 変更禁止・completion v2 exact binding・pre/post 再取得で bypass 不可（Issue #54 §fail-closed 8） | continue |
-| `verify-before-mutate` | pass | A4/A6 safe create→直後再検証。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 marker create/verify→A8 payload**→A9 completion直前のhandle/path identity再確認。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較に加え、**B8(8) 最初の削除mutation直前にも同じhandle/path identityを再確認してからのみ**将来delete対象へ進む | continue |
+| `verify-before-mutate` | pass | A4/A6 safe create→直後再検証。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 marker create（0600固定/safe DACL）+verify→A8 payload（cleanup互換属性で作成＋completion前の全descendant再走査、unsafeなら`scratch-completion/v2`未作成）**→A9 completion直前のhandle/path identity再確認。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較、**B8(8) 削除mutation直前のRUN_LOCK再確認**に加え、**B8(9) inventory記録時点とのchild単位no-follow実体identity再確認を各childのmutation直前に行ってからのみ**その対象を削除する | continue |
 | `provenance-no-fabrication` | pass | `scratch-completion/v2`（`run_state=completed`/`residue=present` only）+ local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・`residue=none`・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
-| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。marker/commitment mismatch・inventory drift 検出 | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。**B8(9)でinventory記録後から削除までの間に同一UIDの別processが追加・置換したdescendantもchild単位no-follow identity再確認で検出**。marker/commitment mismatch・inventory drift 検出 | continue |
 | `override-test-hook-isolation` | not_applicable | Issue #54 は override/test hook を導入しない（4ファイル文書のみ） | continue |
 
 ##### 否定テスト観測例（文書契約・EARLY非実行の証明）
@@ -450,6 +472,10 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | post-approval再取得後のidentity不一致 | `result=blocked` `cleanup=false` `approval_reusable=false` | B8(3)でpre-approval時の観測を再利用せずゼロから再比較 |
 | 削除mutation直前のみidentity不一致 | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B8(8)で直前までの全項目成立が最終確認省略の理由にならない |
 | `RUN_ROOT`/marker存在下での`residue=none`試行 | `result=blocked` `stop_reason=provenance_unknown` `completion_record_created=false` | A9でresidue=presentのみ受理、noneを成立させる別フローなし |
+| `PATH`上の偽装`id`/`getent` | `result=blocked` `stop_reason=identity_root_unresolved` | A0でtrusted execution pathを証明できない結果を正本にしない |
+| `RUN_INSTANCE_MARKER`のobserved modeが`0600`でない | `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` `completion_record_created=false` | A7で作成直後再検証に失敗、unsafe markerをcompletionへ昇格しない |
+| payload descendantのunsafe属性（completion前再走査） | `result=blocked` `stop_reason=path_safety_failed` `completion_record_created=false` | A8で全descendant再走査、1件でもunsafeなら`scratch-completion/v2`未作成 |
+| inventory記録後のchild追加・置換 | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B8(9)でchild単位no-follow実体identity再確認により検出、承認snapshot外の対象を削除しない |
 
 ## 既存リポジトリへの導入（差分マージ方式）
 

@@ -56,12 +56,17 @@ Cursor-specific rules only:
   実cleanup / merge / settings_apply / execution、`HIGH_RISK_TECH_GATE` pass 自己判定、
   `residue=none` を writer 正常フローで受理すること、unsafe entry の chmod/ACL 修復・自動削除・自動GC、
   writer `RUN_LOCK` を曖昧な `OpenOrCreate` 一発で扱うこと、取得直後・削除mutation直前の
-  handle/path identity 再確認省略。
+  handle/path identity 再確認省略、`PATH` 検索の `id`/`getent` 等を identity-root の trusted 入力として
+  扱うこと、marker/payload の作成属性を umask/既定ACL任せにすること、削除mutation直前の child 単位
+  identity 再確認省略。
   **A. scratch writer（role=writer）** — 順序固定:
   A0 identity-root resolve（Windows: `CURRENT_SID`→唯一 `Win32_UserProfile.LocalPath`；
-  Linux/WSL: `id -u`→`getent passwd` 第6フィールド。`USERPROFILE`/`HOME`/`~` は正本にしない。
-  不一致 → `identity_root_mismatch`。取得不能/0/複数/path不正 → `identity_root_unresolved`。
-  unsupported OS → `identity_root_unsupported`）else EARLY blocked
+  Linux/WSL: `id -u`→`getent passwd` 第6フィールドを、**syscall/NSS API（`getuid(2)`/`getpwuid_r(3)`相当）
+  または `PATH` 検索に依存しない絶対パス＋実体検証済みのOS標準commandで解決する**。`PATH` 上で解決される
+  `id`/`getent` 呼び出し（差し替え・shadowing可能な経路）を正本にしない。実行経路・command実体・
+  取得結果の信頼性を証明できない場合は取得成功として扱わない。`USERPROFILE`/`HOME`/`~` は正本にしない。
+  不一致 → `identity_root_mismatch`。取得不能/0/複数/path不正/trusted経路を証明できない場合 →
+  `identity_root_unresolved`。unsupported OS → `identity_root_unsupported`）else EARLY blocked
   A1 segment検証: `repo_slug`/`run_id` が `"."` または `".."` → 即 `invalid_run_segment`（regex より先に exact 拒否）。
   さらに各 segment は `[A-Za-z0-9._-]+` の1 segmentのみ（空・`/`・`\`・多段不可）。不正 → `invalid_run_segment`。
   **Windows native**: 上記通過後・`RUN_LOCK`/`RUN_ROOT` の作成/open より前に、OS/runtime 標準の
@@ -132,15 +137,31 @@ Cursor-specific rules only:
   `instance_nonce` とする（host/user/SID/UID/path/time から導出禁止）。
   (2) `instance_commitment = sha256(raw 32-byte nonce)` を `sha256:<64 lowercase hex>` で表現
   （hex 文字列を hash しない）。
-  (3) `RUN_INSTANCE_MARKER` を create-new/no-overwrite/no-follow で 1件だけ作成。
+  (3) `RUN_INSTANCE_MARKER` を create-new/no-overwrite/no-follow で 1件だけ作成する。
+  **Linux/WSL**: requested mode は **`0600` 固定**（process umaskに安全性を委ねない）。
+  **Windows**: create時点から current SID / SYSTEM / BUILTIN\Administrators 以外へ
+  write/modify/delete相当を与えない owner/DACL を要求する。
   canonical schema `scratch-instance/v1`（各 field LF・末尾 LF。extra/重複/欠落/順序違いは invalid）:
   `record_type=scratch-instance/v1`、`instance_nonce=<64 lowercase hex>`、
   `repo_slug=<exact>`、`run_id=<exact>`、
   `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`。
-  (4) marker 作成直後に path safety・canonical content・read-back exact を検証。
-  失敗 → `provenance_unknown`、payload/completion 未作成。payload は marker を変更・削除・rename しない。
-  A8 **A7 成功後のみ** scratch payload を create/write。scratch 活動終了まで lock 保持。
-  A9 lock 保持のまま exact GitHub completion record 1件を作成
+  (4) marker 作成直後に、**Linux/WSLは observed mode `0600` exact・owner・entry type・canonical boundary**、
+  **Windowsは owner/DACL・reparse・type・canonical boundary** を再検証し、併せて canonical content・
+  read-back exact を検証する。unsafeまたは判定不能（`path_safety_failed`/`path_safety_unknown`）は
+  payloadへ進めない。失敗 → `provenance_unknown`、payload/completion 未作成。payload は marker を
+  変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
+  A8 **A7 成功後のみ** scratch payload を create/write する。
+  **Linux/WSL**: payload directoryは `0700`、fileは `0600` を基本とし、少なくとも B6 の
+  recursive path safety（symlink拒否・owner==`CURRENT_UID`・group/world write bits `0022`拒否・
+  special entry拒否・canonical boundary内）と互換な属性で作成する。process umaskの偶然の値に
+  安全性を依存させない。
+  **Windows**: payload descendantは current SID / SYSTEM / BUILTIN\Administrators 以外へ
+  write/modify/delete相当を与えないsafe owner/DACLで作成し、reparseを使わない。
+  **completion record（A9）作成前に、`RUN_ROOT` 配下の全descendantを再走査し、mode/owner/type/
+  canonical boundary/special entryが B6 のcleanup safety条件と互換であることを確認する。
+  unsafeまたは判定不能なdescendantが1件でもあれば `scratch-completion/v2` を作成しない**
+  （`path_safety_failed`/`path_safety_unknown`、completion未作成）。scratch 活動終了まで lock 保持。
+  A9 **A8のdescendant再検証成功後のみ**、lock 保持のまま exact GitHub completion record 1件を作成
   （`record_type=scratch-completion/v2`、`repo_full_name`、`repo_slug`、`run_id`、
   `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、
   **`instance_commitment=sha256:<64 lowercase hex>` のみ**（`instance_nonce` は書かない）、
@@ -222,6 +243,14 @@ Cursor-specific rules only:
   **(8) 最初の削除 mutation 直前にも、(3)で取得した同じ opened lock handle と現在の `RUN_LOCK`
   path entry の file identity を再度 exact 比較する。不一致または判定不能なら削除へ進まない
   （`path_safety_failed`/`path_safety_unknown`、`cleanup=false`）。**
+  **(9) `RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。(6)で取得した
+  inventoryの各child entry（file/directory）について、削除実行時にno-followで再取得した実体identity
+  （Linux: device+inode／Windows: `FILE_ID_INFO`相当の stable file identity）が(6)時点で記録した対象と
+  一致することを、各childのmutation直前に個別に確認する。併せてtype（regular file/directory）と
+  path safetyもchild単位で再確認する。追加・置換・差し替え・type変化・判定不能を1件でも検出した場合は
+  削除に進まない（`path_safety_failed`/`path_safety_unknown`、`cleanup=false`）。child bindingを
+  証明できない場合は既存stop_reasonでfail-closedし、verified handleを用いたno-follow削除など、
+  対象を検証時の実体へ結び付けた方式でなければ削除しない。**
   全項目一致時のみ将来 executor が exact `RUN_ROOT` 1件削除可能（本 PR は実 delete 禁止）。
   削除完了確認まで **(3)で取得した同じ opened lock handle を保持**。削除開始までも **path 作成禁止**。
   中断・部分失敗・結果確認不能は成功扱いしない。
@@ -233,14 +262,17 @@ Cursor-specific rules only:
   `run_lock_conflict` `run_root_collision` `provenance_unknown` `provenance_mismatch`
   `run_state_not_completed` `inventory_unavailable` `inventory_changed` `approval_stale`
   `cleanup_interrupted` `cleanup_result_unknown`。各停止は `result=blocked`（成功丸め禁止）。
-  評価順序: identity → segment → existing path safety / writer bootstrap（safe create: Linux/WSL `0700`・
-  Windows safe owner/DACL） → writer `RUN_LOCK`（create-new/open-existing区別 + 取得直後 handle/path
-  identity binding） → writer `RUN_ROOT` collision / create → **`RUN_INSTANCE_MARKER` create + verify** →
-  payload → completion v2 provenance（`residue=present` only・作成直前 handle/path identity 再確認） →
+  評価順序: identity（trusted execution path経由のresolve） → segment → existing path safety /
+  writer bootstrap（safe create: Linux/WSL `0700`・Windows safe owner/DACL） → writer `RUN_LOCK`
+  （create-new/open-existing区別 + 取得直後 handle/path identity binding） → writer `RUN_ROOT`
+  collision / create → **`RUN_INSTANCE_MARKER` create（Linux/WSL `0600`固定・Windows safe owner/DACL）
+  + verify** → payload（cleanup互換属性で作成 + completion前の全descendant再検証） →
+  completion v2 provenance（`residue=present` only・作成直前 handle/path identity 再確認） →
   cleanup provenance v2 + named chain read-only → cleanup existing `RUN_LOCK`（取得直後 handle/path
   identity binding） → recursive path safety → **local marker commitment ↔ completion v2 exact binding** →
   inventory / run_state → execution approval → post-approve provenance / existing `RUN_LOCK` reacquire
   （再取得直後 handle/path identity 再確認） → post-approve recursive path safety / **marker binding** /
-  inventory → 削除 mutation 直前の handle/path identity 再確認 → exact deletion / result confirmation。
+  inventory → 削除 mutation 直前の `RUN_LOCK` handle/path identity 再確認 → **child entry単位の
+  no-follow実体identity再確認**（inventory記録時点との一致） → exact deletion / result confirmation。
   後段理由で前段失敗を上書きしない。
   カテゴリ③（本ルールの merge）とカテゴリ④（実 cleanup）は別発効点・別 scope。

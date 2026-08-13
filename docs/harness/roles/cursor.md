@@ -42,7 +42,10 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   `residue=none` は writer 正常フローでは受理しない。到達状態と否定例の正本は `.cursor/rules/ai-workflow.mdc` A9）。
   **新規 directory は umask/既定 ACL に頼らず、Linux/WSL は requested/observed mode `0700` 固定、
   Windows は作成時点から safe owner/DACL を要求し、作成直後に同一 OS の path safety を再検証する
-  （`RUN_LOCK` も同じ規則で Linux/WSL は `0600` 固定）。**
+  （`RUN_LOCK`・`RUN_INSTANCE_MARKER` も同じ規則で Linux/WSL は `0600` 固定）。payload descendantも
+  cleanup互換の安全属性で作成し、completion record作成前に全descendantを再走査する。
+  unsafe/判定不能なdescendantが1件でもあればcompletion recordを作らない（詳細は
+  `.cursor/rules/ai-workflow.mdc` A7/A8）。**
   writerとcleanupは同一 `RUN_LOCK` を non-blocking exclusive で必ず取得する。
   **`RUN_LOCK` の取得は曖昧な `OpenOrCreate` 一発ではなく create-new と open-existing を区別し
   （Linux: `flock` / Windows writer: reparse非followのcreate-new・open-existing + `FileShare=None`、
@@ -52,7 +55,9 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   post-approval 再取得直後・最初の削除 mutation 直前にも同じ比較を行い、不一致・判定不能なら
   mutation へ進まない（詳細は `.cursor/rules/ai-workflow.mdc` A5/B5/B8）。**
   identity-rootは Windows nativeではcurrent SID→`Win32_UserProfile.LocalPath`、
-  Linux/WSLでは `id -u`→`getent passwd`第6フィールド。`USERPROFILE` /
+  Linux/WSLでは `id -u`→`getent passwd`第6フィールドを、**`PATH`検索に依存しない
+  syscall/NSS APIまたは実体検証済みのOS標準commandで解決**する（差し替え可能な`PATH`上の
+  `id`/`getent`は正本にしない。詳細は`.cursor/rules/ai-workflow.mdc` A0）。`USERPROFILE` /
   `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能時はscratch作成も
   cleanup候補化もしない（`scratch_created=false`、run側 mkdir/writeより前に停止）。
   Linux/WSLのbind mount判定は device ID 照合だけに依存せず mount table/mountinfo を用い、
@@ -69,6 +74,10 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   のみ closed questionへ進む。将来の実cleanupは別 `execution` scopeの人間approveが必要。
   人間approveは技術ゲートを代替しない。approve後は既存 `RUN_LOCK` を non-blocking exclusive で
   再取得し、recursive path safety と inventory をゼロから再検証し、削除完了確認までlockを保持する。
+  **`RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。削除実行時は、
+  approve後に取得したinventoryの各child entryについてもno-followで実体identityを再取得し、
+  記録時点との一致をchild単位でmutation直前に確認する。追加・置換・差し替えを検出した場合は
+  削除しない（詳細は`.cursor/rules/ai-workflow.mdc` B8(9)）。**
   カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
   詳細・制御順序・否定例の正本は `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
   （本ファイルは複製しない）。

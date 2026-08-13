@@ -3694,6 +3694,15 @@ local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-i
 `PROPOSED_ROUTE` に提示）、新 `HUMAN_APPROVAL_RECORD: v2` `#5276357583`
 （`proposed_route=claude-code` で承認）が本ラウンドの実装開始正本。
 
+**PM補正（A0/A7/A8/B8是正）**: fixed HEAD `0840fbd` に対する追加レビューで新たに2件のcurrent threadが
+確認され、Codex PM補正判断 `#5277162613` が最新read-back時点の未解決4件（A0 identity command trusted
+execution、A7 marker safe mode、A8 payload安全属性、B8 child mutation binding）を同一Checkpoint内の
+実装修正と判定した。共通する失敗クラスは「安全性を検証した証拠と、後続処理が触る実体が最後まで
+束縛されていないこと」。A1 `GetFullPathNameW` threadは別途wontfix/resolved済みであり本ラウンドの対象外。
+既存canonical proposal `#5276309603` / `HUMAN_APPROVAL_RECORD: v2` `#5276357583`
+（subject=`issue:#54`、scope=`implementation_start`、route=`claude-code`）は変更なく継続利用。
+新proposal・新approvalは発行していない。
+
 ## 採用する方針
 
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
@@ -3711,6 +3720,14 @@ local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-i
   （writer）／取得直後・post-approval再取得直後・削除mutation直前（cleanup）の計4箇所で
   opened handleと現在のpath entryのfile identityをexact比較する
 - **（v3）** completion v2のwriter正常フローは `residue=present` のみを許可する
+- **（PM補正）** Linux/WSL identity-root解決を`PATH`検索の`id`/`getent`から、syscall/NSS APIまたは
+  実体検証済み絶対パスcommandへ固定する（`PATH`差し替え・shadowing経路を正本にしない）
+- **（PM補正）** `RUN_INSTANCE_MARKER`をLinux/WSL `0600`固定・Windows safe owner/DACLで作成し、
+  作成直後に同一OS検査で再検証する（`RUN_LOCK`と同じ規則をmarkerへも適用）
+- **（PM補正）** payload descendantをcleanup（B6）互換の安全属性で作成し、completion record作成前に
+  全descendantを再走査する。unsafe/判定不能が1件でもあればcompletion recordを作らない
+- **（PM補正）** cleanup削除時、`RUN_LOCK`のhandle/path identity再確認に加え、approve後に取得した
+  inventoryの各child entryについてもno-follow実体identityをmutation直前に個別再確認する
 
 ## 採用しない方針 / 却下した代替案
 
@@ -3732,6 +3749,13 @@ local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-i
   通常到達不能な状態を記録することになり、誤ったresidue無し記録を許すため却下
 - **（v3）新規directory作成時のumask/既定ACL依存**: 環境のumask設定次第でmodeが変動し
   非決定的な安全性になるため却下し、requested modeを明示固定した
+- **（PM補正）identity-root解決を`PATH`検索の`id`/`getent`へ依存させること**: 差し替え・shadowing可能な
+  実行経路を正本にするとHOME偽装と同種のリスクが残るため却下
+- **（PM補正）marker/payloadの作成属性をumask/既定ACLへ委ねること**: `RUN_LOCK`/directoryと同じ理由で
+  非決定的になるため却下し、markerは`0600`固定・payloadはcleanup互換属性へ固定した
+- **（PM補正）削除mutation直前を`RUN_LOCK`のhandle/path identity再確認だけで済ませること**: lockの
+  identityとdescendant個々の実体は別物であり、inventory取得後に子要素が差し替えられる経路を
+  閉じられないため却下し、child単位のno-follow実体identity再確認を追加した
 
 ## 判断理由
 
@@ -3829,9 +3853,15 @@ cleanup execution に流用しない。
 | Issue manifest diff @ `7a24e94` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head 7a24e94a42b9cdd69d615122864023adca7558b0`）。GitHub Actions run IDはCI実行後にPR側で別途確認する |
 | Fail-closed success propagation @ `7a24e94` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（対象拡張子`.sh/.js/.cjs/.mjs/.yml/.yaml`が今回diffに含まれないため）。GitHub Actions run IDはCI実行後にPR側で別途確認する |
 | `git diff --check origin/main...HEAD` @ `7a24e94` | **success**（exit 0） | ローカル実行確認 |
-| ChatGPT要件レビュー（v3 fixed HEAD） | **未実施** | v3実装tip確定後 |
-| Codex独立技術レビュー（v3 fixed HEAD） | **未実施** | 同上。Claude Codeは自分から新しいCodexレビューを起動しない |
-| `HIGH_RISK_TECH_GATE`（v3） | blocked / pending | 両レビュー完了前に進まない |
+| Codex独立技術レビュー（fixed HEAD `238ae78`） | **request-changes** risk=high | [#5276711835](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5276711835)。AC2/AC3/AC5 ○、**AC1 ×**（`docs/harness/setup.md`のWindows writer成功例が`OpenOrCreate`陽性記述のままA5契約と矛盾） |
+| Claude Code による `docs/harness/setup.md` 修正 | 完了 | Windows writer成功例をA5のcreate-new/open-existing+handle/path identity binding契約へ同期。他3ファイル無変更 |
+| **fixed tip** | `0840fbdf0d6e60b6c5bd2aae76ce327440c57ddb` | `OpenOrCreate`陽性記述の同期修正コミット |
+| Issue manifest diff @ `0840fbd` | **success** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `0840fbd` | **success** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `0840fbd` | **success**（exit 0） | ローカル実行確認 |
+| PR #132 コメント（fixed HEAD `0840fbd`のレビュー依頼） | 記録済み | [#5276786924](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5276786924) |
+| Codex PM補正判断（追加current thread 2件検出、A0/A7/A8/B8を今回修正と判定） | `PM_VERDICT: approve risk=high route=claude-code` | [#5277162613](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277162613)。A1は別途wontfix/resolved済み。既存proposal `#5276309603`/approval `#5276357583`を継続利用、新規発行なし |
+| **（PM補正）fixed tip** | **次コミットで同期**（自己参照回避のため） | 本ラウンドの4ファイル実装コミット完了後、別コミットでSHAとローカル検証結果を追記する |
 
 ## 次アクション
 
@@ -3849,13 +3879,25 @@ cleanup execution に流用しない。
 - [x] **（v3）** 人間 `implementation_start` approve（#5276357583 / HUMAN_APPROVAL_RECORD: v2, route=claude-code）
 - [x] **（v3）** Claude Code による safe create・RUN_LOCK identity binding・cleanup pre/post binding・
   `residue=present` only の固定4ファイル実装（本コミット）
-- [ ] v3実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
-- [ ] 新HEADで `git diff --name-only origin/main...HEAD` が固定4ファイルのみであることを確認
+- [x] v3実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（`238ae78`。自己参照回避のため）
+- [x] fixed HEAD `238ae78` で `git diff --name-only`/`--check`・Issue manifest diff・Fail-closed
+  success propagationすべてsuccessを確認（PR #132コメント #5276545718）
+- [x] Codex独立技術レビュー（fixed HEAD `238ae78`、#5276711835）→ **request-changes risk=high**
+  （AC1のみ×。`docs/harness/setup.md`のWindows writer成功例が`OpenOrCreate`陽性記述のままA5と矛盾）
+- [x] Claude Code による `docs/harness/setup.md` 最小修正（`OpenOrCreate`陽性記述をA5契約へ同期、fixed HEAD `0840fbd`）
+- [x] fixed HEAD `0840fbd` で `git diff --name-only`/`--check`・Issue manifest diff・Fail-closed
+  success propagationすべてsuccessを確認（PR #132コメント #5276786924）
+- [x] **（PM補正）** Codex追加レビューで新規current thread 2件を検出、PM補正判断 `#5277162613` が
+  未解決4件（A0/A7/A8/B8）を同一Checkpoint内の実装修正と判定。A1は別途wontfix/resolved済み
+- [x] **（PM補正）** Claude Code による A0 trusted identity command・A7 marker safe mode・
+  A8 payload安全属性・B8 child mutation binding の固定4ファイル実装（本ラウンド）
+- [ ] 新HEAD（本ラウンド）で `git diff --name-only origin/main...HEAD` が固定4ファイルのみであることを確認
 - [ ] 新HEADで `git diff --check` success を確認
 - [ ] 新HEADで Issue manifest diff success を確認
 - [ ] 新HEADで Fail-closed success propagation success を確認
-- [ ] ChatGPT 要件レビュー（v3 fixed HEAD）
-- [ ] Codex 独立技術レビュー（v3 fixed HEAD。Claude Codeは自分から起動しない）
-- [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PM）
+- [ ] ChatGPT 要件レビュー（本ラウンド fixed HEAD）
+- [ ] Codex 独立技術レビュー（本ラウンド fixed HEAD。Claude Codeは自分から起動しない）
+- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（A0/A7/A8/B8を含む）
+- [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

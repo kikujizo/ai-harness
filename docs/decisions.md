@@ -3703,6 +3703,15 @@ execution、A7 marker safe mode、A8 payload安全属性、B8 child mutation bin
 （subject=`issue:#54`、scope=`implementation_start`、route=`claude-code`）は変更なく継続利用。
 新proposal・新approvalは発行していない。
 
+**独立技術レビュー第2ラウンド（A9/B8(9)是正）**: fixed HEAD `6a11031` に対する独立技術レビュー
+`#5277468171` で新たに2件のcurrent threadが確認された。(1) A9: `RUN_LOCK` identity driftで
+completion作成前にblockedとなった場合、A8で作成済みのpayloadを「未作成」と誤報し残留を隠す
+契約になっていた、(2) B8(9): child単位のidentity/type/path safety再確認だけでは、同一inode上の
+regular fileへのin-place write（内容のみの書き換え）を検出できなかった。Codex PM判断 `#5277578620`
+はこの2件をIssue #54の既存Checkpoint内の実装修正と判定し、既存canonical proposal `#5276309603` /
+`HUMAN_APPROVAL_RECORD: v2` `#5276357583` を継続利用する形でroute=`claude-code`を維持した
+（新proposal・新approvalは発行していない）。
+
 ## 採用する方針
 
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
@@ -3728,6 +3737,12 @@ execution、A7 marker safe mode、A8 payload安全属性、B8 child mutation bin
   全descendantを再走査する。unsafe/判定不能が1件でもあればcompletion recordを作らない
 - **（PM補正）** cleanup削除時、`RUN_LOCK`のhandle/path identity再確認に加え、approve後に取得した
   inventoryの各child entryについてもno-follow実体identityをmutation直前に個別再確認する
+- **（A9/B8(9)是正）** A9でlock identity driftによりblockedとなった場合、A8で作成済みのpayloadを
+  `payload_written=false`等と誤報しない。payloadは残留し得る状態として保持し、completionのみ
+  未作成のまま自動delete/repair/resumeへ拡張しない
+- **（A9/B8(9)是正）** B8(9)のchild単位識別確認に、regular fileの`size_bytes`/`sha256_lower_hex`を
+  既存`run-inventory/v1`とexact再照合する手順と、directoryのmutation直前child集合再列挙を追加する。
+  内容/集合不一致は既存`inventory_changed`へ収束させ、新しいinventory versionは作らない
 
 ## 採用しない方針 / 却下した代替案
 
@@ -3756,6 +3771,13 @@ execution、A7 marker safe mode、A8 payload安全属性、B8 child mutation bin
 - **（PM補正）削除mutation直前を`RUN_LOCK`のhandle/path identity再確認だけで済ませること**: lockの
   identityとdescendant個々の実体は別物であり、inventory取得後に子要素が差し替えられる経路を
   閉じられないため却下し、child単位のno-follow実体identity再確認を追加した
+- **（A9/B8(9)是正）A9のlock drift時に「payload/completionとも未作成」と一律報告すること**: A8が
+  既に成功していればpayloadは実在するため、実在する残留を偽って否定するfabricationになるため却下した
+- **（A9/B8(9)是正）B8(9)をidentity/type/path safetyの再確認のみで完結させること**: 同一inode上の
+  in-place writeやdirectory child集合の増減はidentity不変のまま発生しうるため検出できず、
+  size/SHA-256再照合とchild集合再列挙を追加した
+- **（A9/B8(9)是正）payload/inventory不一致検出に新しいstop_reasonを追加すること**: 既存
+  `inventory_changed`で意味的に閉じられるため、新規stop_reasonの追加は不要と判断し却下した
 
 ## 判断理由
 
@@ -3865,6 +3887,9 @@ cleanup execution に流用しない。
 | Issue manifest diff @ `f8c8030` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
 | Fail-closed success propagation @ `f8c8030` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
 | `git diff --check origin/main...HEAD` @ `f8c8030` | **success**（exit 0） | ローカル実行確認 |
+| PR #132 コメント（PM補正 fixed HEAD `6a11031`のレビュー依頼） | 記録済み | [#5277328523](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277328523) |
+| Codex独立技術レビュー第2ラウンド（fixed HEAD `6a11031`） | **request-changes** risk=high | [#5277468171](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277468171)。A9（payload保全）/B8(9)（content binding）の2件 |
+| Codex PM判断（A9/B8(9)是正） | `PM_VERDICT: approve risk=high route=claude-code` | [#5277578620](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277578620)。既存Checkpoint内の実装修正と判定、既存proposal `#5276309603`/approval `#5276357583`継続利用 |
 
 ## 次アクション
 
@@ -3894,13 +3919,21 @@ cleanup execution に流用しない。
   未解決4件（A0/A7/A8/B8）を同一Checkpoint内の実装修正と判定。A1は別途wontfix/resolved済み
 - [x] **（PM補正）** Claude Code による A0 trusted identity command・A7 marker safe mode・
   A8 payload安全属性・B8 child mutation binding の固定4ファイル実装（本ラウンド）
+- [x] fixed HEAD `f8c8030`（decisions.md同期HEAD `6a11031`）で `git diff --name-only`/`--check`・
+  Issue manifest diff・Fail-closed success propagationすべてsuccessを確認（PR #132コメント #5277328523）
+- [x] **（A9/B8(9)是正）** Codex独立技術レビュー第2ラウンド（fixed HEAD `6a11031`、#5277468171）→
+  **request-changes risk=high**（A9 payload保全・B8(9) content binding の2件）
+- [x] **（A9/B8(9)是正）** Codex PM判断（#5277578620）が既存Checkpoint内の実装修正と判定、
+  既存proposal `#5276309603`/approval `#5276357583`継続利用を確認
+- [x] **（A9/B8(9)是正）** Claude Code による A9 payload保全契約・B8(9) content/child集合binding の
+  固定4ファイル実装（本ラウンド）
 - [ ] 新HEAD（本ラウンド）で `git diff --name-only origin/main...HEAD` が固定4ファイルのみであることを確認
 - [ ] 新HEADで `git diff --check` success を確認
 - [ ] 新HEADで Issue manifest diff success を確認
 - [ ] 新HEADで Fail-closed success propagation success を確認
 - [ ] ChatGPT 要件レビュー（本ラウンド fixed HEAD）
 - [ ] Codex 独立技術レビュー（本ラウンド fixed HEAD。Claude Codeは自分から起動しない）
-- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（A0/A7/A8/B8を含む）
+- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（A9/B8(9)を含む）
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

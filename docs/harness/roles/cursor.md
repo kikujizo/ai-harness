@@ -76,8 +76,14 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   再取得し、recursive path safety と inventory をゼロから再検証し、削除完了確認までlockを保持する。
   **`RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。削除実行時は、
   approve後に取得したinventoryの各child entryについてもno-followで実体identityを再取得し、
-  記録時点との一致をchild単位でmutation直前に確認する。追加・置換・差し替えを検出した場合は
-  削除しない（詳細は`.cursor/rules/ai-workflow.mdc` B8(9)）。**
+  記録時点との一致をchild単位でmutation直前に確認する。regular fileはidentity一致だけでは
+  同一inode上のin-place writeを検出できないため、size/SHA-256もinventoryとexact再照合する。
+  directoryは配下削除後・自身の削除直前にchild集合を再列挙しinventoryと照合する。
+  追加・置換・差し替え・content不一致・child集合の増減を検出した場合は削除しない
+  （詳細は`.cursor/rules/ai-workflow.mdc` B8(9)）。**
+  **A9でlock identity driftによりblockedとなった場合、A8で作成済みのpayloadを「未作成」と
+  誤報しない。payloadは残留し得る状態として保持し、completion未作成・blockedのまま自動delete/
+  repair/resumeへ進まない（詳細は`.cursor/rules/ai-workflow.mdc` A9）。**
   カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
   詳細・制御順序・否定例の正本は `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
   （本ファイルは複製しない）。

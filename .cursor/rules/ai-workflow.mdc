@@ -169,7 +169,10 @@ Cursor-specific rules only:
   A9 到達時には `RUN_ROOT` と `RUN_INSTANCE_MARKER` が存在するため通常経路では到達不能な状態であり、
   `residue=none` を成立させる別 writer フローは新設しない）**）。
   作成直前に、保持している opened lock handle と現在の `RUN_LOCK` path entry の file identity を
-  再確認する（drift 時は blocked、payload/completion 未作成）。
+  再確認する（不一致 → `path_safety_failed`、判定不能 → `path_safety_unknown`。いずれも blocked、
+  completion 未作成。**A8 は既に成功しておりpayloadは作成済みのため、この分岐で
+  `payload_written=false` と報告してはならない。payloadは作成済み・残留し得る状態として保持し、
+  自動削除・repair・resumeへ拡張しない。cleanupは既存の技術ゲート（B0–B8）を経ずに開始しない**）。
   **`scratch-completion/v1`、`residue=none`、`residue` 欠落、field 不足/重複/extra/invalid は
   valid completion v2 として受理しない → `provenance_unknown`。v1 から instance binding を
   推測・補完・昇格しない。**
@@ -247,10 +250,19 @@ Cursor-specific rules only:
   inventoryの各child entry（file/directory）について、削除実行時にno-followで再取得した実体identity
   （Linux: device+inode／Windows: `FILE_ID_INFO`相当の stable file identity）が(6)時点で記録した対象と
   一致することを、各childのmutation直前に個別に確認する。併せてtype（regular file/directory）と
-  path safetyもchild単位で再確認する。追加・置換・差し替え・type変化・判定不能を1件でも検出した場合は
-  削除に進まない（`path_safety_failed`/`path_safety_unknown`、`cleanup=false`）。child bindingを
-  証明できない場合は既存stop_reasonでfail-closedし、verified handleを用いたno-follow削除など、
-  対象を検証時の実体へ結び付けた方式でなければ削除しない。**
+  path safetyもchild単位で再確認する。
+  **regular fileはidentity一致だけでは同一inode/file ID上のin-place write（内容のみの書き換え）を
+  検出できない。各unlink直前にno-followで `size_bytes` と `sha256_lower_hex` を再取得し、(6)の
+  inventoryに記録された同一entryとexact一致することを追加で要求する。identity一致をcontent一致の
+  代替にしない。**
+  **directoryは配下descendantの削除完了後・当該directory自体の削除直前に、現存child集合を
+  再列挙し、(6)時点のinventoryに記録されたchild集合とexact一致することを確認する。**
+  追加・置換・差し替え・content不一致・child集合の増減・type変化・判定不能を1件でも検出した場合は
+  削除に進まない（content/child集合の不一致は既存 `inventory_changed`、identity/type/safety不一致は
+  既存 `path_safety_failed`、安全性を証明できないものは既存 `path_safety_unknown`、inventory内容を
+  読めない場合は既存 `inventory_unavailable` として `cleanup=false`。新しいstop_reasonは追加しない）。
+  child bindingを証明できない場合は既存stop_reasonでfail-closedし、verified handleを用いた
+  no-follow削除など、対象を検証時の実体へ結び付けた方式でなければ削除しない。**
   全項目一致時のみ将来 executor が exact `RUN_ROOT` 1件削除可能（本 PR は実 delete 禁止）。
   削除完了確認まで **(3)で取得した同じ opened lock handle を保持**。削除開始までも **path 作成禁止**。
   中断・部分失敗・結果確認不能は成功扱いしない。
@@ -273,6 +285,8 @@ Cursor-specific rules only:
   inventory / run_state → execution approval → post-approve provenance / existing `RUN_LOCK` reacquire
   （再取得直後 handle/path identity 再確認） → post-approve recursive path safety / **marker binding** /
   inventory → 削除 mutation 直前の `RUN_LOCK` handle/path identity 再確認 → **child entry単位の
-  no-follow実体identity再確認**（inventory記録時点との一致） → exact deletion / result confirmation。
+  no-follow実体identity再確認**（inventory記録時点との一致。regular fileは`size_bytes`/`sha256`も
+  exact再照合、directoryはchild集合をmutation直前に再列挙して照合） → exact deletion / result
+  confirmation。
   後段理由で前段失敗を上書きしない。
   カテゴリ③（本ルールの merge）とカテゴリ④（実 cleanup）は別発効点・別 scope。

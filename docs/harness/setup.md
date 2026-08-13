@@ -425,6 +425,21 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `RUN_LOCK` のhandle/path identity再確認だけでは検出されないことを前提としたうえで、child単位の
   no-follow実体identity再確認で不一致を検出し、`result=blocked` `stop_reason=path_safety_failed`
   `cleanup=false` となり、承認されたsnapshotにない対象を削除しないことを確認する。
+- **同一inodeのin-place write拒否（否定例・B8(9)）**: inventory記録後、同一UIDの別processが既存の
+  regular fileを同一device+inode/`FILE_ID_INFO`のまま内容だけ書き換えた状況を渡し、identity/type/
+  path safetyの再確認だけでは検出されないことを前提としたうえで、unlink直前に再取得した
+  `size_bytes`/`sha256_lower_hex` がinventory記録値と不一致となり、`result=blocked`
+  `stop_reason=inventory_changed` `cleanup=false` となることを確認する（identity一致をcontent一致の
+  代替にしない）。
+- **directory child集合drift拒否（否定例・B8(9)）**: 配下descendant削除完了後、当該directory自体の
+  削除直前に再列挙したchild集合が(6)時点のinventoryと一致しない（別processによる追加・削除）状況を
+  渡し、`result=blocked` `stop_reason=inventory_changed` `cleanup=false` となり、directory自体の
+  削除に進まないことを確認する。
+- **A9到達後のlock drift時のpayload保全（否定例・A9）**: A8がpayload作成まで成功した後、completion
+  作成直前の `RUN_LOCK` handle/path identity再確認でdriftを検出した状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `completion_record_created=false`
+  となり、既に作成済みのpayloadを `payload_written=false` として誤報せず、残留し得る状態として
+  保持したまま自動delete/repair/resumeへ進まないことを確認する。
 
 **試験実施記録（Issue #54・実装後照合・実施: Cursor）**
 
@@ -441,9 +456,9 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールドを**`PATH`検索に依存しないtrusted execution path（syscall/NSS APIまたは実体検証済みcommand）で解決**し、差し替え可能な`PATH`上の`id`/`getent`を正本にしない（A0）。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
 | `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A4/A6 新規directoryをLinux/WSL `0700`固定・Windows safe owner/DACLで1段create→直後再検証。A5/B5/B8 `RUN_LOCK`のcreate-new/open-existing区別＋取得直後・completion直前・post-approval再取得直後・削除mutation直前のhandle/path identity exact binding。**A7 `RUN_INSTANCE_MARKER`もLinux/WSL `0600`固定・Windows safe owner/DACLで作成直後再検証。A8 payload descendantもB6互換の安全属性で作成**。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
 | `persistent-claim-bypass` | pass | local marker は create-new/no-overwrite・collision・payload による marker 変更禁止・completion v2 exact binding・pre/post 再取得で bypass 不可（Issue #54 §fail-closed 8） | continue |
-| `verify-before-mutate` | pass | A4/A6 safe create→直後再検証。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 marker create（0600固定/safe DACL）+verify→A8 payload（cleanup互換属性で作成＋completion前の全descendant再走査、unsafeなら`scratch-completion/v2`未作成）**→A9 completion直前のhandle/path identity再確認。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較、**B8(8) 削除mutation直前のRUN_LOCK再確認**に加え、**B8(9) inventory記録時点とのchild単位no-follow実体identity再確認を各childのmutation直前に行ってからのみ**その対象を削除する | continue |
+| `verify-before-mutate` | pass | A4/A6 safe create→直後再検証。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 marker create（0600固定/safe DACL）+verify→A8 payload（cleanup互換属性で作成＋completion前の全descendant再走査、unsafeなら`scratch-completion/v2`未作成）**→A9 completion直前のhandle/path identity再確認（**drift時はpayload残留を`payload_written=false`と誤報せず保持、completionのみ未作成**）。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較、**B8(8) 削除mutation直前のRUN_LOCK再確認**に加え、**B8(9) inventory記録時点とのchild単位no-follow実体identity再確認を各childのmutation直前に行い、regular fileはsize/SHA-256もexact再照合、directoryはchild集合を削除直前に再列挙・照合してからのみ**その対象を削除する | continue |
 | `provenance-no-fabrication` | pass | `scratch-completion/v2`（`run_state=completed`/`residue=present` only）+ local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・`residue=none`・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
-| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。**B8(9)でinventory記録後から削除までの間に同一UIDの別processが追加・置換したdescendantもchild単位no-follow identity再確認で検出**。marker/commitment mismatch・inventory drift 検出 | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。**B8(9)でinventory記録後から削除までの間に同一UIDの別processが追加・置換したdescendantもchild単位no-follow identity再確認で検出し、同一inodeへのin-place writeはsize/SHA-256再照合、directory child集合の増減は削除直前の再列挙で検出**。**A9でcompletion直前にlock identity driftが起きた場合もpayload残留を偽って否定しない**。marker/commitment mismatch・inventory drift 検出 | continue |
 | `override-test-hook-isolation` | not_applicable | Issue #54 は override/test hook を導入しない（4ファイル文書のみ） | continue |
 
 ##### 否定テスト観測例（文書契約・EARLY非実行の証明）
@@ -476,6 +491,9 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | `RUN_INSTANCE_MARKER`のobserved modeが`0600`でない | `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` `completion_record_created=false` | A7で作成直後再検証に失敗、unsafe markerをcompletionへ昇格しない |
 | payload descendantのunsafe属性（completion前再走査） | `result=blocked` `stop_reason=path_safety_failed` `completion_record_created=false` | A8で全descendant再走査、1件でもunsafeなら`scratch-completion/v2`未作成 |
 | inventory記録後のchild追加・置換 | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B8(9)でchild単位no-follow実体identity再確認により検出、承認snapshot外の対象を削除しない |
+| 同一inode上のregular file in-place write | `result=blocked` `stop_reason=inventory_changed` `cleanup=false` | B8(9)でunlink直前のsize/SHA-256再照合により検出、identity一致をcontent一致の代替にしない |
+| directory child集合の削除直前drift | `result=blocked` `stop_reason=inventory_changed` `cleanup=false` | B8(9)でdirectory自身の削除直前にchild集合を再列挙しinventoryと照合 |
+| A8後・completion直前のRUN_LOCK identity drift | `result=blocked` `stop_reason=path_safety_failed` `payload_written=true` `completion_record_created=false` | A9でpayload残留を`payload_written=false`と誤報せず保持、自動delete/repair/resumeへ進まない |
 
 ## 既存リポジトリへの導入（差分マージ方式）
 

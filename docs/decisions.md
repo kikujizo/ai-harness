@@ -3894,6 +3894,11 @@ cleanup execution に流用しない。
 | Issue manifest diff @ `85eb4b3` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
 | Fail-closed success propagation @ `85eb4b3` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
 | `git diff --check origin/main...HEAD` @ `85eb4b3` | **success**（exit 0） | ローカル実行確認 |
+| advisor指摘（B8(9) directory再検証の論理矛盾） | 是正 | 削除はbottom-upのため削除直前の子は空であり、(6)時点inventoryとの「exact一致」要求は非空directoryで恒久的に不成立になる論理矛盾があった。PM原文「空であることを確認してから削除する」（#5277578620）に合わせ、(a) 残余child集合が空であること (b) inventory外entry混入がないこと、という会計条件へ書き換えた |
+| **（advisor是正）fixed tip** | `0549e836def844a8a1328b0bce7fe6a3c9406d16` | B8(9) directory再検証の論理矛盾是正、A9の`payload_written=true`肯定記録、size/hash再取得〜unlink間の残留window明記 |
+| Issue manifest diff @ `0549e83` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `0549e83` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `0549e83` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 
@@ -3931,10 +3936,12 @@ cleanup execution に流用しない。
   既存proposal `#5276309603`/approval `#5276357583`継続利用を確認
 - [x] **（A9/B8(9)是正）** Claude Code による A9 payload保全契約・B8(9) content/child集合binding の
   固定4ファイル実装（本ラウンド）
-- [ ] 新HEAD（本ラウンド）で `git diff --name-only origin/main...HEAD` が固定4ファイルのみであることを確認
-- [ ] 新HEADで `git diff --check` success を確認
-- [ ] 新HEADで Issue manifest diff success を確認
-- [ ] 新HEADで Fail-closed success propagation success を確認
+- [x] **（advisor是正）** advisor指摘によるB8(9) directory再検証の論理矛盾是正（exact一致要求を
+  空であること＋会計チェックへ書き換え）、A9の`payload_written=true`肯定記録、残留window明記
+- [x] 新HEAD `0549e83` で `git diff --name-only origin/main...HEAD` が固定4ファイルのみであることを確認
+- [x] 新HEAD `0549e83` で `git diff --check` success を確認
+- [x] 新HEAD `0549e83` で Issue manifest diff success を確認
+- [x] 新HEAD `0549e83` で Fail-closed success propagation success を確認
 - [ ] ChatGPT 要件レビュー（本ラウンド fixed HEAD）
 - [ ] Codex 独立技術レビュー（本ラウンド fixed HEAD。Claude Codeは自分から起動しない）
 - [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（A9/B8(9)を含む）

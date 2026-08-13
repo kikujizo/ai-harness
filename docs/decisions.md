@@ -3890,6 +3890,10 @@ cleanup execution に流用しない。
 | PR #132 コメント（PM補正 fixed HEAD `6a11031`のレビュー依頼） | 記録済み | [#5277328523](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277328523) |
 | Codex独立技術レビュー第2ラウンド（fixed HEAD `6a11031`） | **request-changes** risk=high | [#5277468171](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277468171)。A9（payload保全）/B8(9)（content binding）の2件 |
 | Codex PM判断（A9/B8(9)是正） | `PM_VERDICT: approve risk=high route=claude-code` | [#5277578620](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277578620)。既存Checkpoint内の実装修正と判定、既存proposal `#5276309603`/approval `#5276357583`継続利用 |
+| **（A9/B8(9)是正）fixed tip** | `85eb4b3cae7e2d3c588af4201b49a49fcbeb58e7` | A9 payload保全・B8(9) content/child集合binding補強コミット |
+| Issue manifest diff @ `85eb4b3` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `85eb4b3` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `85eb4b3` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 

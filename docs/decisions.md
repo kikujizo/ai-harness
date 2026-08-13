@@ -3825,9 +3825,10 @@ cleanup execution に流用しない。
 | 新 canonical proposal（v3） | 固定 | #5276309603 |
 | HUMAN_APPROVAL_RECORD: v2（v3, route=claude-code, scope=implementation_start） | **approve** | #5276357583 |
 | **v3実装開始時HEAD** | `1eccda8558a57138a9382811301c40d18341fad4` | 独立技術レビュー時点のblocked HEAD。本ラウンドの実装起点 |
-| v3実装tip | **次コミットで同期**（本ファイルへの自己参照を避けるため） | 本ラウンドの4ファイル実装コミット完了後、別コミットでSHAとローカル検証結果を追記する（`a3aeac8`→`1bd64cb`の既存precedentに準拠） |
-| Fail-closed success propagation @ v3実装tip | **次コミットで同期** | ローカル `harness/checks/fail-closed-success-propagation.cjs` 実行結果を反映予定 |
-| Issue manifest diff @ v3実装tip | **次コミットで同期** | ローカル `harness/checks/issue-manifest-diff.cjs` 実行結果を反映予定 |
+| **v3実装tip** | `7a24e94a42b9cdd69d615122864023adca7558b0` | safe create・RUN_LOCK identity binding・cleanup pre/post binding・`residue=present` only を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `7a24e94` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head 7a24e94a42b9cdd69d615122864023adca7558b0`）。GitHub Actions run IDはCI実行後にPR側で別途確認する |
+| Fail-closed success propagation @ `7a24e94` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（対象拡張子`.sh/.js/.cjs/.mjs/.yml/.yaml`が今回diffに含まれないため）。GitHub Actions run IDはCI実行後にPR側で別途確認する |
+| `git diff --check origin/main...HEAD` @ `7a24e94` | **success**（exit 0） | ローカル実行確認 |
 | ChatGPT要件レビュー（v3 fixed HEAD） | **未実施** | v3実装tip確定後 |
 | Codex独立技術レビュー（v3 fixed HEAD） | **未実施** | 同上。Claude Codeは自分から新しいCodexレビューを起動しない |
 | `HIGH_RISK_TECH_GATE`（v3） | blocked / pending | 両レビュー完了前に進まない |

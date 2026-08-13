@@ -3674,7 +3674,7 @@ local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-i
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
 - `.cursor/rules/ai-workflow.mdc` にidentity-root・`LOCK_CHAIN`/`RUN_CHAIN` 別検証・
   lock bootstrap限定・`RUN_LOCK` 取得後run側作成・exact completion record・
-  cleanup read-only gate（A0–A7/B0–B8制御順序）を短く追記
+  cleanup read-only gate（A0–A9/B0–B8制御順序）を短く追記
 - `docs/harness/roles/cursor.md` は正本参照を維持し設計意図・chain分離・lock bootstrap順序のみ同期
 - `docs/harness/setup.md` にfresh bootstrap成功・bootstrap安全性不明・bind mount判定不能・
   lock/run chain分岐・cleanup missing path・post-approve drift・否定例・fail-closed 8基準の実装後照合記録

@@ -60,7 +60,14 @@ Cursor-specific rules only:
   不一致 → `identity_root_mismatch`。取得不能/0/複数/path不正 → `identity_root_unresolved`。
   unsupported OS → `identity_root_unsupported`）else EARLY blocked
   A1 segment検証: `repo_slug`/`run_id` が `"."` または `".."` → 即 `invalid_run_segment`（regex より先に exact 拒否）。
-  さらに各 segment は `[A-Za-z0-9._-]+` の1 segmentのみ（空・`/`・`\`・多段不可）。不正 → `invalid_run_segment`
+  さらに各 segment は `[A-Za-z0-9._-]+` の1 segmentのみ（空・`/`・`\`・多段不可）。不正 → `invalid_run_segment`。
+  **Windows native**: 上記通過後・`RUN_LOCK`/`RUN_ROOT` の作成/open より前に、OS/runtime 標準の
+  path 正規化関数（例: `GetFullPathNameW` 相当。対象の実在を前提にしない）で各 segment 単独の
+  canonical leaf を求め、入力 segment と canonical leaf が exact 一致しない場合
+  （例: 末尾 `.`/space alias で `foo.` が `foo` に canonicalize される等、regex 通過後も
+  別 segment へ alias する値）→ `invalid_run_segment`。alias を正規化・読み替えて受理せず、
+  入力そのものを拒否する。canonicalization を実行・評価できない場合も safe 扱いせず
+  `invalid_run_segment`
   A2 chain定義: 上記 `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN`。`LOCK_ROOT` と `RUN_ROOT` を単一chainにしない
   A3 path safety（既存 component ごと read-only。unknown を safe 扱いしない・package 導入禁止）:
   **Linux/WSL**: symlink 拒否；owner UID == `CURRENT_UID`；group/world write bits `0022` 拒否；
@@ -116,7 +123,8 @@ Cursor-specific rules only:
   作成不能 → provenance 未成立。通常作業中は cleanup しない
   **B. cleanup candidate（role=cleanup。本PRは契約のみ。実 delete 禁止）** — writer bootstrap 非適用:
   B0 identity-root 再 resolve
-  B1 segment検証（A1 と同一契約: `"."`/`".."` exact 拒否→regex 1 segment）
+  B1 segment検証（A1 と同一契約: `"."`/`".."` exact 拒否→regex 1 segment→Windows native では
+  canonical leaf との exact 一致検証。不一致・評価不能 → `invalid_run_segment`）
   B2 exact **`scratch-completion/v2`** provenance record 1件を取得・照合（path/repo-wide 検索から推測しない。
   **`scratch-completion/v1` は受理しない。v1→v2 推測昇格・補完禁止。**
   不在/v1のみ/不一致 → `provenance_unknown`/`provenance_mismatch`；`residue=none` は候補外）

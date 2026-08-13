@@ -275,7 +275,8 @@ branch `issue-121-ambiguous-comprehensive-instruction-scope`。
 
 #### 一時scratch / cleanup境界（Issue #54 Checkpoint・10件）
 
-制御フロー正本: `.cursor/rules/ai-workflow.mdc`（A0–A7: role=writer / B0–B8: role=cleanup）。
+制御フロー正本: `.cursor/rules/ai-workflow.mdc`（A0–A9: role=writer / B0–B8: role=cleanup。
+A8=payload、A9=completion provenance）。
 `LOCK_CHAIN` と `RUN_CHAIN` は兄弟系統として別 branch 定義。単一 `PATH_CHAIN` は使わない。
 EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write/cleanup deleteより前に
 停止することを各否定例で観測する（`ai-workflow.mdc` の EARLY呼禁止節を構造grepで確認可能）。
@@ -333,6 +334,14 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `run_id=.` / `run_id=..` を渡し、`result=blocked` `stop_reason=invalid_run_segment`
   `scratch_created=false` `run_root_created=false` `path_created=false` `cleanup=false` とし、
   A1/B1 失敗後に A4–A6 / B3–B5 へ進まないことを確認する（`"."`/`".."` は regex より先に exact 拒否）。
+- **Windows canonicalization alias（否定例・EARLY）**: Windows native で `run_id=foo.`（末尾ドット）のように、
+  regex検証は通過するが OS/runtime 標準の path 正規化で別 segment（`foo`）へ alias する値を渡し、
+  validated segment と canonical leaf が exact 一致しないため `result=blocked`
+  `stop_reason=invalid_run_segment` `run_lock_created=false` `run_root_created=false`
+  `instance_marker_created=false` `payload_written=false` `completion_record_created=false`
+  `cleanup=false` となることを確認する。A1/B1 失敗後に path 作成・lock 作成・payload・
+  completion record・cleanup へ進まない（alias を正規化して受理せず、入力自体を拒否する。
+  canonicalization 評価不能も同様に blocked）。
 - **run lock競合（否定例・EARLY）**: 同一 `repo_slug/run_id` で `run_lock=conflict` を渡し、
   `result=blocked`、`stop_reason=run_lock_conflict`、`cleanup=false` とし、待機・steal・
   lock file削除による突破がないことを確認する。
@@ -376,7 +385,7 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 |---|---|---|---|
 | `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift・marker/commitment mismatch を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止 | continue |
 | `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールド。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
-| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
+| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
 | `persistent-claim-bypass` | pass | local marker は create-new/no-overwrite・collision・payload による marker 変更禁止・completion v2 exact binding・pre/post 再取得で bypass 不可（Issue #54 §fail-closed 8） | continue |
 | `verify-before-mutate` | pass | A4 bootstrap→A5 lock→A6 run 作成→**A7 marker create/verify→A8 payload**。cleanup pre/post で marker binding・inventory exact 比較後のみ将来 delete | continue |
 | `provenance-no-fabrication` | pass | `scratch-completion/v2` + local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
@@ -394,6 +403,7 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | nested mount / bind mount / reparse（cleanup） | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B6 recursive safety 完了前に inventory/cleanup 未宣言 |
 | post-approve `RUN_LOCK` conflict | `result=blocked` `stop_reason=run_lock_conflict` `cleanup=false` `approval_reusable=false` | B8 既存 lock のみ open・新規作成なし |
 | `repo_slug=..` または `run_id=..` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` | A1/B1 失敗後 lock bootstrap・marker・payload 未作成 |
+| `run_id=foo.`（Windows canonical leaf alias） | `result=blocked` `stop_reason=invalid_run_segment` `run_lock_created=false` `run_root_created=false` `instance_marker_created=false` `payload_written=false` `completion_record_created=false` `cleanup=false` | A1/B1 失敗後 lock/root/marker/payload/completion/cleanup 未作成（canonicalization alias を正規化受理しない） |
 | `LOCK_ROOT` 親 safety 不明 | `result=blocked` `stop_reason=path_safety_unknown` `run_root_created=false` | bootstrap 失敗後 marker/payload 未作成 |
 | mountinfo 評価不能 | `result=blocked` `stop_reason=path_safety_unknown` `scratch_created=false` | device ID 照合だけで pass しない |
 | `USERPROFILE`/`HOME` が `TRUSTED_HOME` と不一致 | `result=blocked` `stop_reason=identity_root_mismatch` | mkdir/marker/payload/cleanup より前に停止 |

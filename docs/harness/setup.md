@@ -321,8 +321,11 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `RUN_CHAIN`（`RUN_BASE`→`RUN_ROOT`）が別定義・別検証であり、
   `LOCK_ROOT` と `RUN_ROOT` を単一祖先chainとして扱わないことを確認する。
 - **Windows identity-root・lock取得成功**: current SID→`Win32_UserProfile.LocalPath` で
-  `TRUSTED_HOME` が一意に得られ、lock bootstrap→`RUN_LOCK` 取得（writer: `OpenOrCreate`+`FileShare=None`）後、
-  lock保持中に `RUN_ROOT` へ書込できることを確認する。
+  `TRUSTED_HOME` が一意に得られ、lock bootstrap後、`RUN_LOCK` missingならreparse非followの
+  create-new、existingならreparse非followのopen-existingで区別して取得し、`FileShare=None`相当で
+  non-blocking exclusive取得する。取得直後にopened handleと現在の `RUN_LOCK` path entryの
+  stable file identity（`FILE_ID_INFO`相当）をexact照合し、一致した場合のみlock保持中に
+  `RUN_ROOT` へ書込できることを確認する（`OpenOrCreate`一発の陽性経路は使わない）。
 - **Linux/WSL identity-root・lock取得成功**: `id -u`→`getent passwd`第6フィールドで
   `TRUSTED_HOME` が得られ、mountinfo 評価・symlink/owner/mode/ACL/special/canonical検証後、
   `flock` non-blocking exclusive 取得→lock保持中に `RUN_ROOT` 書込→completion record作成を確認する。

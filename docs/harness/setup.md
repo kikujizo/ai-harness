@@ -371,6 +371,35 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
 - **中断・部分失敗・確認不能**: cleanup中断・部分失敗・結果確認不能を成功扱いせず、
   `stop_reason=cleanup_interrupted` または `cleanup_result_unknown` で `blocked` とし、
   残留再検出と前回approve再利用禁止を確認する。
+- **Linux umask=0002でもsafe create成功**: `umask=0002` 環境で `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/
+  `LOCK_ROOT`/`RUN_BASE`/`RUN_ROOT` が missing の状況を渡し、各 directory の requested/observed mode が
+  process umask に関わらず `0700` exact で作成され、新規 `RUN_LOCK` の requested/observed mode が
+  `0600` exact で作成されることを確認する。
+- **safe attribute観測不能（否定例・EARLY）**: directory/lock作成直後に mode・owner・DACL等のsafe属性を
+  取得・評価できない状況を渡し、`result=blocked` `stop_reason=path_safety_unknown` とし、
+  作成済みentryの自動削除・chmod/ACL自動repairをせず既存entryをそのまま残すことを確認する。
+- **unsafe lock attributes（否定例）**: 新規作成した `RUN_LOCK` の観測modeが `0600` exactでない、
+  または既存 `RUN_LOCK` に group/world write bit（`0022`相当）が立っている状況を渡し、
+  `result=blocked` `stop_reason=path_safety_failed` `run_root_created=false`
+  `instance_marker_created=false` `payload_written=false` `completion_record_created=false` とし、
+  `RUN_ROOT`/marker/payload/completionへ進まないことを確認する。
+- **RUN_LOCK path swap（否定例・pre-approval）**: writerまたはcleanupがnon-blocking exclusive取得した
+  直後、opened handleのfile identity（Linux: device+inode／Windows: `FILE_ID_INFO`相当）と現在の
+  `RUN_LOCK` path entryのfile identityが不一致の状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed` とし、以降のrun作成・payload・completion・cleanup技術ゲートへ
+  進まないことを確認する。
+- **post-approval再取得でも同一identity再確認（否定例）**: pre-approval時に観測したhandle/path identityを
+  再利用せず、post-approvalで `RUN_LOCK` をゼロから再取得したうえで再度exact比較する状況を渡し、
+  再取得直後の比較で不一致が検出された場合 `result=blocked` `cleanup=false` `approval_reusable=false`
+  となることを確認する。
+- **削除mutation直前のidentity再確認（否定例）**: post-approval再取得直後の比較・recursive path safety・
+  marker binding・inventory再検証はすべて成立したが、最初の削除mutation直前に行う2回目のhandle/path
+  identity比較でのみ不一致が検出される状況を渡し、`result=blocked` `stop_reason=path_safety_failed`
+  `cleanup=false` とし、直前までの全項目成立が最終確認省略の理由にならないことを確認する。
+- **residue=none拒否（否定例・A9到達後）**: `RUN_ROOT` と有効な `RUN_INSTANCE_MARKER` が既に存在する状態で
+  writerが `residue=none` のcompletion recordを作成しようとする状況を渡し、
+  `completion_record_created=false` `result=blocked` `stop_reason=provenance_unknown` となり、
+  `residue=none` を成立させる別writerフローが存在しないことを確認する。
 
 **試験実施記録（Issue #54・実装後照合・実施: Cursor）**
 
@@ -383,13 +412,13 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 
 | criterion | result | basis | next_action |
 |---|---|---|---|
-| `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift・marker/commitment mismatch を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止 | continue |
+| `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift・marker/commitment mismatch・handle/path identity不一致を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止。`residue=present` only化により、`RUN_ROOT`/marker存在時に`residue=none`を成功として取りこぼす経路が塞がれた | continue |
 | `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールド。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
-| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
+| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A4/A6 新規directoryをLinux/WSL `0700`固定・Windows safe owner/DACLで1段create→直後再検証。A5/B5/B8 `RUN_LOCK`のcreate-new/open-existing区別＋取得直後・completion直前・post-approval再取得直後・削除mutation直前のhandle/path identity exact binding。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
 | `persistent-claim-bypass` | pass | local marker は create-new/no-overwrite・collision・payload による marker 変更禁止・completion v2 exact binding・pre/post 再取得で bypass 不可（Issue #54 §fail-closed 8） | continue |
-| `verify-before-mutate` | pass | A4 bootstrap→A5 lock→A6 run 作成→**A7 marker create/verify→A8 payload**。cleanup pre/post で marker binding・inventory exact 比較後のみ将来 delete | continue |
-| `provenance-no-fabrication` | pass | `scratch-completion/v2` + local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
-| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。post-approve reacquire・marker/commitment mismatch・inventory drift 検出 | continue |
+| `verify-before-mutate` | pass | A4/A6 safe create→直後再検証。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 marker create/verify→A8 payload**→A9 completion直前のhandle/path identity再確認。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較に加え、**B8(8) 最初の削除mutation直前にも同じhandle/path identityを再確認してからのみ**将来delete対象へ進む | continue |
+| `provenance-no-fabrication` | pass | `scratch-completion/v2`（`run_state=completed`/`residue=present` only）+ local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・`residue=none`・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。marker/commitment mismatch・inventory drift 検出 | continue |
 | `override-test-hook-isolation` | not_applicable | Issue #54 は override/test hook を導入しない（4ファイル文書のみ） | continue |
 
 ##### 否定テスト観測例（文書契約・EARLY非実行の証明）
@@ -411,6 +440,13 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | `scratch-completion/v1` のみ | `result=blocked` `stop_reason=provenance_unknown` `cleanup=false` | v1 受理・v2 推測昇格禁止（B2） |
 | approve後 `inventory_changed=true` | `result=blocked` `stop_reason=inventory_changed` `approval_reusable=false` | 古い approve で削除継続なし |
 | approve後 provenance drift | `result=blocked` `stop_reason=approval_stale` `cleanup=false` | post-approve 再検証で drift 検出 |
+| umask=0002下でのdirectory/lock作成 | `directory observed_mode=0700` `lock observed_mode=0600`（いずれもexact） | A4/A6/A5 requested modeがumaskに依存しない固定値 |
+| safe attribute観測不能（作成直後） | `result=blocked` `stop_reason=path_safety_unknown` | 作成済みentryの自動削除・chmod/ACL自動repairなし |
+| unsafe lock attributes（`0600`/`0022`逸脱） | `result=blocked` `stop_reason=path_safety_failed` `run_root_created=false` `instance_marker_created=false` `payload_written=false` `completion_record_created=false` | A5でRUN_ROOT/marker/payload/completion未到達 |
+| `RUN_LOCK` path swap（取得直後） | `result=blocked` `stop_reason=path_safety_failed` | A5/B5でhandle/path identity不一致を検出、以降のmutationへ進まない |
+| post-approval再取得後のidentity不一致 | `result=blocked` `cleanup=false` `approval_reusable=false` | B8(3)でpre-approval時の観測を再利用せずゼロから再比較 |
+| 削除mutation直前のみidentity不一致 | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B8(8)で直前までの全項目成立が最終確認省略の理由にならない |
+| `RUN_ROOT`/marker存在下での`residue=none`試行 | `result=blocked` `stop_reason=provenance_unknown` `completion_record_created=false` | A9でresidue=presentのみ受理、noneを成立させる別フローなし |
 
 ## 既存リポジトリへの導入（差分マージ方式）
 

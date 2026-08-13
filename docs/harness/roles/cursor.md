@@ -38,10 +38,19 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   `RUN_LOCK` 取得後に `RUN_BASE`/`RUN_ROOT` を作成し、**payload 前に fresh 256-bit `instance_nonce` と
   `RUN_INSTANCE_MARKER`（create-new/read-back）を作成**する。既存 safe `RUN_ROOT` は
   `run_root_collision` で blocked（再利用・resume 禁止）。completion は `scratch-completion/v2`
-  （`instance_commitment` のみ。v1 非受理）。
-  writerとcleanupは同一 `RUN_LOCK` を non-blocking exclusive で必ず取得する
-  （Linux: flock / Windows writer: `OpenOrCreate`+`FileShare=None`、
-  Windows cleanup: 既存 lock file のみ open・`OpenOrCreate` 禁止）。
+  （`instance_commitment` のみ。v1 非受理。**`run_state=completed` / `residue=present` only**——
+  `residue=none` は writer 正常フローでは受理しない。到達状態と否定例の正本は `.cursor/rules/ai-workflow.mdc` A9）。
+  **新規 directory は umask/既定 ACL に頼らず、Linux/WSL は requested/observed mode `0700` 固定、
+  Windows は作成時点から safe owner/DACL を要求し、作成直後に同一 OS の path safety を再検証する
+  （`RUN_LOCK` も同じ規則で Linux/WSL は `0600` 固定）。**
+  writerとcleanupは同一 `RUN_LOCK` を non-blocking exclusive で必ず取得する。
+  **`RUN_LOCK` の取得は曖昧な `OpenOrCreate` 一発ではなく create-new と open-existing を区別し
+  （Linux: `flock` / Windows writer: reparse非followのcreate-new・open-existing + `FileShare=None`、
+  Windows cleanup: 既存 lock file のみ open・`OpenOrCreate` 禁止）、取得直後に opened handle と
+  現在の `RUN_LOCK` path entry の file identity（Linux: device+inode／Windows: `FILE_ID_INFO` 相当）を
+  exact 比較する。writer は completion record 作成直前、cleanup は pre-approval 取得直後と
+  post-approval 再取得直後・最初の削除 mutation 直前にも同じ比較を行い、不一致・判定不能なら
+  mutation へ進まない（詳細は `.cursor/rules/ai-workflow.mdc` A5/B5/B8）。**
   identity-rootは Windows nativeではcurrent SID→`Win32_UserProfile.LocalPath`、
   Linux/WSLでは `id -u`→`getent passwd`第6フィールド。`USERPROFILE` /
   `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能時はscratch作成も

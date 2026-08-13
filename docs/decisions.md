@@ -3639,10 +3639,24 @@ local `scratch-instance/v1` marker から再計算した `instance_commitment` �
 `record_type=scratch-completion/v2`、`repo_full_name`、`repo_slug`、`run_id`、
 相対 `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、
 `instance_commitment=sha256:<64 lowercase hex>`、`run_state=completed`、
-`residue=present|none` を照合する。**`scratch-completion/v1` は受理しない。v1 から instance binding を
+**`residue=present`**（`residue=none` は writer 正常フローでは禁止。A9到達時には `RUN_ROOT` と
+`RUN_INSTANCE_MARKER` が存在するため通常到達不能であり、`none` を成立させる別 writer フローは
+新設しない）を照合する。**`scratch-completion/v1` は受理しない。v1 から instance binding を
 推測・補完・昇格しない。** **`run_id` 単独は provenance 証拠にならない。**
 `instance_nonce` は GitHub へ書かない。旧仕様の canonical absolute scratch root を
 GitHubへ記録する方式は撤回し、absolute local home path・個人情報はGitHubへ書かない。
+
+**（再仕様化v3・safe create/lock identity binding）** writerが新規作成するdirectory（`CACHE_ROOT`/
+`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`/`RUN_BASE`/`RUN_ROOT`）は、process umaskや既定ACLに安全性を
+委ねず、Linux/WSLはrequested/observed mode `0700` 固定、Windowsは作成時点からcurrent SID/SYSTEM/
+BUILTIN\Administrators以外へwrite/modify/delete相当を与えないowner/DACLを要求し、作成直後に同一OS検査で
+再検証する。`RUN_LOCK` の取得は曖昧な `OpenOrCreate` 一発ではなくcreate-new/open-existingを区別し
+（Linux/WSL新規lockは `0600` 固定）、**取得直後にopened handleのfile identity（Linux: device+inode／
+Windows: `FILE_ID_INFO`相当）と現在の `RUN_LOCK` path entryのfile identityをexact比較する**。
+writerはcompletion record作成直前にも同じ比較を行い、cleanupはpre-approval取得直後と
+post-approval再取得直後・**最初の削除mutation直前**の計4箇所で同じ比較を行う。不一致・判定不能は
+`path_safety_failed`/`path_safety_unknown` としてmutationへ進まない。同一opened lock handleは
+削除完了確認まで保持する。
 
 通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` 1件に対しidentity・exact provenance・
 path safety・inventory・`RUN_LOCK` 取得を含むread-only技術ゲート全成立後にのみ
@@ -3669,6 +3683,17 @@ local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-i
 新 `HUMAN_APPROVAL_RECORD: v2` `#5263876000`、Codex PM route `#5263894169`（route=cursor）が
 本再仕様化後の実装開始正本。
 
+**再仕様化v3（safe create / RUN_LOCK identity binding）**: fixed HEAD `1eccda8` に対する独立技術レビューで、
+非outdated・未解決として次の4件が確認された。(1) 新規 `RUN_LOCK` を取得直後にmode/path-safety再検証する、
+(2) A9では通常到達不能な `residue=none` を許可しない、(3) writer bootstrapで新規directoryをumask任せに
+せず安全なmode/ACLで作る、(4) cleanupで取得したlock handleを検証済み `RUN_LOCK` path entryとfile identity
+で束縛する。Codex PM `#5276235137` はこれらをIssue正本の不足/矛盾としてChatGPTへ再仕様化差し戻しした。
+前段 proposal `#5274678076` / `implementation_start` record `#5276117459` は限定scopeの使用済み記録であり、
+本再仕様化へ流用しない（実装は着手されず、fixed HEAD `1eccda8` は変更していない）。
+新 canonical proposal `#5276309603`（Codex PMは「今回依頼で明示された例外担当」としてClaude Codeを
+`PROPOSED_ROUTE` に提示）、新 `HUMAN_APPROVAL_RECORD: v2` `#5276357583`
+（`proposed_route=claude-code` で承認）が本ラウンドの実装開始正本。
+
 ## 採用する方針
 
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
@@ -3680,6 +3705,12 @@ local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-i
   lock/run chain分岐・cleanup missing path・post-approve drift・否定例・fail-closed 8基準の実装後照合記録
 - provenanceはpath名推測禁止。exact GitHub record + local再検証の組み合わせ
 - Windowsはcurrent SIDと `Win32_UserProfile.LocalPath` の対応をルール契約として記述
+- **（v3）** 新規directory作成はLinux/WSL `0700`・Windows safe owner/DACLをrequested値として固定し、
+  作成直後に同一OS検査で再検証する（umask/既定ACL任せにしない）
+- **（v3）** `RUN_LOCK` はcreate-new/open-existingを区別して取得し、取得直後・completion直前
+  （writer）／取得直後・post-approval再取得直後・削除mutation直前（cleanup）の計4箇所で
+  opened handleと現在のpath entryのfile identityをexact比較する
+- **（v3）** completion v2のwriter正常フローは `residue=present` のみを許可する
 
 ## 採用しない方針 / 却下した代替案
 
@@ -3695,6 +3726,12 @@ local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-i
 - **固定manifest外ファイルの追加**: Issue境界を超えるため却下
 - **環境変数優先またはOS側無条件優先の不一致fallback**: 両方禁止
 - **fail-closedのままcleanupを常時blockedに縮小**: Checkpoint目的と矛盾するため却下
+- **（v3）曖昧な `OpenOrCreate` 一発での `RUN_LOCK` 取得**: create/existingが不分離のままだと
+  取得直後の対象file特定が曖昧になりTOCTOU（取得後のpath差し替え）を検出できないため却下
+- **（v3）writer正常フローでの `residue=none` 受理**: A9到達時は `RUN_ROOT`/marker が存在し
+  通常到達不能な状態を記録することになり、誤ったresidue無し記録を許すため却下
+- **（v3）新規directory作成時のumask/既定ACL依存**: 環境のumask設定次第でmodeが変動し
+  非決定的な安全性になるため却下し、requested modeを明示固定した
 
 ## 判断理由
 
@@ -3781,6 +3818,19 @@ cleanup execution に流用しない。
 | Claude Code 例外委譲（CI復旧確認・記録限定） | 完了 | [#5264479320](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264479320) 委譲 → [#5264545733](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264545733) 記録 |
 | Codex PM route再評価（AC4修正のactor候補） | `PM_VERDICT: approve risk=high gate=human_approval` / `PROPOSED_ROUTE: claude-code` | [#5264655488](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264655488) / proposal本文 [#5264648223](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5264648223)。既存承認 `#5263876000`（`proposed_route=cursor`）はactor変更へ流用不可のため新規承認が必要と判定 |
 | HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=docs/decisions.md最小同期） | **approve** | [#5264680032](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264680032)。`docs/decisions.md`のみが対象。他3ファイル・merge・settings_apply・execution・実cleanupへは流用しない |
+| fixed HEAD `1bd64cb`以降の再要件レビュー・独立技術レビュー | **superseded** | 上記4件は完了前にv3再仕様化（下記）へ差し替わり、fixed HEADが `1eccda8` へ進んだため対象外。旧HEAD `1bd64cb`向けの指摘はv3実装で個別に再確認する |
+| **（v3再仕様化）** Codex独立技術レビュー（新規4指摘の確認） | 未解決4件を特定 | #5276235137（新規`RUN_LOCK`再検証・A9 `residue=none`拒否・writer safe mode/ACL・cleanup handle/path binding） |
+| 旧 canonical proposal（v3前段） | **非流用**（実装未着手のまま差し替え） | #5274678076 |
+| 旧 `implementation_start` approval（v3前段） | **非流用**（実装未着手のまま差し替え） | #5276117459 |
+| 新 canonical proposal（v3） | 固定 | #5276309603 |
+| HUMAN_APPROVAL_RECORD: v2（v3, route=claude-code, scope=implementation_start） | **approve** | #5276357583 |
+| **v3実装開始時HEAD** | `1eccda8558a57138a9382811301c40d18341fad4` | 独立技術レビュー時点のblocked HEAD。本ラウンドの実装起点 |
+| v3実装tip | **次コミットで同期**（本ファイルへの自己参照を避けるため） | 本ラウンドの4ファイル実装コミット完了後、別コミットでSHAとローカル検証結果を追記する（`a3aeac8`→`1bd64cb`の既存precedentに準拠） |
+| Fail-closed success propagation @ v3実装tip | **次コミットで同期** | ローカル `harness/checks/fail-closed-success-propagation.cjs` 実行結果を反映予定 |
+| Issue manifest diff @ v3実装tip | **次コミットで同期** | ローカル `harness/checks/issue-manifest-diff.cjs` 実行結果を反映予定 |
+| ChatGPT要件レビュー（v3 fixed HEAD） | **未実施** | v3実装tip確定後 |
+| Codex独立技術レビュー（v3 fixed HEAD） | **未実施** | 同上。Claude Codeは自分から新しいCodexレビューを起動しない |
+| `HIGH_RISK_TECH_GATE`（v3） | blocked / pending | 両レビュー完了前に進まない |
 
 ## 次アクション
 
@@ -3792,9 +3842,19 @@ cleanup execution に流用しない。
 - [x] fixed HEAD `1bd64cb` で expected workflow 2本 success（manifest diff run `31580948676` / success propagation run `31578332485`）
 - [x] ChatGPT 要件レビュー（fixed HEAD `1bd64cb`、#5264631720）→ **request-changes risk=high**（AC4のみ未充足）
 - [x] Codex PM route再評価・新HUMAN_APPROVAL_RECORD: v2（route=claude-code、#5264680032）→ `docs/decisions.md` 最小同期をClaude Codeへ委譲確定
-- [x] Claude Code による `docs/decisions.md` 最小同期（本コミット。他3ファイルは変更しない）
-- [ ] 新HEAD（本コミット後）で `git diff --check` と固定4ファイル以内であることを確認
-- [ ] 新HEADで expected workflow 2本 success再確認
-- [ ] ChatGPT 再要件レビュー（AC4解消確認）
-- [ ] Codex 独立技術レビュー（本実装 fixed HEAD）
+- [x] Claude Code による `docs/decisions.md` 最小同期（AC4解消コミット。他3ファイルは変更しない）
+- [x] **（v3）** Codex独立技術レビューで新規4指摘を特定（#5276235137）→ ChatGPT再仕様化差し戻し
+- [x] **（v3）** Codex PM 新canonical proposal（#5276309603）
+- [x] **（v3）** 人間 `implementation_start` approve（#5276357583 / HUMAN_APPROVAL_RECORD: v2, route=claude-code）
+- [x] **（v3）** Claude Code による safe create・RUN_LOCK identity binding・cleanup pre/post binding・
+  `residue=present` only の固定4ファイル実装（本コミット）
+- [ ] v3実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [ ] 新HEADで `git diff --name-only origin/main...HEAD` が固定4ファイルのみであることを確認
+- [ ] 新HEADで `git diff --check` success を確認
+- [ ] 新HEADで Issue manifest diff success を確認
+- [ ] 新HEADで Fail-closed success propagation success を確認
+- [ ] ChatGPT 要件レビュー（v3 fixed HEAD）
+- [ ] Codex 独立技術レビュー（v3 fixed HEAD。Claude Codeは自分から起動しない）
+- [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PM）
+- [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

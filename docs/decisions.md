@@ -3861,7 +3861,10 @@ cleanup execution に流用しない。
 | `git diff --check origin/main...HEAD` @ `0840fbd` | **success**（exit 0） | ローカル実行確認 |
 | PR #132 コメント（fixed HEAD `0840fbd`のレビュー依頼） | 記録済み | [#5276786924](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5276786924) |
 | Codex PM補正判断（追加current thread 2件検出、A0/A7/A8/B8を今回修正と判定） | `PM_VERDICT: approve risk=high route=claude-code` | [#5277162613](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277162613)。A1は別途wontfix/resolved済み。既存proposal `#5276309603`/approval `#5276357583`を継続利用、新規発行なし |
-| **（PM補正）fixed tip** | **次コミットで同期**（自己参照回避のため） | 本ラウンドの4ファイル実装コミット完了後、別コミットでSHAとローカル検証結果を追記する |
+| **（PM補正）fixed tip** | `f8c80302b2b874e4e2d75602c84f144b458c86a5` | A0/A7/A8/B8補強コミット |
+| Issue manifest diff @ `f8c8030` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `f8c8030` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `f8c8030` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 

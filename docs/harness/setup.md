@@ -431,10 +431,12 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `size_bytes`/`sha256_lower_hex` がinventory記録値と不一致となり、`result=blocked`
   `stop_reason=inventory_changed` `cleanup=false` となることを確認する（identity一致をcontent一致の
   代替にしない）。
-- **directory child集合drift拒否（否定例・B8(9)）**: 配下descendant削除完了後、当該directory自体の
-  削除直前に再列挙したchild集合が(6)時点のinventoryと一致しない（別processによる追加・削除）状況を
-  渡し、`result=blocked` `stop_reason=inventory_changed` `cleanup=false` となり、directory自体の
-  削除に進まないことを確認する。
+- **directory child集合drift拒否（否定例・B8(9)）**: 配下descendantを検証・削除した後、当該directory
+  自体の削除直前に残余child集合を再列挙した結果、(a) 削除対象として検証済みのchildが1件未削除で
+  残っている、または (b) (6)時点のinventoryに記録のないentryが1件出現している状況を渡し、
+  `result=blocked` `stop_reason=inventory_changed` `cleanup=false` となり、directory自体の削除に
+  進まないことを確認する（残余集合とinventory記録集合のexact一致は削除がbottom-upであるため
+  要求しない。空であることと承認snapshot外混入の不在という会計条件で判定する）。
 - **A9到達後のlock drift時のpayload保全（否定例・A9）**: A8がpayload作成まで成功した後、completion
   作成直前の `RUN_LOCK` handle/path identity再確認でdriftを検出した状況を渡し、`result=blocked`
   `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `completion_record_created=false`

@@ -170,9 +170,11 @@ Cursor-specific rules only:
   `residue=none` を成立させる別 writer フローは新設しない）**）。
   作成直前に、保持している opened lock handle と現在の `RUN_LOCK` path entry の file identity を
   再確認する（不一致 → `path_safety_failed`、判定不能 → `path_safety_unknown`。いずれも blocked、
-  completion 未作成。**A8 は既に成功しておりpayloadは作成済みのため、この分岐で
-  `payload_written=false` と報告してはならない。payloadは作成済み・残留し得る状態として保持し、
-  自動削除・repair・resumeへ拡張しない。cleanupは既存の技術ゲート（B0–B8）を経ずに開始しない**）。
+  completion 未作成。**A8 は既に成功しておりpayloadは作成済みのため、この分岐は
+  `payload_written=true` `completion_record_created=false` `result=blocked` として記録する
+  （`payload_written=false` と報告してはならない）。payloadは作成済み・残留し得る状態として
+  recovery/residue処理のために記録を保持し、自動削除・repair・resumeへ拡張しない。cleanupは
+  既存の技術ゲート（B0–B8）を経ずに開始しない**）。
   **`scratch-completion/v1`、`residue=none`、`residue` 欠落、field 不足/重複/extra/invalid は
   valid completion v2 として受理しない → `provenance_unknown`。v1 から instance binding を
   推測・補完・昇格しない。**
@@ -254,9 +256,16 @@ Cursor-specific rules only:
   **regular fileはidentity一致だけでは同一inode/file ID上のin-place write（内容のみの書き換え）を
   検出できない。各unlink直前にno-followで `size_bytes` と `sha256_lower_hex` を再取得し、(6)の
   inventoryに記録された同一entryとexact一致することを追加で要求する。identity一致をcontent一致の
-  代替にしない。**
-  **directoryは配下descendantの削除完了後・当該directory自体の削除直前に、現存child集合を
-  再列挙し、(6)時点のinventoryに記録されたchild集合とexact一致することを確認する。**
+  代替にしない。size/hash再取得からunlinkまでの間にも理論上の書き換え window は残るため、
+  再取得直後は同じ検証済みno-follow handle/descriptorを用いて即時unlinkし、別pathの再解決や
+  追加の待機を挟まない。**
+  **directoryは配下descendantを本手順で検証・削除した後、当該directory自体の削除直前に、
+  残余child集合を再列挙する。削除は葉から根への順で行うため、(6)時点のinventoryに記録された
+  child集合とのexact一致は要求しない（削除済みchildが消えているのは正常）。代わりに次の
+  会計条件を両方満たすことを要求する: (a) 残余child集合が空であること（削除対象として検証済みの
+  childが1件でも未削除で残っていれば削除に進まない）、(b) 残余集合に(6)時点のinventoryへ
+  記録がないentryが1件でも出現していないこと（承認snapshot外からの新規混入を許さない）。
+  いずれかを満たさない、または列挙・評価不能な場合は削除に進まない。**
   追加・置換・差し替え・content不一致・child集合の増減・type変化・判定不能を1件でも検出した場合は
   削除に進まない（content/child集合の不一致は既存 `inventory_changed`、identity/type/safety不一致は
   既存 `path_safety_failed`、安全性を証明できないものは既存 `path_safety_unknown`、inventory内容を

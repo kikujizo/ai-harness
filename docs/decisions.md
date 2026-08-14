@@ -4045,6 +4045,11 @@ cleanup execution に流用しない。
 | **（v5）** HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=implementation_start） | **approve** | [#5289615101](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289615101) |
 | **（v5）** route確定プリフライト | `@codex`宛て | [#5289663239](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289663239)（ChatGPT） |
 | **（v5）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=claude-code` | [#5289667993](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289667993)（Codex本人が投稿） |
+| **（v5）実装tip** | `e7b993e67696af831c8a47a77a80c22b10460809` | 6 finding（RUN_ROOT identity baseline・Windows share条件・A8 B6同等rescan・directory bottom-up accounting・capability unavailable観測例・A8 post-write residue肯定記録）を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `e7b993e` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head e7b993e67696af831c8a47a77a80c22b10460809`） |
+| Fail-closed success propagation @ `e7b993e` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head e7b993e67696af831c8a47a77a80c22b10460809`） |
+| `git diff --name-only origin/main...HEAD` @ `e7b993e` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `e7b993e` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 

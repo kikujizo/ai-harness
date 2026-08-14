@@ -146,9 +146,11 @@ Cursor-specific rules only:
   `repo_slug=<exact>`、`run_id=<exact>`、
   `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`。
   (4) marker 作成直後に、**Linux/WSLは observed mode `0600` exact・owner・entry type・canonical boundary**、
-  **Windowsは owner/DACL・reparse・type・canonical boundary** を再検証し、併せて canonical content・
-  read-back exact を検証する。unsafeまたは判定不能（`path_safety_failed`/`path_safety_unknown`）は
-  payloadへ進めない。失敗 → `provenance_unknown`、payload/completion 未作成。payload は marker を
+  **Windowsは owner/DACL・reparse・type・canonical boundary** を再検証する。unsafeまたは判定不能は
+  `path_safety_failed`/`path_safety_unknown` としてpayloadへ進めない（この分岐で確定した stop reason を
+  `provenance_unknown` で上書きしない）。上記safety再検証に合格した場合のみ、続けて canonical content・
+  read-back exact を検証する。schema不一致・decode不能・read-back不一致等の純粋な provenance 失敗 →
+  `provenance_unknown`、payload/completion 未作成。payload は marker を
   変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
   A8 **A7 成功後のみ** scratch payload を create/write する。
   **Linux/WSL**: payload directoryは `0700`、fileは `0600` を基本とし、少なくとも B6 の

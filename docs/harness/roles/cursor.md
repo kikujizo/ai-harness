@@ -73,14 +73,23 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` に対するread-only技術ゲート全成立後に
   のみ closed questionへ進む。将来の実cleanupは別 `execution` scopeの人間approveが必要。
   人間approveは技術ゲートを代替しない。approve後は既存 `RUN_LOCK` を non-blocking exclusive で
-  再取得し、recursive path safety と inventory をゼロから再検証し、削除完了確認までlockを保持する。
+  再取得し、recursive path safety と inventory をゼロから再検証する。delete mutationへ進むのは
+  Windowsでverified handle bindingが成立した場合のみで、その場合は削除完了確認までlockを保持する
+  （Linux/WSLはbinding不能のため mutationに進まずlockを保持したまま停止する）。
   **`RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。削除実行時は、
-  approve後に取得したinventoryの各child entryについてもno-followで実体identityを再取得し、
-  記録時点との一致をchild単位でmutation直前に確認する。regular fileはidentity一致だけでは
-  同一inode上のin-place writeを検出できないため、size/SHA-256もinventoryとexact再照合する。
-  directoryは配下削除後・自身の削除直前にchild集合を再列挙しinventoryと照合する。
-  追加・置換・差し替え・content不一致・child集合の増減を検出した場合は削除しない
-  （詳細は`.cursor/rules/ai-workflow.mdc` B8(9)）。**
+  approve後に取得した公開`run-inventory/v1`とは別のprocess-local child identity baseline
+  （B8(6)）を比較元に、各child entryの実体identity・type・path safetyをchild単位で読み取り専用
+  再確認する。regular fileはidentity一致だけでは同一inode上のin-place writeを検出できないため、
+  size/SHA-256もinventoryとexact再照合する。directoryは配下削除後・自身の削除直前にchild集合を
+  再列挙しinventoryと照合する。追加・置換・差し替え・content不一致・child集合の増減を検出した
+  場合は削除しない。**
+  **上記の再確認は読み取り専用であり、実際のdelete mutationはOS境界でのみ許可する。
+  Windowsは、削除直前に取得した**verified handle**（同一handle上でidentity/type/content再確認
+  済み）へdeleteを束縛できる場合だけ削除可能とし、pathname-onlyの`DeleteFile`/`RemoveDirectory`を
+  binding根拠にしない。Linux/WSLは、同一UIDの非協調processによるrename/replaceを現在許可された
+  APIでは原子的に排除できないため、read-only再確認が全てpassしても同一実体へのbindingを保証
+  できず、delete mutation前に`path_safety_unknown`で停止する（`unlink`等のpathname delete APIを
+  使わない。詳細は`.cursor/rules/ai-workflow.mdc` B8(9)）。**
   **A9でlock identity driftによりblockedとなった場合、A8で作成済みのpayloadを「未作成」と
   誤報しない。payloadは残留し得る状態として保持し、completion未作成・blockedのまま自動delete/
   repair/resumeへ進まない（詳細は`.cursor/rules/ai-workflow.mdc` A9）。**

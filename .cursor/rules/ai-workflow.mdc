@@ -244,21 +244,26 @@ Cursor-specific rules only:
   (6) lock 保持中に canonical inventory をゼロから再取得し、approved `inventory_version` /
   `inventory_digest` / `entry_count` と exact 比較。不一致 → `inventory_changed` `cleanup=false`
   `approval_reusable=false`。取得不能 → `inventory_unavailable` `cleanup=false`。
+  **併せて、公開 `run-inventory/v1`（file: path/size/hash、directory: path のみ）とは別に、
+  process-local・非公開の child identity baseline を `RUN_INSTANCE_MARKER` を含む全 descendant に
+  ついてゼロから取得する: `child_identity_map[path_b64] = {entry_type: regular_file|directory,
+  identity: (Linux/WSL は device+inode 相当／Windows は `FILE_ID_INFO` 相当)}`。
+  取得先は memory/process-local のみとし、GitHub・completion record・公開 inventory・ログへ
+  identity を出さない。baseline を取得できない、または取得経路の信頼性を証明できない場合は
+  `path_safety_unknown` として `cleanup=false` `approval_reusable=false`。このbaselineが
+  (9) の child 単位再確認の比較元となる（`run-inventory/v1` の schema/version は変更しない）。**
   (7) `run_state=completed` / exact target / operation / `instance_commitment` を再確認。
   **(8) 最初の削除 mutation 直前にも、(3)で取得した同じ opened lock handle と現在の `RUN_LOCK`
   path entry の file identity を再度 exact 比較する。不一致または判定不能なら削除へ進まない
   （`path_safety_failed`/`path_safety_unknown`、`cleanup=false`）。**
   **(9) `RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。(6)で取得した
-  inventoryの各child entry（file/directory）について、削除実行時にno-followで再取得した実体identity
-  （Linux: device+inode／Windows: `FILE_ID_INFO`相当の stable file identity）が(6)時点で記録した対象と
-  一致することを、各childのmutation直前に個別に確認する。併せてtype（regular file/directory）と
-  path safetyもchild単位で再確認する。
+  process-local child identity baseline（`child_identity_map`）を比較元として、削除対象となる
+  各child（`RUN_INSTANCE_MARKER`を含む）についてno-followで再取得した実体identity・type・
+  path safetyが、baseline記録時点の対象と一致することを child 単位で確認する（読み取り専用の
+  再検証）。identity不一致は `path_safety_failed`、比較不能は `path_safety_unknown`。**
   **regular fileはidentity一致だけでは同一inode/file ID上のin-place write（内容のみの書き換え）を
-  検出できない。各unlink直前にno-followで `size_bytes` と `sha256_lower_hex` を再取得し、(6)の
-  inventoryに記録された同一entryとexact一致することを追加で要求する。identity一致をcontent一致の
-  代替にしない。size/hash再取得からunlinkまでの間にも理論上の書き換え window は残るため、
-  再取得直後は同じ検証済みno-follow handle/descriptorを用いて即時unlinkし、別pathの再解決や
-  追加の待機を挟まない。**
+  検出できない。`size_bytes` と `sha256_lower_hex` を再取得し、(6)の `run-inventory/v1` に記録された
+  同一entryとexact一致することを追加で要求する。identity一致をcontent一致の代替にしない。**
   **directoryは配下descendantを本手順で検証・削除した後、当該directory自体の削除直前に、
   残余child集合を再列挙する。削除は葉から根への順で行うため、(6)時点のinventoryに記録された
   child集合とのexact一致は要求しない（削除済みchildが消えているのは正常）。代わりに次の
@@ -270,11 +275,51 @@ Cursor-specific rules only:
   削除に進まない（content/child集合の不一致は既存 `inventory_changed`、identity/type/safety不一致は
   既存 `path_safety_failed`、安全性を証明できないものは既存 `path_safety_unknown`、inventory内容を
   読めない場合は既存 `inventory_unavailable` として `cleanup=false`。新しいstop_reasonは追加しない）。
-  child bindingを証明できない場合は既存stop_reasonでfail-closedし、verified handleを用いた
-  no-follow削除など、対象を検証時の実体へ結び付けた方式でなければ削除しない。**
-  全項目一致時のみ将来 executor が exact `RUN_ROOT` 1件削除可能（本 PR は実 delete 禁止）。
-  削除完了確認まで **(3)で取得した同じ opened lock handle を保持**。削除開始までも **path 作成禁止**。
-  中断・部分失敗・結果確認不能は成功扱いしない。
+
+  **上記のchild単位再確認は読み取り専用の再検証であり、実際の削除mutation対象をその実体へ束縛
+  することを保証しない。delete mutationの実行可否は次のOS別契約でのみ決まる。**
+
+  **Windows native**: regular fileは、no-reparseのcreate/open手順で対象へ削除mutation直前に
+  **verified handle** を取得する。handleはDELETE、および上記のidentity/type/content再確認に
+  必要なcontent・attribute accessを持つこと。identity（`FILE_ID_INFO`相当）・type・owner・
+  DACL・reparse・canonical boundaryを **同一handle** 上で再確認し、(6)のbaselineと一致することを
+  確認する。inventoryの `size_bytes`/`sha256_lower_hex` も **同一verified handle** から取得した
+  値で確認する。全項目一致後にのみ、**同一verified handle** に対する
+  `SetFileInformationByHandle` + `FileDispositionInfo`、または同等のhandle-bound dispositionで
+  削除する。pathname-only `DeleteFile` をdelete target bindingの安全根拠として使用しない。
+  B8(6)時点の対象Xが別実体Yへ差し替わっていた場合、pathnameを追跡してYを削除しない
+  （`path_safety_failed`）。
+  directoryはbottom-upで、削除直前にno-reparseのdirectory handleをDELETE accessで取得し、上記
+  identity再確認と残余child集合の確認（空であること・inventory外entry不在）を **同一directory
+  handle** を用いて行う。全項目一致後にのみ、**同一directory handle** に対する
+  handle-based dispositionで削除する。pathname-only `RemoveDirectory` をbinding保証として
+  使用しない。
+  delete実行後、削除結果を同一handleまたはOS標準の手段で確認できない場合は
+  `cleanup_result_unknown` とし、以降の削除を継続しない。
+
+  **Linux/WSL**: 本Checkpointのthreat modelでは、同一UIDの非協調processによるrename/replace/write
+  を排除しない。したがって、identity/content/provenance/lock等すべてのread-only checkが上記まで
+  passしても、現在許可されたOS/runtime標準APIだけでは「検証済みchild実体」と「実delete mutation
+  対象」を原子的に束縛できないため、削除しない。結果は `os=linux|wsl` `result=blocked`
+  `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false`
+  `approval_reusable=false` とする。
+  禁止: `unlink`、`unlinkat`、`rmdir`、shell `rm`、runtimeのpathname delete API、「検証済み
+  descriptorを保持して直後にunlinkするから安全」という時間・協調性の仮定を安全根拠にすること、
+  `openat2` によるinspectionを後続pathname deleteのidentity binding保証として扱うこと、人間
+  approvalを上記の技術的束縛保証の代替にすること。Linux/WSLで実cleanupを成立させるために新
+  helper/runtime/isolation等が必要と判明した場合、本Checkpointへ追加実装せず別Checkpointへ
+  分離する。
+
+  **mutation前後のfail-closed境界**: Windowsで上記のhandle binding capabilityを最初の削除
+  mutation前に証明できない場合も `result=blocked` `stop_reason=path_safety_unknown`
+  `cleanup=false` `delete_attempted=false` `approval_reusable=false` とする。1件以上の
+  mutationを実行した後に失敗した場合は `cleanup_interrupted` または `cleanup_result_unknown`
+  とし、以降の追加削除は行わない。**
+  全項目一致時のみ、Windows nativeにおいて将来 executor が exact `RUN_ROOT` 1件を上記
+  handle-bound dispositionで削除可能（本 PR は実 delete 禁止）。Linux/WSLは本Checkpointの契約上、
+  削除実行に到達しない。削除完了確認まで **(3)で取得した同じ opened lock handle を保持**
+  （Windows実行時）。削除開始までも **path 作成禁止**。中断・部分失敗・結果確認不能は成功扱い
+  しない。
   **固定 stop_reason**（文字列コード。bool へ潰さない。本再仕様化で新規 reason は追加しない。
   instance binding の missing/invalid/unavailable → `provenance_unknown`、
   record/marker mismatch → `provenance_mismatch` に収束）:
@@ -294,8 +339,10 @@ Cursor-specific rules only:
   inventory / run_state → execution approval → post-approve provenance / existing `RUN_LOCK` reacquire
   （再取得直後 handle/path identity 再確認） → post-approve recursive path safety / **marker binding** /
   inventory → 削除 mutation 直前の `RUN_LOCK` handle/path identity 再確認 → **child entry単位の
-  no-follow実体identity再確認**（inventory記録時点との一致。regular fileは`size_bytes`/`sha256`も
-  exact再照合、directoryはchild集合をmutation直前に再列挙して照合） → exact deletion / result
-  confirmation。
+  no-follow実体identity再確認（読み取り専用）**（(6)のprocess-local child identity baselineとの
+  一致。regular fileは`size_bytes`/`sha256`もexact再照合、directoryはchild集合を削除直前に
+  再列挙して照合） → **OS別delete mutation binding**（Windows: 同一verified handleへの
+  handle-based disposition。Linux/WSL: 原子的bindingを現在許可されたAPIで証明できないため
+  fail-closedで停止） → exact deletion（Windows nativeのみ）/ result confirmation。
   後段理由で前段失敗を上書きしない。
   カテゴリ③（本ルールの merge）とカテゴリ④（実 cleanup）は別発効点・別 scope。

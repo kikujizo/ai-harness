@@ -3712,6 +3712,35 @@ regular fileへのin-place write（内容のみの書き換え）を検出でき
 `HUMAN_APPROVAL_RECORD: v2` `#5276357583` を継続利用する形でroute=`claude-code`を維持した
 （新proposal・新approvalは発行していない）。
 
+**再仕様化v4（P1-2 delete target binding／Windows・Linux OS分岐）**: fixed HEAD `334b24f`
+（`0549e83`是正の同期コミット）に対する独立技術レビュー`#5277901998`は、AC3を非outdated・
+未解決のP1 2件で **fail** と判定した。(1) B8(9)が比較を要求する「(6)時点のchild identity」を
+`run-inventory/v1` は記録していない（v1のfile entryはpath/size/hash、directory entryはpathのみ
+であり、device+inode / `FILE_ID_INFO` と比較する基準値がない）。(2) Linux/WSLでchild descriptorを
+検証しても `unlink` はpathnameを解決してmutationするため、再取得後に同一UIDの別processが
+rename/replaceした場合、「同じdescriptorで即時unlink」という記述だけでは検証済み実体を削除対象へ
+原子的に束縛できない。本ラウンドのChatGPT要件レビューはこの技術レビューに先着されたため実施
+されなかった（`REVIEW_VERDICT` 記録なし。実施済みなのはCodex独立技術レビューのみ）。
+Codex PM判断`#5278028614`はP1-1（既存AC3の実装詳細として閉じ得る）とP1-2（Issue正本の安全契約
+不足）を明確に区別し、限定文言修正での続行を「AGENTS.mdの同一タスク2敗後3回目リトライ禁止」に
+抵触すると判定して拒否、ChatGPTへ再仕様化を差し戻した。同時に既存canonical proposal
+`#5276309603` / `HUMAN_APPROVAL_RECORD: v2` `#5276357583` は、P1-2が削除mutationの安全契約・
+利用API・保証不能時挙動を新たに確定する仕様変更であるため、再仕様化後の実装開始へ**流用不可**と
+判定した。
+
+その後、「Cursorは現在利用可能トークンを持たず本Issueの実装を開始できない」という新しい一次入力
+（`AGENTS.md` Claude Code例外委譲条件に該当）に基づき、Codex PMは新canonical proposal
+`#5278352801`（`PROPOSED_ROUTE: claude-code`、scopeは更新後Issue #54の固定4ファイルと既存5AC
+のみ）を発行した。人間はこの対話で `HUMAN_APPROVAL_RECORD: v2` `#5278387881`
+（`proposed_route=claude-code`、`decision=approve`）としてapproveし、Codex PMはroute確定
+`#5278407512`で、proposal・承認recordのfield完全一致とactive一意性を照合したうえで
+`route=claude-code` の `implementation_start` を確定した。既存Cursor向けrecord `#5278202174`
+（`proposed_route=cursor`）は別tupleであり、今回のClaude Code routeへは流用していない。
+Issue #54本文はこの再仕様化により、B8(6)のprocess-local child identity baseline契約、B8(9)の
+Windows/Linux-WSL OS別delete target binding契約、Windows nativeでの技術前提（handle-bound
+`SetFileInformationByHandle`+`FileDispositionInfo`）とLinux/WSLでの技術前提
+（`unlinkat`のpathname解決契約はchild FDへの直接binding手段ではない）を明記する形へ更新済み。
+
 ## 採用する方針
 
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
@@ -3743,6 +3772,19 @@ regular fileへのin-place write（内容のみの書き換え）を検出でき
 - **（A9/B8(9)是正）** B8(9)のchild単位識別確認に、regular fileの`size_bytes`/`sha256_lower_hex`を
   既存`run-inventory/v1`とexact再照合する手順と、directoryのmutation直前child集合再列挙を追加する。
   内容/集合不一致は既存`inventory_changed`へ収束させ、新しいinventory versionは作らない
+- **（v4）** B8(6)で公開`run-inventory/v1`とは別に、process-local・非公開のchild identity
+  baseline（`child_identity_map[path_b64] = {entry_type, identity}`）を`RUN_INSTANCE_MARKER`を
+  含む全descendantについて取得し、B8(9)の child 単位比較元とする。GitHub・completion record・
+  公開inventory・ログへidentityは出さない
+- **（v4）** Windows nativeの削除mutationは、削除直前に取得したverified handle（identity/type/
+  owner/DACL/reparse/canonical boundaryとsize/hashを同一handle上で再確認済み）に対する
+  `SetFileInformationByHandle` + `FileDispositionInfo`相当のhandle-based dispositionでのみ許可し、
+  pathname-only `DeleteFile`/`RemoveDirectory`をbinding根拠にしない。B8(6)時点の対象が別実体へ
+  差し替わっていた場合はpathnameを追跡して削除しない
+- **（v4）** Linux/WSLは、現在のthreat modelで同一UIDの非協調processによるrename/replace/writeを
+  排除しないため、identity/content/provenance/lock等すべてのread-only checkがpassしても、現在
+  許可されたOS/runtime標準APIだけでは検証済みchild実体と実delete mutation対象を原子的に束縛
+  できないと判断し、削除mutationを行わずに`path_safety_unknown`で停止する契約へ固定する
 
 ## 採用しない方針 / 却下した代替案
 
@@ -3778,6 +3820,21 @@ regular fileへのin-place write（内容のみの書き換え）を検出でき
   size/SHA-256再照合とchild集合再列挙を追加した
 - **（A9/B8(9)是正）payload/inventory不一致検出に新しいstop_reasonを追加すること**: 既存
   `inventory_changed`で意味的に閉じられるため、新規stop_reasonの追加は不要と判断し却下した
+- **（v4）検証済みdescriptorを保持して直後にunlinkする方式を安全根拠にすること**: Codex独立技術
+  レビュー`#5277901998`のP1-2で、rename/replace競合下では時間・協調性の仮定に過ぎず原子的
+  bindingにならないと指摘されたため却下した
+- **（v4）`openat2`のRESOLVE_*によるinspectionを後続pathname deleteのidentity binding保証として
+  扱うこと**: path解決時の安全性は高めるが、後続のpathname deleteを同一inodeへ束縛する代替には
+  ならないため却下した
+- **（v4）Linux/WSLの削除mutationを人間approvalだけで許可すること**: 人間approvalは技術的束縛
+  保証の代替にならないため却下した
+- **（v4）Linux/WSLの実cleanupを成立させるための新helper/runtime/isolationを本Checkpointへ
+  追加実装すること**: 固定4ファイル・文書契約のみというIssue #54のscope外であるため却下し、
+  必要になった場合は別Checkpointへ分離する
+- **（v4）P1-2再仕様化前の既存canonical proposal `#5276309603` / approval `#5276357583`を
+  そのまま実装開始承認として流用すること**: 削除mutationの安全契約・利用API・保証不能時挙動を
+  新たに確定する仕様変更であり、承認対象proposalの内容自体が変わるため却下し、新proposal
+  `#5278352801` / 新承認 `#5278387881` を取得した
 
 ## 判断理由
 
@@ -3899,6 +3956,13 @@ cleanup execution に流用しない。
 | Issue manifest diff @ `0549e83` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
 | Fail-closed success propagation @ `0549e83` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
 | `git diff --check origin/main...HEAD` @ `0549e83` | **success**（exit 0） | ローカル実行確認 |
+| **（v4）** Codex独立技術レビュー（fixed HEAD `334b24f`、AC3 P1-1/P1-2） | **request-changes** risk=high（AC3 fail） | [#5277901998](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277901998)。B8(6) child identity baseline未定義（P1-1）、Linux/WSL pathname `unlink`のrename/replace競合下での実体束縛不能（P1-2） |
+| **（v4）** ChatGPT要件レビュー（fixed HEAD `334b24f`） | **未実施**（Codex技術レビューに先着され、P1-2再仕様化へ移行） | Issue #54コメント中に該当HEAD向け`REVIEW_VERDICT`記録なしを確認済み |
+| **（v4）** Codex PM判断（P1-2再仕様化差し戻し・既存proposal/approval非流用） | 再仕様化へ差し戻し、限定修正拒否 | [#5278028614](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278028614)。AGENTS.md「同一タスク2敗後3回目リトライ禁止」を適用、`#5276309603`/`#5276357583`を非流用と判定 |
+| **（v4）** Issue #54本文のP1-1/P1-2再仕様化 | 完了 | ChatGPTによる本文更新。B8(6) child identity baseline・B8(9) Windows/Linux-WSL OS別delete target binding契約を追加 |
+| **（v4）** 新 canonical proposal（route=claude-code） | 固定 | [#5278352801](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278352801)。Cursorトークン不足によるClaude Code例外委譲、scopeは固定4ファイル・既存5AC |
+| **（v4）** HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=implementation_start） | **approve** | [#5278387881](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278387881) |
+| **（v4）** Codex PM route確定 | `PM_VERDICT: approve risk=high route=claude-code` | [#5278407512](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278407512)。既存Cursor向けrecord `#5278202174`（proposed_route=cursor）は別tupleとして非流用 |
 
 ## 次アクション
 
@@ -3942,9 +4006,26 @@ cleanup execution に流用しない。
 - [x] 新HEAD `0549e83` で `git diff --check` success を確認
 - [x] 新HEAD `0549e83` で Issue manifest diff success を確認
 - [x] 新HEAD `0549e83` で Fail-closed success propagation success を確認
-- [ ] ChatGPT 要件レビュー（本ラウンド fixed HEAD）
-- [ ] Codex 独立技術レビュー（本ラウンド fixed HEAD。Claude Codeは自分から起動しない）
-- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（A9/B8(9)を含む）
+- [x] ChatGPT 要件レビュー（fixed HEAD `0549e83`/`334b24f`）→ **未実施のまま終了**。Codex独立技術
+  レビュー（下記）がAC3 failで先着し、P1-2再仕様化（v4）へ移行したため本ラウンドのgateとしては
+  この時点で終わり、v4実装後に改めてChatGPT要件レビューを実施する
+- [x] Codex 独立技術レビュー（fixed HEAD `334b24f`）→ **request-changes risk=high**（AC3 fail、
+  P1-1/P1-2の2件。#5277901998）
+- [x] **（v4）** Codex PM判断: P1-2をIssue正本不足としてChatGPTへ再仕様化差し戻し、既存proposal
+  `#5276309603`/approval `#5276357583`は非流用（#5278028614）
+- [x] **（v4）** ChatGPTによるIssue #54本文のP1-1/P1-2再仕様化（B8(6) child identity baseline・
+  B8(9) OS別delete target binding）
+- [x] **（v4）** Codex PM 新canonical proposal（#5278352801、Cursorトークン不足によるClaude Code
+  例外委譲）
+- [x] **（v4）** 人間 `implementation_start` approve（#5278387881 / HUMAN_APPROVAL_RECORD: v2,
+  route=claude-code）
+- [x] **（v4）** Codex PM route確定（#5278407512 / route=claude-code）
+- [x] **（v4）** Claude Code によるB8(6) process-local child identity baseline・B8(9) Windows
+  handle-bound disposition／Linux-WSL fail-closed の固定4ファイル実装（本コミット）
+- [ ] **（v4）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [ ] ChatGPT 要件レビュー（v4実装 fixed HEAD）
+- [ ] Codex 独立技術レビュー（v4実装 fixed HEAD。Claude Codeは自分から起動しない）
+- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（B8(6)/B8(9)を含む）
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

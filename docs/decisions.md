@@ -3963,6 +3963,11 @@ cleanup execution に流用しない。
 | **（v4）** 新 canonical proposal（route=claude-code） | 固定 | [#5278352801](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278352801)。Cursorトークン不足によるClaude Code例外委譲、scopeは固定4ファイル・既存5AC |
 | **（v4）** HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=implementation_start） | **approve** | [#5278387881](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278387881) |
 | **（v4）** Codex PM route確定 | `PM_VERDICT: approve risk=high route=claude-code` | [#5278407512](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278407512)。既存Cursor向けrecord `#5278202174`（proposed_route=cursor）は別tupleとして非流用 |
+| **（v4）実装tip** | `3d7d4e98b2b2e0186304ea9b260e602fc099da51` | B8(6) child identity baseline・B8(9) Windows handle-bound disposition／Linux-WSL fail-closed分岐を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `3d7d4e9` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head 3d7d4e98b2b2e0186304ea9b260e602fc099da51`） |
+| Fail-closed success propagation @ `3d7d4e9` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head 3d7d4e98b2b2e0186304ea9b260e602fc099da51`） |
+| `git diff --name-only origin/main...HEAD` @ `3d7d4e9` | 固定4ファイルのみ | ローカル実行確認（`.cursor/rules/ai-workflow.mdc` / `docs/decisions.md` / `docs/harness/roles/cursor.md` / `docs/harness/setup.md`） |
+| `git diff --check origin/main...HEAD` @ `3d7d4e9` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 

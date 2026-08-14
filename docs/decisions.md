@@ -4066,6 +4066,12 @@ cleanup execution に流用しない。
 | Fail-closed success propagation @ `e7b993e` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head e7b993e67696af831c8a47a77a80c22b10460809`） |
 | `git diff --name-only origin/main...HEAD` @ `e7b993e` | 固定4ファイルのみ | ローカル実行確認 |
 | `git diff --check origin/main...HEAD` @ `e7b993e` | **success**（exit 0） | ローカル実行確認 |
+| **（v5是正）** advisor指摘によるdecisions.md却下代替案の補完（renameat2/read-sharing/自動復旧/child増減supersede） | 完了 | 採用しない方針にv5分の4項目が欠けていた点を補完 |
+| **（v5是正）実装tip** | `bb3772df72b953b3d3b42b69e682bfffe8d435c6` | 上記補完コミット |
+| Issue manifest diff @ `bb3772d` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `bb3772d` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --name-only origin/main...HEAD` @ `bb3772d` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `bb3772d` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 

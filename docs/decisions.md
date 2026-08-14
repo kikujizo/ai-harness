@@ -3719,8 +3719,9 @@ regular fileへのin-place write（内容のみの書き換え）を検出でき
 であり、device+inode / `FILE_ID_INFO` と比較する基準値がない）。(2) Linux/WSLでchild descriptorを
 検証しても `unlink` はpathnameを解決してmutationするため、再取得後に同一UIDの別processが
 rename/replaceした場合、「同じdescriptorで即時unlink」という記述だけでは検証済み実体を削除対象へ
-原子的に束縛できない。本ラウンドのChatGPT要件レビューはこの技術レビューに先着されたため実施
-されなかった（`REVIEW_VERDICT` 記録なし。実施済みなのはCodex独立技術レビューのみ）。
+原子的に束縛できない。同HEADのChatGPT要件レビューは`REVIEW_VERDICT: approve risk=high`（Issue #54
+本文および[#5278010167](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5278010167)
+でのChatGPT自身の記録）であり、要件面はpass・技術面（AC3）のみCodexがfailと判定した構図だった。
 Codex PM判断`#5278028614`はP1-1（既存AC3の実装詳細として閉じ得る）とP1-2（Issue正本の安全契約
 不足）を明確に区別し、限定文言修正での続行を「AGENTS.mdの同一タスク2敗後3回目リトライ禁止」に
 抵触すると判定して拒否、ChatGPTへ再仕様化を差し戻した。同時に既存canonical proposal
@@ -3957,7 +3958,7 @@ cleanup execution に流用しない。
 | Fail-closed success propagation @ `0549e83` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
 | `git diff --check origin/main...HEAD` @ `0549e83` | **success**（exit 0） | ローカル実行確認 |
 | **（v4）** Codex独立技術レビュー（fixed HEAD `334b24f`、AC3 P1-1/P1-2） | **request-changes** risk=high（AC3 fail） | [#5277901998](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277901998)。B8(6) child identity baseline未定義（P1-1）、Linux/WSL pathname `unlink`のrename/replace競合下での実体束縛不能（P1-2） |
-| **（v4）** ChatGPT要件レビュー（fixed HEAD `334b24f`） | **未実施**（Codex技術レビューに先着され、P1-2再仕様化へ移行） | Issue #54コメント中に該当HEAD向け`REVIEW_VERDICT`記録なしを確認済み |
+| **（v4）** ChatGPT要件レビュー（fixed HEAD `334b24f`） | `REVIEW_VERDICT: approve risk=high`（要件面はpass） | Issue #54本文の記載、および[#5278010167](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5278010167)でのChatGPT自身の確認記録による。GitHub上に単体の`REVIEW_VERDICT`コメントは特定できなかったが、両記録が一致して同HEADでのapproveを示す |
 | **（v4）** Codex PM判断（P1-2再仕様化差し戻し・既存proposal/approval非流用） | 再仕様化へ差し戻し、限定修正拒否 | [#5278028614](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278028614)。AGENTS.md「同一タスク2敗後3回目リトライ禁止」を適用、`#5276309603`/`#5276357583`を非流用と判定 |
 | **（v4）** Issue #54本文のP1-1/P1-2再仕様化 | 完了 | ChatGPTによる本文更新。B8(6) child identity baseline・B8(9) Windows/Linux-WSL OS別delete target binding契約を追加 |
 | **（v4）** 新 canonical proposal（route=claude-code） | 固定 | [#5278352801](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278352801)。Cursorトークン不足によるClaude Code例外委譲、scopeは固定4ファイル・既存5AC |
@@ -4011,9 +4012,8 @@ cleanup execution に流用しない。
 - [x] 新HEAD `0549e83` で `git diff --check` success を確認
 - [x] 新HEAD `0549e83` で Issue manifest diff success を確認
 - [x] 新HEAD `0549e83` で Fail-closed success propagation success を確認
-- [x] ChatGPT 要件レビュー（fixed HEAD `0549e83`/`334b24f`）→ **未実施のまま終了**。Codex独立技術
-  レビュー（下記）がAC3 failで先着し、P1-2再仕様化（v4）へ移行したため本ラウンドのgateとしては
-  この時点で終わり、v4実装後に改めてChatGPT要件レビューを実施する
+- [x] ChatGPT 要件レビュー（fixed HEAD `0549e83`/`334b24f`）→ `REVIEW_VERDICT: approve risk=high`
+  （要件面はpass。Issue #54本文と#5278010167のChatGPT自身の記録による）
 - [x] Codex 独立技術レビュー（fixed HEAD `334b24f`）→ **request-changes risk=high**（AC3 fail、
   P1-1/P1-2の2件。#5277901998）
 - [x] **（v4）** Codex PM判断: P1-2をIssue正本不足としてChatGPTへ再仕様化差し戻し、既存proposal

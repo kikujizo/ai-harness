@@ -75,7 +75,7 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   人間approveは技術ゲートを代替しない。approve後は既存 `RUN_LOCK` を non-blocking exclusive で
   再取得し、recursive path safety と inventory をゼロから再検証する。delete mutationへ進むのは
   Windowsでverified handle bindingが成立した場合のみで、その場合は削除完了確認までlockを保持する
-  （Linux/WSLはbinding不能のため mutationに進まずlockを保持したまま停止する）。
+  （Linux/WSLはbinding不能のためmutationに進まない）。
   **`RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。削除実行時は、
   approve後に取得した公開`run-inventory/v1`とは別のprocess-local child identity baseline
   （B8(6)）を比較元に、各child entryの実体identity・type・path safetyをchild単位で読み取り専用

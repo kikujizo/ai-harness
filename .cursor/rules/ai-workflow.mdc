@@ -250,7 +250,8 @@ Cursor-specific rules only:
   identity: (Linux/WSL は device+inode 相当／Windows は `FILE_ID_INFO` 相当)}`。
   取得先は memory/process-local のみとし、GitHub・completion record・公開 inventory・ログへ
   identity を出さない。baseline を取得できない、または取得経路の信頼性を証明できない場合は
-  `path_safety_unknown` として `cleanup=false` `approval_reusable=false`。このbaselineが
+  `path_safety_unknown` として `cleanup=false` `approval_reusable=false` `delete_attempted=false`。
+  このbaselineが
   (9) の child 単位再確認の比較元となる（`run-inventory/v1` の schema/version は変更しない）。**
   (7) `run_state=completed` / exact target / operation / `instance_commitment` を再確認。
   **(8) 最初の削除 mutation 直前にも、(3)で取得した同じ opened lock handle と現在の `RUN_LOCK`

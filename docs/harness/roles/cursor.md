@@ -76,23 +76,26 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   再取得し、recursive path safety と inventory をゼロから再検証する。delete mutationへ進むのは
   Windowsでverified handle bindingが成立した場合のみで、その場合は削除完了確認までlockを保持する
   （Linux/WSLはbinding不能のためmutationに進まない）。
-  **`RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。削除実行時は、
-  approve後に取得した公開`run-inventory/v1`とは別のprocess-local child identity baseline
-  （B8(6)）を比較元に、各child entryの実体identity・type・path safetyをchild単位で読み取り専用
-  再確認する。regular fileはidentity一致だけでは同一inode上のin-place writeを検出できないため、
-  size/SHA-256もinventoryとexact再照合する。directoryは配下削除後・自身の削除直前にchild集合を
-  再列挙しinventoryと照合する。追加・置換・差し替え・content不一致・child集合の増減を検出した
-  場合は削除しない。**
+  **`RUN_LOCK` のhandle/path identity再確認だけでは`RUN_ROOT`自身・各childの実体束縛に
+  ならない。削除実行時は、`RUN_ROOT`自身のidentityをmutation candidateごとにbaselineとexact
+  比較するroot binding確認を先に行い、approve後に取得した公開`run-inventory/v1`とは別の
+  process-local child identity baseline（B8(6)）を比較元に、各child entryの実体identity・type・
+  path safetyをchild単位で読み取り専用再確認する。regular fileはidentity一致だけでは同一inode上の
+  in-place writeを検出できないため、size/SHA-256もinventoryとexact再照合する。directoryは配下
+  削除後・自身の削除直前にchild集合を再列挙しinventoryと照合する（bottom-up削除によるchild集合の
+  正常な減少はdriftとしない）。追加・置換・差し替え・content不一致を検出した場合は削除しない。**
   **上記の再確認は読み取り専用であり、実際のdelete mutationはOS境界でのみ許可する。
   Windowsは、削除直前に取得した**verified handle**（同一handle上でidentity/type/content再確認
-  済み）へdeleteを束縛できる場合だけ削除可能とし、pathname-onlyの`DeleteFile`/`RemoveDirectory`を
+  済み、write/delete sharingを排除するか同等の安全性を証明できる条件で取得）へdeleteを束縛できる
+  場合だけ削除可能とし、pathname-onlyの`DeleteFile`/`RemoveDirectory`を
   binding根拠にしない。Linux/WSLは、同一UIDの非協調processによるrename/replaceを現在許可された
   APIでは原子的に排除できないため、read-only再確認が全てpassしても同一実体へのbindingを保証
   できず、delete mutation前に`path_safety_unknown`で停止する（`unlink`等のpathname delete APIを
   使わない。詳細は`.cursor/rules/ai-workflow.mdc` B8(9)）。**
-  **A9でlock identity driftによりblockedとなった場合、A8で作成済みのpayloadを「未作成」と
+  **A8のpayload write後recursive safety再走査失敗、またはA9でのlock identity driftにより
+  blockedとなった場合、A8で作成済みのpayloadを「未作成」と
   誤報しない。payloadは残留し得る状態として保持し、completion未作成・blockedのまま自動delete/
-  repair/resumeへ進まない（詳細は`.cursor/rules/ai-workflow.mdc` A9）。**
+  repair/resumeへ進まない（詳細は`.cursor/rules/ai-workflow.mdc` A8/A9）。**
   カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
   詳細・制御順序・否定例の正本は `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
   （本ファイルは複製しない）。

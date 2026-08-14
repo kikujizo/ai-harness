@@ -3742,6 +3742,50 @@ Windows/Linux-WSL OS別delete target binding契約、Windows nativeでの技術�
 `SetFileInformationByHandle`+`FileDispositionInfo`）とLinux/WSLでの技術前提
 （`unlinkat`のpathname解決契約はchild FDへの直接binding手段ではない）を明記する形へ更新済み。
 
+**再仕様化v5（6 finding是正／RUN_ROOT baseline・share条件・A8 rescan・directory accounting）**:
+fixed HEAD `af7c9cd`/`96f1d96`（v4是正後）に対する追加のCodex独立技術レビュー`#5289296528`は
+`REVIEW_VERDICT: request-changes risk=high`。Codex（PM）判断`#5289485250`は次の6件すべてを
+成立と判定し、finding 1・3・4・5は既存Issue契約の実装・文書同期不足として**今回修正**、
+finding 2・6はIssue本文の仕様不足として一度ChatGPTへ再仕様化を差し戻した（`route=mixed`）。
+
+1. **finding 1（Windows verified handle share条件不足）**: verified handleがwrite/delete
+   sharingを十分に排除する契約になっておらず、size/hash確認後からmutationまでの間に同一UID等の
+   別processが内容変更・renameできる余地があった。
+2. **finding 2（`RUN_ROOT`自身のidentity baseline不足）**: process-local child identity baseline
+   がdescendant中心で、`RUN_ROOT` directory自身のidentity取得時点・比較対象・drift時挙動が
+   未定義だった。`RUN_ROOT` rename→元pathへのreplacement作成等でdescendant検証を通過しながら
+   別rootを操作できる余地があった。
+3. **finding 3（A8 completion前再走査の安全性条件不足）**: A8のcompletion前再走査がB6のOS別
+   recursive safety predicateと同じ強度になっておらず、Linux/WSLのnested mount/bind mount・
+   mountinfo評価・ACL確認・評価不能時のfail-closedが明記されていなかった。
+4. **finding 4（directory child集合条件の矛盾）**: bottom-up削除では承認済みchildを正常に削除
+   すればchild集合は減少するが、現SSOTの「child集合の増減」を一律driftとして拒否する残存文言が、
+   正常な削除による縮小まで`inventory_changed`にしてしまう論理矛盾を残していた。
+5. **finding 5（AC4のWindows handle-based delete capability unavailable観測例不足）**:
+   `docs/harness/setup.md`に、read-only検査は通過したがverified handleへの安全なdelete
+   disposition capabilityを証明できないnegative scenarioが不足していた。
+6. **finding 6（A8 post-write失敗時のresidue記録不足）**: payload書き込み後にA8のdescendant
+   安全性再走査が失敗した場合、completion未作成だけでなく`payload_written=true`等の肯定記録が
+   契約として明記されていなかった。
+
+その後、正規PM proposal`#5289589235`（`PROPOSED_ROUTE: claude-code`、scopeは固定4ファイル）を
+Codex（PM）本人が発行し、人間は`HUMAN_APPROVAL_RECORD: v2` `#5289615101`
+（`proposed_route=claude-code`、`decision=approve`、`recorded_by=ChatGPT`）としてapproveした。
+ChatGPTのroute確定プリフライト`#5289663239`（`@codex`宛て）を経て、Codex（PM）本人が正式route
+確定`#5289667993`を投稿した。
+
+```text
+APPROVAL_SCOPE: implementation_start
+APPROVAL_RECORD: https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289615101
+APPROVAL_STATE: approved
+PM_VERDICT: approve risk=high route=claude-code
+```
+
+本ラウンドより前のproposal・approval（`#5276309603`/`#5276357583`、`#5278352801`/`#5278387881`
+を含む）は、本再仕様化に伴う`implementation_start`としては流用しない。Claude Codeは実装担当
+としてのみこの委任を受けており、Codex（PM）の役割・route判定・承認record検証を代理・自称しない
+（記録者はすべて`Claude Code`のまま。他AIの名称を名乗らない）。
+
 ## 採用する方針
 
 - **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
@@ -3786,6 +3830,25 @@ Windows/Linux-WSL OS別delete target binding契約、Windows nativeでの技術�
   排除しないため、identity/content/provenance/lock等すべてのread-only checkがpassしても、現在
   許可されたOS/runtime標準APIだけでは検証済みchild実体と実delete mutation対象を原子的に束縛
   できないと判断し、削除mutationを行わずに`path_safety_unknown`で停止する契約へ固定する
+- **（v5・finding 2）** B8(6)でprocess-local baselineとして`RUN_ROOT`自身の`run_root_identity`を
+  child mapとは別に必須取得し、B8(9)の各mutation candidate処理直前にcurrent `RUN_ROOT`を
+  baselineとexact比較する。不一致（rename/replacement等）は`path_safety_failed`、証明不能は
+  `path_safety_unknown`とし、後段のOS別delete capability判定でこの前段失敗を上書きしない
+- **（v5・finding 1）** Windows nativeのverified handleは、write/delete sharingを許可しないか
+  OS/APIとして同等の安全性を証明できるshare条件で取得する。既存handleとのshare conflict等で
+  target bindingを証明できない場合は`path_safety_unknown`でmutation前に停止する
+- **（v5・finding 3）** A8のcompletion前descendant再走査を、B6と同一のOS別recursive safety
+  predicate（Linux/WSLのnested mount/bind mount・mountinfo評価・ACL確認・評価不能時fail-closedを
+  含む）へ明示的に揃える
+- **（v5・finding 4）** directory child集合の再確認で拒否する対象を、承認snapshot外の新規entry・
+  削除対象として検証済みのchildの残留・置換/type/content/identity/safety drift・列挙不能へ限定し、
+  bottom-up削除による正常なchild集合の減少はdriftとして扱わない
+- **（v5・finding 5）** `docs/harness/setup.md`にWindows handle-based delete capability
+  unavailableの否定例を追加し、`delete_attempted=false`/`approval_reusable=false`が観測できる
+  ようにする
+- **（v5・finding 6）** A8のpayload write後recursive safety失敗でも、`payload_written=true`
+  `completion_record_created=false` `result=blocked` `auto_cleanup=false` `auto_repair=false`
+  `auto_resume=false`を肯定記録し、completion未作成をresidue不存在の根拠にしない
 
 ## 採用しない方針 / 却下した代替案
 
@@ -3975,6 +4038,13 @@ cleanup execution に流用しない。
 | Fail-closed success propagation @ `6e71c2a` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
 | `git diff --name-only origin/main...HEAD` @ `6e71c2a` | 固定4ファイルのみ | ローカル実行確認 |
 | `git diff --check origin/main...HEAD` @ `6e71c2a` | **success**（exit 0） | ローカル実行確認 |
+| **（v5）** Codex独立技術レビュー（fixed HEAD `af7c9cd`/`96f1d96`、6 finding） | **request-changes** risk=high | [#5289296528](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289296528) |
+| **（v5）** Codex（PM）6 finding判定 | route=mixed（finding 1・3・4・5は今回修正、finding 2・6はChatGPT再仕様化） | [#5289485250](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289485250) |
+| **（v5）** Issue #54本文の6 finding再仕様化 | 完了 | ChatGPTによる本文更新（root identity baseline・post-write residue契約を追加） |
+| **（v5）** 正規PM proposal（route=claude-code） | 固定 | [#5289589235](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289589235)（Codex本人が発行） |
+| **（v5）** HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=implementation_start） | **approve** | [#5289615101](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289615101) |
+| **（v5）** route確定プリフライト | `@codex`宛て | [#5289663239](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289663239)（ChatGPT） |
+| **（v5）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=claude-code` | [#5289667993](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289667993)（Codex本人が投稿） |
 
 ## 次アクション
 
@@ -4035,10 +4105,26 @@ cleanup execution に流用しない。
   handle-bound disposition／Linux-WSL fail-closed の固定4ファイル実装（本コミット）
 - [x] **（v4）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（`3d7d4e9`。自己参照回避のため）
 - [x] **（v4是正）** advisor指摘（setup.md table pipe escape / ChatGPT要件レビュー記録訂正 / cursor.md
-  SSOT整合）を是正し、新tip `6e71c2a` のSHAと検証結果を別コミットで同期
-- [ ] ChatGPT 要件レビュー（v4実装 fixed HEAD `6e71c2a`）
-- [ ] Codex 独立技術レビュー（v4実装 fixed HEAD `6e71c2a`。Claude Codeは自分から起動しない）
-- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（B8(6)/B8(9)を含む）
+  SSOT整合）を是正し、新tip `6e71c2a` のSHAと検証結果を別コミットで同期（同期コミット自体のHEADは
+  `96f1d96`）
+- [x] Codex 独立技術レビュー（v4是正後 fixed HEAD `96f1d96`）→ **request-changes risk=high**
+  （6 finding。#5289296528）
+- [x] **（v5）** Codex（PM）6 finding判定: finding 1・3・4・5は今回修正、finding 2・6はChatGPT
+  再仕様化差し戻し（`route=mixed`。#5289485250）
+- [x] **（v5）** ChatGPTによるIssue #54本文の6 finding再仕様化（`RUN_ROOT`自身のidentity baseline・
+  A8 post-write residue契約を追加）
+- [x] **（v5）** Codex（PM）本人による正規proposal（#5289589235、scope=固定4ファイル）
+- [x] **（v5）** 人間 `implementation_start` approve（#5289615101 / HUMAN_APPROVAL_RECORD: v2,
+  route=claude-code, recorded_by=ChatGPT）
+- [x] **（v5）** Codex（PM）本人による正式route確定（#5289667993 / route=claude-code。route確定
+  プリフライト#5289663239を経てCodex本人が投稿）
+- [x] **（v5）** Claude Codeによる6 finding（Windows share条件・`RUN_ROOT` identity baseline・
+  A8 B6同等rescan・directory bottom-up accounting・Windows capability unavailable観測例・
+  A8 post-write residue肯定記録）の固定4ファイル実装（本コミット）
+- [ ] **（v5）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [ ] ChatGPT 要件レビュー（v5実装 fixed HEAD）
+- [ ] Codex 独立技術レビュー（v5実装 fixed HEAD。Claude Codeは自分から起動しない）
+- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（6 findingすべてを含む）
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

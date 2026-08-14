@@ -157,10 +157,18 @@ Cursor-specific rules only:
   安全性を依存させない。
   **Windows**: payload descendantは current SID / SYSTEM / BUILTIN\Administrators 以外へ
   write/modify/delete相当を与えないsafe owner/DACLで作成し、reparseを使わない。
-  **completion record（A9）作成前に、`RUN_ROOT` 配下の全descendantを再走査し、mode/owner/type/
-  canonical boundary/special entryが B6 のcleanup safety条件と互換であることを確認する。
-  unsafeまたは判定不能なdescendantが1件でもあれば `scratch-completion/v2` を作成しない**
-  （`path_safety_failed`/`path_safety_unknown`、completion未作成）。scratch 活動終了まで lock 保持。
+  **completion record（A9）作成前に、`RUN_ROOT` 配下の全descendantへ、B6と同一のOS別recursive
+  safety predicate（Linux/WSL: symlink拒否・owner UID一致・group/world write bits `0022`拒否・
+  mount table/mountinfoによるnested mount/bind mount拒否（評価不能は`path_safety_unknown`）・ACL評価・
+  special entry拒否・canonical boundary外拒否／Windows: reparse拒否・owner/ACL評価による
+  write/modify/delete拒否（評価不能は`path_safety_unknown`）・special/type不明拒否・canonical
+  boundary外拒否）を適用して再走査する。unsafeまたは判定不能なdescendantが1件でもあれば
+  `scratch-completion/v2` を作成しない**（`path_safety_failed`/`path_safety_unknown`、
+  completion未作成）。**A8はpayload作成後にのみ到達するため、この再走査に失敗した場合は
+  payload作成済みの状態として `payload_written=true` `completion_record_created=false`
+  `result=blocked` を肯定的に記録する（`payload_written=false`・payload不存在とは報告しない）。
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false` とし、既存の技術ゲート（B0–B8）を
+  経ずにcleanupを開始しない。** scratch 活動終了まで lock 保持。
   A9 **A8のdescendant再検証成功後のみ**、lock 保持のまま exact GitHub completion record 1件を作成
   （`record_type=scratch-completion/v2`、`repo_full_name`、`repo_slug`、`run_id`、
   `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、
@@ -172,8 +180,9 @@ Cursor-specific rules only:
   再確認する（不一致 → `path_safety_failed`、判定不能 → `path_safety_unknown`。いずれも blocked、
   completion 未作成。**A8 は既に成功しておりpayloadは作成済みのため、この分岐は
   `payload_written=true` `completion_record_created=false` `result=blocked` として記録する
-  （`payload_written=false` と報告してはならない）。payloadは作成済み・残留し得る状態として
-  recovery/residue処理のために記録を保持し、自動削除・repair・resumeへ拡張しない。cleanupは
+  （`payload_written=false` と報告してはならない）。`auto_cleanup=false` `auto_repair=false`
+  `auto_resume=false` とし、payloadは作成済み・残留し得る状態として
+  recovery/residue処理のために記録を保持する。cleanupは
   既存の技術ゲート（B0–B8）を経ずに開始しない**）。
   **`scratch-completion/v1`、`residue=none`、`residue` 欠落、field 不足/重複/extra/invalid は
   valid completion v2 として受理しない → `provenance_unknown`。v1 から instance binding を
@@ -245,19 +254,29 @@ Cursor-specific rules only:
   `inventory_digest` / `entry_count` と exact 比較。不一致 → `inventory_changed` `cleanup=false`
   `approval_reusable=false`。取得不能 → `inventory_unavailable` `cleanup=false`。
   **併せて、公開 `run-inventory/v1`（file: path/size/hash、directory: path のみ）とは別に、
-  process-local・非公開の child identity baseline を `RUN_INSTANCE_MARKER` を含む全 descendant に
-  ついてゼロから取得する: `child_identity_map[path_b64] = {entry_type: regular_file|directory,
-  identity: (Linux/WSL は device+inode 相当／Windows は `FILE_ID_INFO` 相当)}`。
+  process-local・非公開のtarget identity baselineを同一走査でゼロから取得する。
+  `run_root_identity = {entry_type: directory, identity: (Linux/WSL は device+inode 相当／
+  Windows は `FILE_ID_INFO` 相当)}`（`RUN_ROOT` 自身、必須取得）に加え、
+  `child_identity_map[path_b64] = {entry_type: regular_file|directory,
+  identity: (Linux/WSL は device+inode 相当／Windows は `FILE_ID_INFO` 相当)}`
+  （`RUN_INSTANCE_MARKER` を含む全 descendant）を取得する。
   取得先は memory/process-local のみとし、GitHub・completion record・公開 inventory・ログへ
-  identity を出さない。baseline を取得できない、または取得経路の信頼性を証明できない場合は
+  identity を出さない。`RUN_ROOT` 自身またはchildのidentity/typeを取得できない、一意比較不能、
+  または取得経路の信頼性を証明できない場合は
   `path_safety_unknown` として `cleanup=false` `approval_reusable=false` `delete_attempted=false`。
-  このbaselineが
-  (9) の child 単位再確認の比較元となる（`run-inventory/v1` の schema/version は変更しない）。**
+  この`run_root_identity`と`child_identity_map`が
+  (9) のroot/child単位再確認の比較元となる（`run-inventory/v1` の schema/version は変更しない）。**
   (7) `run_state=completed` / exact target / operation / `instance_commitment` を再確認。
   **(8) 最初の削除 mutation 直前にも、(3)で取得した同じ opened lock handle と現在の `RUN_LOCK`
   path entry の file identity を再度 exact 比較する。不一致または判定不能なら削除へ進まない
   （`path_safety_failed`/`path_safety_unknown`、`cleanup=false`）。**
-  **(9) `RUN_LOCK` のhandle/path identity再確認だけでは各childの実体束縛にならない。(6)で取得した
+  **(9) `RUN_LOCK` のhandle/path identity再確認だけでは`RUN_ROOT`自身・各childの実体束縛には
+  ならない。各mutation candidateをopen/処理する直前に、current `RUN_ROOT`をno-followで再取得し、
+  (6)の`run_root_identity`とentry type + identityをexact比較する（baselineをmutation直前に
+  初めて採ることはしない）。current `RUN_ROOT`がrename/replacement等でbaselineと不一致なら
+  `path_safety_failed`、current rootのidentity/typeを証明不能なら`path_safety_unknown`とし、
+  **そのmutationは実行しない**（後段のOS別delete capability判定でこの前段失敗を上書きしない）。
+  root binding確認後、(6)で取得した
   process-local child identity baseline（`child_identity_map`）を比較元として、削除対象となる
   各child（`RUN_INSTANCE_MARKER`を含む）についてno-followで再取得した実体identity・type・
   path safetyが、baseline記録時点の対象と一致することを child 単位で確認する（読み取り専用の
@@ -272,17 +291,26 @@ Cursor-specific rules only:
   childが1件でも未削除で残っていれば削除に進まない）、(b) 残余集合に(6)時点のinventoryへ
   記録がないentryが1件でも出現していないこと（承認snapshot外からの新規混入を許さない）。
   いずれかを満たさない、または列挙・評価不能な場合は削除に進まない。**
-  追加・置換・差し替え・content不一致・child集合の増減・type変化・判定不能を1件でも検出した場合は
-  削除に進まない（content/child集合の不一致は既存 `inventory_changed`、identity/type/safety不一致は
-  既存 `path_safety_failed`、安全性を証明できないものは既存 `path_safety_unknown`、inventory内容を
-  読めない場合は既存 `inventory_unavailable` として `cleanup=false`。新しいstop_reasonは追加しない）。
+  承認snapshot外からの新規entry追加、削除対象として検証済みのchildが未削除のまま残留、置換・
+  差し替え、content不一致、type変化、identity/safety drift、列挙不能のいずれかを1件でも検出した
+  場合は削除に進まない（**bottom-up削除によりchild集合が承認時点より減少すること自体は正常であり、
+  それだけでは拒否しない**。content/child集合の不一致は既存 `inventory_changed`、identity/type/
+  safety不一致は既存 `path_safety_failed`、安全性を証明できないものは既存 `path_safety_unknown`、
+  inventory内容を読めない場合は既存 `inventory_unavailable` として `cleanup=false`。新しい
+  stop_reasonは追加しない）。
 
   **上記のchild単位再確認は読み取り専用の再検証であり、実際の削除mutation対象をその実体へ束縛
   することを保証しない。delete mutationの実行可否は次のOS別契約でのみ決まる。**
 
-  **Windows native**: regular fileは、no-reparseのcreate/open手順で対象へ削除mutation直前に
+  **Windows native**: `RUN_ROOT`自身を含む各mutation candidateをopenする直前に、上記(9)冒頭の
+  root binding確認をcurrent `RUN_ROOT`のdirectory handle identity（`FILE_ID_INFO`相当）でも
+  同様に行う。regular fileは、no-reparseのcreate/open手順で対象へ削除mutation直前に
   **verified handle** を取得する。handleはDELETE、および上記のidentity/type/content再確認に
-  必要なcontent・attribute accessを持つこと。identity（`FILE_ID_INFO`相当）・type・owner・
+  必要なcontent・attribute accessを持つこと。**競合processによるwrite/rename/replaceを許さない
+  ため、このhandleはwrite/delete sharingを許可しない、またはOS/APIとして同等の安全性を証明できる
+  share条件で取得する。既存handleとのshare conflict等によりtarget bindingを証明できない場合は
+  `path_safety_unknown` でmutation前に停止する。read sharingを許す場合もwrite/deleteを防げる
+  根拠を持つこと。** identity（`FILE_ID_INFO`相当）・type・owner・
   DACL・reparse・canonical boundaryを **同一handle** 上で再確認し、(6)のbaselineと一致することを
   確認する。inventoryの `size_bytes`/`sha256_lower_hex` も **同一verified handle** から取得した
   値で確認する。全項目一致後にのみ、**同一verified handle** に対する
@@ -290,11 +318,14 @@ Cursor-specific rules only:
   削除する。pathname-only `DeleteFile` をdelete target bindingの安全根拠として使用しない。
   B8(6)時点の対象Xが別実体Yへ差し替わっていた場合、pathnameを追跡してYを削除しない
   （`path_safety_failed`）。
-  directoryはbottom-upで、削除直前にno-reparseのdirectory handleをDELETE accessで取得し、上記
+  directoryはbottom-upで、削除直前にno-reparseのdirectory handleを、DELETE accessと上記regular
+  fileと同じ安全なshare条件で取得し、上記
   identity再確認と残余child集合の確認（空であること・inventory外entry不在）を **同一directory
-  handle** を用いて行う。全項目一致後にのみ、**同一directory handle** に対する
+  handle** を用いて行う。**bottom-up削除により承認済みchild集合が減少すること自体は正常であり、
+  それだけではdriftとして拒否しない。** 全項目一致後にのみ、**同一directory handle** に対する
   handle-based dispositionで削除する。pathname-only `RemoveDirectory` をbinding保証として
-  使用しない。
+  使用しない。`RUN_ROOT`自身を削除する場合も、上記root binding確認と同一directory handle基準の
+  empty/safety確認を経てからhandle-based dispositionを適用する。
   delete実行後、削除結果を同一handleまたはOS標準の手段で確認できない場合は
   `cleanup_result_unknown` とし、以降の削除を継続しない。
 
@@ -339,11 +370,13 @@ Cursor-specific rules only:
   identity binding） → recursive path safety → **local marker commitment ↔ completion v2 exact binding** →
   inventory / run_state → execution approval → post-approve provenance / existing `RUN_LOCK` reacquire
   （再取得直後 handle/path identity 再確認） → post-approve recursive path safety / **marker binding** /
-  inventory → 削除 mutation 直前の `RUN_LOCK` handle/path identity 再確認 → **child entry単位の
+  inventory → 削除 mutation 直前の `RUN_LOCK` handle/path identity 再確認 → **mutation candidate
+  ごとのcurrent `RUN_ROOT` root binding再確認（(6)の`run_root_identity`とのexact比較。不一致・
+  判定不能はそのmutation前に停止）** → **child entry単位の
   no-follow実体identity再確認（読み取り専用）**（(6)のprocess-local child identity baselineとの
   一致。regular fileは`size_bytes`/`sha256`もexact再照合、directoryはchild集合を削除直前に
-  再列挙して照合） → **OS別delete mutation binding**（Windows: 同一verified handleへの
-  handle-based disposition。Linux/WSL: 原子的bindingを現在許可されたAPIで証明できないため
-  fail-closedで停止） → exact deletion（Windows nativeのみ）/ result confirmation。
+  再列挙して照合） → **OS別delete mutation binding**（Windows: write/delete sharingを制限した
+  同一verified handleへのhandle-based disposition。Linux/WSL: 原子的bindingを現在許可されたAPIで
+  証明できないためfail-closedで停止） → exact deletion（Windows nativeのみ）/ result confirmation。
   後段理由で前段失敗を上書きしない。
   カテゴリ③（本ルールの merge）とカテゴリ④（実 cleanup）は別発効点・別 scope。

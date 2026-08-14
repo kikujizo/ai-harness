@@ -428,19 +428,36 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   handleへのdispositionにより削除契約上到達可能となる（本PRでは実delete未実行）ことを確認し、
   pathname-only `DeleteFile`/`RemoveDirectory`を経由しないことを確認する。
 - **Linux/WSL fail-closed停止（否定例・B8(9)）**: Linux/WSLで、identity・content・provenance・
-  lockのread-only再確認がすべてpassした状況を渡しても、`os=linux|wsl` `result=blocked`
+  lockのread-only再確認がすべてpassした状況、および検証直後に同一UIDの別processがrename/replace
+  した状況のいずれを渡しても、`os=linux|wsl` `result=blocked`
   `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false`
   `approval_reusable=false` となり、`unlink`/`unlinkat`/`rmdir`/shell `rm` 等のpathname delete
-  APIが一切呼ばれないことを確認する（read-only check全passがmutation実行の理由にならない）。
-- **B8(6)後の識別対象差し替え拒否（否定例・B8(9)・Windows）**: Windows nativeで、B8(6)時点で
+  APIが一切呼ばれないことを確認する（read-only check全passやrename/replaceの有無に関わらず、
+  現行API境界では最初のmutation前に停止する）。
+- **B8(6)後の識別対象差し替え拒否（否定例・B8(9)・Windows・child handle identity mismatch）**:
+  Windows nativeで、B8(6)時点で
   identity baselineを記録した対象Xが、削除mutation前に別実体Yへ差し替わった（同一pathnameで
   異なる`FILE_ID_INFO`を持つ）状況を渡し、削除直前に取得したverified handleのidentityが
   baselineと不一致となり `result=blocked` `stop_reason=path_safety_failed` `cleanup=false`
   `delete_attempted=false` となり、pathnameを追跡してYを削除しないことを確認する。
-- **child identity baseline取得不能（否定例・B8(6)/B8(9)）**: B8(6)でprocess-local child identity
-  mapを取得できない、または取得経路の信頼性を証明できない状況を渡し、`result=blocked`
+- **`RUN_ROOT` rename/replacement拒否（否定例・B8(9)・Windows）**: Windows nativeで、B8(6)時点の
+  `run_root_identity`を記録した後、いずれかのmutation candidateを処理する直前に`RUN_ROOT`自身が
+  rename/replacementされ、current `RUN_ROOT`のdirectory handle identityがbaselineと不一致になる
+  状況を渡し、`result=blocked` `stop_reason=path_safety_failed` `cleanup=false`
+  `delete_attempted=false` `approval_reusable=false` となり、差し替え後のroot配下を追跡して
+  削除しないことを確認する（後段のOS別delete capability判定でこの前段失敗を上書きしない）。
+- **target identity baseline取得不能（否定例・B8(6)/B8(9)）**: B8(6)でprocess-local
+  `run_root_identity`または`child_identity_map`のいずれかを取得できない、一意比較不能、または
+  取得経路の信頼性を証明できない状況を渡し、`result=blocked`
   `stop_reason=path_safety_unknown` `cleanup=false` `approval_reusable=false` となり、
-  baseline欠落のままB8(9)の比較・削除へ進まないことを確認する。
+  baseline欠落のままB8(9)のroot/child比較・削除へ進まないことを確認する。
+- **Windows handle-based delete capability unavailable（否定例・B8(9)・finding 1）**: Windows
+  nativeで、identity/content等のread-only検査はすべてpassしたが、write/delete sharingを排除する
+  handleを取得できない、または既存handleとのshare conflict等により対象実体へのdelete target
+  bindingを技術的に証明できない状況を渡し、`result=blocked` `stop_reason=path_safety_unknown`
+  `cleanup=false` `delete_attempted=false` `approval_reusable=false` となり、read sharingのみで
+  write/delete競合を防げない場合や、pathname再解決をverified target bindingの代用にした場合に
+  成立しないことを確認する（最初のdelete mutationが実行されていないことを含む）。
 - **inventory後のchild差し替え拒否（否定例・B8(9)・Windows）**: post-approvalの(6)でinventoryと
   child identity baselineを取得した後、最初の削除mutationまでの間に同一UIDの別processが
   descendantを追加または置換した状況を渡し、`RUN_LOCK` のhandle/path identity再確認だけでは
@@ -454,18 +471,31 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   disposition直前に再取得した `size_bytes`/`sha256_lower_hex` がinventory記録値と不一致となり、
   `result=blocked` `stop_reason=inventory_changed` `cleanup=false` となることを確認する
   （identity一致をcontent一致の代替にしない）。
-- **directory child集合drift拒否（否定例・B8(9)・Windows）**: 配下descendantを検証・削除した後、
+- **directory child集合drift拒否（否定例・B8(9)・Windows・finding 4）**: 配下descendantを検証・削除した後、
   当該directory自体の削除直前に、同一directory handle上で残余child集合を再列挙した結果、
   (a) 削除対象として検証済みのchildが1件未削除で残っている、または (b) (6)時点のinventoryに
   記録のないentryが1件出現している状況を渡し、`result=blocked` `stop_reason=inventory_changed`
   `cleanup=false` となり、directory自体の削除に進まないことを確認する（残余集合とinventory
   記録集合のexact一致は削除がbottom-upであるため要求しない。空であることと承認snapshot外混入の
   不在という会計条件で判定する）。
+- **bottom-up縮小のみでは拒否しない（正例・B8(9)・finding 4）**: 配下descendantを承認どおり検証・
+  削除した結果、残余child集合が(6)時点のinventoryより単純に少ない（かつinventory外entryの混入も
+  未削除の検証済みchildもない）状況を渡し、`stop_reason=inventory_changed`とならず
+  directory自体の削除契約上のmutation candidateへ進めることを確認する（child集合の減少自体は
+  正常でありdriftとして扱わない）。
 - **A9到達後のlock drift時のpayload保全（否定例・A9）**: A8がpayload作成まで成功した後、completion
   作成直前の `RUN_LOCK` handle/path identity再確認でdriftを検出した状況を渡し、`result=blocked`
-  `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `completion_record_created=false`
+  `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `payload_written=true`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
   となり、既に作成済みのpayloadを `payload_written=false` として誤報せず、残留し得る状態として
   保持したまま自動delete/repair/resumeへ進まないことを確認する。
+- **A8 post-write safety failure（否定例・A8・finding 6）**: payloadへ1回以上write mutation済みの
+  状態で、completion record作成前のB6同等recursive safety再走査（Linux/WSLはnested mount/bind
+  mount・mountinfo評価を含む）がunsafeまたは判定不能となる状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `payload_written=true`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  となり、completion未作成を「payloadなし」の意味に読み替えず、残留を隠さずに肯定記録すること、
+  および自動cleanup/repair/resumeへ進まないことを確認する。
 
 **試験実施記録（Issue #54・実装後照合・実施: Cursor）**
 
@@ -482,9 +512,9 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールドを**`PATH`検索に依存しないtrusted execution path（syscall/NSS APIまたは実体検証済みcommand）で解決**し、差し替え可能な`PATH`上の`id`/`getent`を正本にしない（A0）。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
 | `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A4/A6 新規directoryをLinux/WSL `0700`固定・Windows safe owner/DACLで1段create→直後再検証。A5/B5/B8 `RUN_LOCK`のcreate-new/open-existing区別＋取得直後・completion直前・post-approval再取得直後・削除mutation直前のhandle/path identity exact binding。**A7 `RUN_INSTANCE_MARKER`もLinux/WSL `0600`固定・Windows safe owner/DACLで作成直後再検証。A8 payload descendantもB6互換の安全属性で作成**。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
 | `persistent-claim-bypass` | pass | local marker は create-new/no-overwrite・collision・payload による marker 変更禁止・completion v2 exact binding・pre/post 再取得で bypass 不可（Issue #54 §fail-closed 8） | continue |
-| `verify-before-mutate` | pass | A4/A6 safe create→直後再検証。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 marker create（0600固定/safe DACL）+verify→A8 payload（cleanup互換属性で作成＋completion前の全descendant再走査、unsafeなら`scratch-completion/v2`未作成）**→A9 completion直前のhandle/path identity再確認（**drift時はpayload残留を`payload_written=false`と誤報せず保持、completionのみ未作成**）。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較、**B8(8) 削除mutation直前のRUN_LOCK再確認**に加え、**B8(9)は(6)のchild identity baselineとのchild単位no-follow実体identity再確認（読み取り専用、regular fileはsize/SHA-256もexact再照合、directoryはchild集合を削除直前に再列挙・照合）をOS共通で行った上で、実際のmutationはOS別契約でのみ許可する: Windows nativeは再確認と同一のverified handleに対する`SetFileInformationByHandle`+`FileDispositionInfo`相当のhandle-based dispositionでのみ削除し、pathname-onlyの`DeleteFile`/`RemoveDirectory`をbinding根拠にしない。Linux/WSLは同一UIDの非協調processによるrename/replaceを現在許可されたAPI（`unlink`/`unlinkat`/`rmdir`等のpathname delete）では原子的に排除できないため、read-only再確認が全てpassしても最初のmutation前に`path_safety_unknown`で停止し、`delete_attempted=false`のまま削除を実行しない**（Codex独立技術レビュー#5277901998のP1-2指摘に対する是正） | continue |
+| `verify-before-mutate` | pass | A4/A6 safe create→直後再検証。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 marker create（0600固定/safe DACL）+verify→A8 payload（cleanup互換属性で作成＋completion前にB6と同一のOS別recursive safety predicate（nested mount/bind mount/mountinfo評価を含む）で全descendant再走査、unsafeなら`scratch-completion/v2`未作成・payload write済みなら`payload_written=true`/`completion_record_created=false`/`result=blocked`を肯定記録）**→A9 completion直前のhandle/path identity再確認（**drift時はpayload残留を`payload_written=false`と誤報せず保持、completionのみ未作成**）。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較、**B8(8) 削除mutation直前のRUN_LOCK再確認**に加え、**B8(9)は各mutation candidate処理直前にcurrent `RUN_ROOT`を(6)の`run_root_identity`とexact比較するroot binding確認を先に行い（不一致・判定不能はそのmutation前に停止）、その後(6)のchild identity baselineとのchild単位no-follow実体identity再確認（読み取り専用、regular fileはsize/SHA-256もexact再照合、directoryはchild集合を削除直前に再列挙・照合。bottom-up縮小自体はdriftとしない）をOS共通で行った上で、実際のmutationはOS別契約でのみ許可する: Windows nativeは再確認と同一のverified handleに対する`SetFileInformationByHandle`+`FileDispositionInfo`相当のhandle-based dispositionでのみ削除し、handleはwrite/delete sharingを許可しないか同等の安全性を証明できる条件で取得し、pathname-onlyの`DeleteFile`/`RemoveDirectory`をbinding根拠にしない。Linux/WSLは同一UIDの非協調processによるrename/replaceを現在許可されたAPI（`unlink`/`unlinkat`/`rmdir`等のpathname delete）では原子的に排除できないため、read-only再確認が全てpassしても最初のmutation前に`path_safety_unknown`で停止し、`delete_attempted=false`のまま削除を実行しない**（Codex独立技術レビュー#5277901998のP1-2指摘、および#5289296528の6 finding指摘に対する是正） | continue |
 | `provenance-no-fabrication` | pass | `scratch-completion/v2`（`run_state=completed`/`residue=present` only）+ local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・`residue=none`・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
-| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。**B8(9)でinventory記録後から削除までの間に同一UIDの別processが追加・置換したdescendantもchild単位no-follow identity再確認で検出し、同一inodeへのin-place writeはsize/SHA-256再照合、directory child集合の増減は削除直前の再列挙で検出**。**OS別残留保証: Windows nativeは検出後にverified handleへのdisposition前でblockedとなり削除自体が発生しない。Linux/WSLはそもそも現行API境界で削除mutationへ到達しないため、非協調processによる並行rename/replaceが誤削除・残留誤認へつながる経路自体が存在しない（`os=linux\|wsl` `delete_attempted=false`）**。**A9でcompletion直前にlock identity driftが起きた場合もpayload残留を偽って否定しない**。marker/commitment mismatch・inventory drift 検出 | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。**B8(9)は各mutation candidate直前に`RUN_ROOT`自身のroot bindingも再確認し、rename/replacementを検出。inventory記録後から削除までの間に同一UIDの別processが追加・置換したdescendantもchild単位no-follow identity再確認で検出し、同一inodeへのin-place writeはsize/SHA-256再照合、directory child集合はbottom-up削除による正常な減少をdriftとせず、inventory外entry追加・削除対象として検証済みのchild残留のみを削除直前の再列挙で検出する**。Windows nativeのverified handleはwrite/delete sharingを排除するか同等の安全性を証明できる条件で取得し、並行processによるhandle取得後のcontent変更を防ぐ。**OS別残留保証: Windows nativeは検出後にverified handleへのdisposition前でblockedとなり削除自体が発生しない。Linux/WSLはそもそも現行API境界で削除mutationへ到達しないため、非協調processによる並行rename/replaceが誤削除・残留誤認へつながる経路自体が存在しない（`os=linux\|wsl` `delete_attempted=false`）**。**A8 post-write recursive safety失敗・A9でcompletion直前にlock identity driftが起きた場合もpayload残留を偽って否定せず`payload_written=true`を肯定記録する**。marker/commitment mismatch・inventory drift 検出 | continue |
 | `override-test-hook-isolation` | not_applicable | Issue #54 は override/test hook を導入しない（4ファイル文書のみ） | continue |
 
 ##### 否定テスト観測例（文書契約・EARLY非実行の証明）

@@ -3899,6 +3899,22 @@ PM_VERDICT: approve risk=high route=claude-code
   そのまま実装開始承認として流用すること**: 削除mutationの安全契約・利用API・保証不能時挙動を
   新たに確定する仕様変更であり、承認対象proposalの内容自体が変わるため却下し、新proposal
   `#5278352801` / 新承認 `#5278387881` を取得した
+- **（v5・finding 4）「child集合の増減」を一律driftとして拒否する契約**: 上記「（A9/B8(9)是正）」
+  時点ではin-place write検出とchild集合変化検出を同列に導入する目的で採用したが、bottom-up削除
+  では承認済みchildの正常な削除自体がchild集合を減少させるため、この一律拒否は現在の規範契約では
+  **superseded**（優先度が上位の会計条件（承認snapshot外の新規entry・検証済みchildの未削除残留・
+  置換/drift/列挙不能の個別検出）へ置き換え済み）。「（A9/B8(9)是正）」の却下理由テキスト自体は
+  当時の判断記録として残すが、現在の規範は`.cursor/rules/ai-workflow.mdc` B8(9)の会計条件であり、
+  「child集合の増減」という文言で一律拒否する契約はこのIssueでは採用しない
+- **（v5・finding 1）read sharingのみでwrite/delete競合を防げるとみなすこと**: read shareを
+  許可しても他processのwrite/delete/renameを排除できなければtarget bindingが証明できないため
+  却下し、write/delete sharingを排除するか同等の安全性を証明できる条件を要求する
+- **（v5）`renameat2`等を用いたquarantine/交換方式を、本Issue内で検証なしに新しい安全根拠として
+  採用すること**: 未検証の新方式をfail-closedの代替根拠にはできないため却下し、Linux/WSLの実
+  cleanup有効化は別Checkpointでの設計・Codex PM評価を要求する
+- **（v5・finding 6）A8 post-write failureを契機とした自動cleanup/repair/resume**: 残留状態を
+  肯定記録することと、そこから自動的に後続処理を進めることは別問題であり、後者は誤った自動復旧の
+  リスクを生むため却下し、`auto_cleanup=false` `auto_repair=false` `auto_resume=false`を明示する
 
 ## 判断理由
 

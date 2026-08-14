@@ -3969,6 +3969,12 @@ cleanup execution に流用しない。
 | Fail-closed success propagation @ `3d7d4e9` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head 3d7d4e98b2b2e0186304ea9b260e602fc099da51`） |
 | `git diff --name-only origin/main...HEAD` @ `3d7d4e9` | 固定4ファイルのみ | ローカル実行確認（`.cursor/rules/ai-workflow.mdc` / `docs/decisions.md` / `docs/harness/roles/cursor.md` / `docs/harness/setup.md`） |
 | `git diff --check origin/main...HEAD` @ `3d7d4e9` | **success**（exit 0） | ローカル実行確認 |
+| **（v4是正）** advisor指摘によるsetup.md table pipe escape・ChatGPT要件レビュー記録訂正・cursor.md SSOT整合 | 完了 | Codex技術レビュー観点で読める`docs/harness/setup.md`のfail-closed 8表・否定テストテーブルが`os=linux|wsl`の未エスケープpipeでセル崩壊していた点、および決定記録が実際には存在した`REVIEW_VERDICT: approve risk=high`（ChatGPT、Issue #54本文・[#5278010167](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5278010167)）を「未実施」と誤記していた点を是正 |
+| **（v4是正）実装tip** | `6e71c2a795c873dc2a919e767cc8a5bcf9c60361` | 上記3点の是正コミット |
+| Issue manifest diff @ `6e71c2a` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `6e71c2a` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --name-only origin/main...HEAD` @ `6e71c2a` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `6e71c2a` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 
@@ -4027,9 +4033,11 @@ cleanup execution に流用しない。
 - [x] **（v4）** Codex PM route確定（#5278407512 / route=claude-code）
 - [x] **（v4）** Claude Code によるB8(6) process-local child identity baseline・B8(9) Windows
   handle-bound disposition／Linux-WSL fail-closed の固定4ファイル実装（本コミット）
-- [ ] **（v4）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
-- [ ] ChatGPT 要件レビュー（v4実装 fixed HEAD）
-- [ ] Codex 独立技術レビュー（v4実装 fixed HEAD。Claude Codeは自分から起動しない）
+- [x] **（v4）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（`3d7d4e9`。自己参照回避のため）
+- [x] **（v4是正）** advisor指摘（setup.md table pipe escape / ChatGPT要件レビュー記録訂正 / cursor.md
+  SSOT整合）を是正し、新tip `6e71c2a` のSHAと検証結果を別コミットで同期
+- [ ] ChatGPT 要件レビュー（v4実装 fixed HEAD `6e71c2a`）
+- [ ] Codex 独立技術レビュー（v4実装 fixed HEAD `6e71c2a`。Claude Codeは自分から起動しない）
 - [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（B8(6)/B8(9)を含む）
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

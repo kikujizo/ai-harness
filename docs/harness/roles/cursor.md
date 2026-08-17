@@ -57,6 +57,13 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   entry（外部 file への hard link 先置き含む）は open/truncate しない。leaf pre-write binding を
   証明不能・不一致なら当該 write 前に blocked（`path_safety_failed` / `path_safety_unknown`）。
   A7 失敗時は A8 未進入（詳細は正本 A7/A8）。**
+  **payload directory**: 各 one-level create 前に `PreDirCreateAncestorBind`（`parent(D)`..`RUN_ROOT`
+  inclusive）と bound-parent one-level create-new。証明不能は create 前 `path_safety_unknown`
+  （詳細は正本 A8）。**
+  **leaf containment（`LeafContainmentCapabilityGate`）**: `RUN_INSTANCE_MARKER` と payload regular file は
+  create-new 成功〜初回 content write 完了までの leaf containment を OS/API で証明できる場合のみ write。
+  証明不能は content write 前 `path_safety_unknown`（pathname 単発照合・短時間窓・post-write scan 等は
+  安全代替にしない。詳細は正本 A7/A8）。**
   **A8: payload entry へ 1回でも write mutation 成功後の short write / flush / close 失敗は
   `payload_written=true` で fail-closed 残留を肯定し completion 未作成・`auto_*`=false とする
   （詳細は正本 A8）。**

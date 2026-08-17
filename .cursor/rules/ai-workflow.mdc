@@ -64,9 +64,13 @@ Cursor-specific rules only:
   **A7 の pre-write binding 失敗後に A8 payload へ進むこと**、
   **marker/payload の ancestor directory / `RUN_ROOT` pre-write binding を省略すること**、
   **leaf create-new 成功・`RUN_LOCK` 保持・pathname 一度 checked・post-write scan 合格だけで
-  ancestor-bound とみなすこと**、**ancestor/RUN_ROOT bind 保証不能時に create-new または content write
+  ancestor-bound とみなすこと**、  **ancestor/RUN_ROOT bind 保証不能時に create-new または content write
   を実行してから path safety を検出すること（write-then-detect）**、
-  **ancestor bind 成功前に leaf create-new を実行すること**。
+  **ancestor bind 成功前に leaf create-new を実行すること**、
+  **payload directory の `PreDirCreateAncestorBind` / bound-parent one-level create-new を省略すること**、
+  **leaf containment capability 証明不能時に marker/payload regular file へ content write すること**、
+  **pathname 単発照合・短時間窓・協調 process 前提・post-write scan・同一 handle 保持のみ・
+  rename/hard-link 隙間が残る link-count 単発比較を leaf containment の安全代替として列挙すること**。
   **A. scratch writer（role=writer）** — 順序固定:
   A0 identity-root resolve（Windows: `CURRENT_SID`→唯一 `Win32_UserProfile.LocalPath`；
   Linux/WSL: `id -u`→`getent passwd` 第6フィールドを、**syscall/NSS API（`getuid(2)`/`getpwuid_r(3)`相当）
@@ -172,6 +176,17 @@ Cursor-specific rules only:
   `WRITE_TARGET`（H）identity を照合する。不一致（観測可能）→ `result=blocked`
   `stop_reason=path_safety_failed`（content write しない。A8 未進入）。
   一致を証明不能 → `path_safety_unknown`（content write しない。A8 未進入）。
+  **LeafContainmentCapabilityGate（marker content write の前。create-new 成功後・初回 content write
+  完了まで）**: OS/API として、create-new 成功から初回 content write 完了までの間に leaf が
+  `RUN_ROOT` 外へ rename escape できないこと、および同一 entity への external hard-link 等の
+  外部参照追加を排除できることを証明できる場合のみ content write へ進む。
+  **以下だけでは safe とみなさない（禁止）**: pathname identity の単発照合のみ；短い時間窓；
+  協調 process 前提；post-write scan；同一 handle 保持のみ；rename/hard-link 隙間が残る
+  link-count 単発比較のみ。
+  上記 containment capability を証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
+  `completion_record_created=false` `content_write_attempted=false`。create-new は実施済みのため
+  `instance_marker_created=true` と肯定記録し residue を隠さない。content write は実行しない。
+  A8 未進入。write-then-detect / auto_cleanup / auto_repair / auto_resume 禁止。
   照合成功後のみ、canonical schema `scratch-instance/v1`（各 field LF・末尾 LF。extra/重複/欠落/
   順序違いは invalid）の content を **WRITE_TARGET 経由のみ**で write する（複数回 write が必要なら
   同一 WRITE_TARGET を使用。**create-new 後の pathname 再 open による初回 content write / truncate
@@ -194,6 +209,20 @@ Cursor-specific rules only:
   （`instance_marker_created=false` と報告したり marker/residue を省略で隠さない。A8 未進入）。
   payload は marker を変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
   A8 **A7 成功後のみ** scratch payload を create/write する。
+  **payload directory ごとに**（one-level nesting の各段。親→子の1段 create-new のみ）:
+  (c0) **PreDirCreateAncestorBind（directory create mutation の前）**: 当該 directory D の親
+  `parent(D)` から `RUN_ROOT` まで inclusive の各 ancestor directory について、identity binding、
+  no-follow + handle/descriptor based binding、または同等 OS/API 保証のいずれかで verified safe
+  directory entity へ束縛する。いずれかを証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
+  `create_dir_attempted=false`（当該段）。外部 target 未変更。directory create mutation 前停止。
+  write-then-detect / create-then-detect 禁止。
+  (c1) **DirectoryCreateNewFromBoundParent**: 上記 bind 成功後のみ、bound parent からの
+  OS/API one-level create-new を要求（pathname-only 過去 checked・`RUN_LOCK` 保持・後続 recursive scan・
+  短い race window は代替にしない）。bound-parent create-new を証明不能 → `path_safety_unknown`
+  （mkdir 前停止。`create_dir_attempted=false`）。
+  (c2) **ImmediatePostCreateVerify(D)**: 新規 D の identity / type / path safety を直後再検証。
+  unsafe/mismatch → 既存 fail-closed class（`path_safety_failed` または `path_safety_unknown`）。
+  合格後のみ次のネスト段または leaf regular file へ進む。
   **payload regular file ごとに**:
   (a) **PreWriteAncestorBind（当該 expected leaf pathname に対する create-new および初回 content write
   の両方より前）**: A7 (3) と同一要件。証明不能 → `path_safety_unknown`。**まだ当該 entry へ一度も
@@ -214,6 +243,18 @@ Cursor-specific rules only:
   **leaf content write の前に** current path entry identity と `WRITE_TARGET` identity を照合する。
   不一致（観測可能）→ `path_safety_failed`。**まだ当該 entry へ一度も write していない場合は
   `payload_written=false`。** 一致を証明不能 → `path_safety_unknown`（content write しない）。
+  **LeafContainmentCapabilityGate（leaf content write の前。create-new 成功後・初回 content write
+  完了まで）**: OS/API として、create-new 成功から初回 content write 完了までの間に leaf が
+  `RUN_ROOT` 外へ rename escape できないこと、および同一 entity への external hard-link 等の
+  外部参照追加を排除できることを証明できる場合のみ content write へ進む。
+  **以下だけでは safe とみなさない（禁止）**: pathname identity の単発照合のみ；短い時間窓；
+  協調 process 前提；post-write scan；同一 handle 保持のみ；rename/hard-link 隙間が残る
+  link-count 単発比較のみ。
+  上記 containment capability を証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
+  `content_write_attempted=false` `external_target_written=false`。**まだ当該 entry へ一度も
+  write していない場合は `payload_written=false`。** create-new は実施済みのため
+  `create_new_attempted=true` と肯定記録し residue を隠さない。content write は実行しない。
+  write-then-detect / auto_cleanup / auto_repair / auto_resume 禁止。
   初回 write と同一 file への継続 write を **WRITE_TARGET 経由のみ**で行う
   （**create-new 後の pathname 再 open による初回 content write / truncate は禁止**）。
   いずれかの payload entry へ **1回でも** write mutation（bytes 書込）が成功した後に、
@@ -439,10 +480,12 @@ Cursor-specific rules only:
   評価順序: identity（trusted execution path経由のresolve） → segment → existing path safety /
   writer bootstrap（safe create: Linux/WSL `0700`・Windows safe owner/DACL） → writer `RUN_LOCK`
   （create-new/open-existing区別 + 取得直後 handle/path identity binding） → writer `RUN_ROOT`
-  collision / create → **`RUN_INSTANCE_MARKER` create-new + pre-write handle binding
-  （Linux/WSL `0600`固定・Windows safe owner/DACL。canonical content は create-new handle 経由のみ。
-  pathname 再 open 初回 write 禁止）+ verify** → payload regular file ごとの create-new +
-  pre-write handle binding（既存 entry/hard link 先置きは open/truncate 禁止。pathname 再 open
+  collision / create → **`RUN_INSTANCE_MARKER` create-new + pre-write handle binding +
+  LeafContainmentCapabilityGate（Linux/WSL `0600`固定・Windows safe owner/DACL。canonical content は
+  create-new handle 経由のみ。pathname 再 open 初回 write 禁止）+ verify** → payload directory ごとの
+  PreDirCreateAncestorBind + bound-parent one-level create-new + ImmediatePostCreateVerify →
+  payload regular file ごとの create-new + pre-write handle binding +
+  LeafContainmentCapabilityGate（既存 entry/hard link 先置きは open/truncate 禁止。pathname 再 open
   初回 write 禁止。cleanup互換属性 + completion前の全descendant再検証） →
   completion v2 provenance（`residue=present` only・作成直前 handle/path identity 再確認） →
   cleanup provenance v2 + named chain read-only → cleanup existing `RUN_LOCK`（取得直後 handle/path

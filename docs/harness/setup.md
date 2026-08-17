@@ -527,6 +527,18 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `completion_record_created=false` `external_target_written=false` となり、marker/payload の当該
   create-new も content write も行わず外部 target 未変更のまま A8 未進入で停止することを
   確認する（write-then-detect 禁止。create-new 後のみの ancestor チェックでは不足）。
+- **payload directory parent 差し替え（否定例・A8・Case A・discussion_r3794153887）**: A8 で payload
+  directory を作成する直前に、当該 directory の親が symlink/reparse へ置換された状況を渡し、
+  `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`
+  `external_target_written=false` となり、directory create mutation 前に停止し外部 target 未変更のまま
+  であることを確認する（write-then-detect / create-then-detect 禁止）。
+- **leaf containment capability 不成立（否定例・A7/A8・Case B・discussion_r3794153890）**:
+  marker または payload regular file の create-new 成功後、初回 content write 前に `RUN_ROOT` 外
+  rename escape または external hard-link 追加を OS/API で排除できることを証明不能な状況を渡し、
+  `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false`
+  `external_target_written=false` となる。create-new 済みの場合は `create_new_attempted=true` を
+  実順序どおり肯定し residue を隠さない（marker: `instance_marker_created=true`；
+  payload 未write: `payload_written=false`）。「たぶん安全」で content write へ進まないことを確認する。
 - **payload mutation 後の flush/close 失敗（否定例・A8・discussion_r3793893860）**: payload entry へ
   1回以上 write mutation 済みの後に short write・後続 write 失敗・`flush` 失敗・`close` 失敗、または
   content が完全 committed/durable でない equivalent 状態を渡し、`result=blocked`
@@ -595,6 +607,8 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | marker create-new後のpath差し替え | `pathname_reopen_used=false` `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` | A7 canonical content は create-new handle へ。path 再 open 初回 write なし。A8 未進入 |
 | pre-write binding capability不明 | `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` | create-new/handle/path binding 証明不能。pathname write へ進まない |
 | ancestor directory / `RUN_ROOT` bind 不能（A6後symlink/reparse置換） | `create_new_attempted=false` `content_write_attempted=false` `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` `external_target_written=false` | A7/A8 create-new 前停止。create-new 後のみの ancestor チェックでは不足 |
+| payload directory parent 差し替え（Case A） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | A8 PreDirCreateAncestorBind 失敗。directory create 前停止 |
+| leaf containment capability 不成立（Case B） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `external_target_written=false` | create-new 済みなら `create_new_attempted=true` を肯定。content write 前停止 |
 | payload mutation 後 flush/close 失敗 | `result=blocked` `payload_written=true` `completion_record_created=false` `auto_cleanup=false` | 不完全 payload 残留を肯定。成功丸め禁止 |
 
 ## 既存リポジトリへの導入（差分マージ方式）

@@ -46,6 +46,11 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   cleanup互換の安全属性で作成し、completion record作成前に全descendantを再走査する。
   unsafe/判定不能なdescendantが1件でもあればcompletion recordを作らない（詳細は
   `.cursor/rules/ai-workflow.mdc` A7/A8）。**
+  **`RUN_INSTANCE_MARKER` と payload regular file の最初の content write は、atomic create-new /
+  no-overwrite で得た同一 handle/descriptor へ束縛する。create-new 後の pathname 再 open による
+  初回 write / truncate は禁止。expected pathname への既存 entry（外部 file への hard link
+  先置き含む）は open/truncate しない。pre-write binding を証明不能・不一致なら当該 write 前に
+  blocked（`path_safety_failed` / `path_safety_unknown`）。A7 失敗時は A8 未進入（詳細は正本 A7/A8）。**
   writerとcleanupは同一 `RUN_LOCK` を non-blocking exclusive で必ず取得する。
   **`RUN_LOCK` の取得は曖昧な `OpenOrCreate` 一発ではなく create-new と open-existing を区別し
   （Linux: `flock` / Windows writer: reparse非followのcreate-new・open-existing + `FileShare=None`、

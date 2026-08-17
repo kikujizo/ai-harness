@@ -3781,10 +3781,48 @@ APPROVAL_STATE: approved
 PM_VERDICT: approve risk=high route=claude-code
 ```
 
-本ラウンドより前のproposal・approval（`#5276309603`/`#5276357583`、`#5278352801`/`#5278387881`
-を含む）は、本再仕様化に伴う`implementation_start`としては流用しない。Claude Codeは実装担当
-としてのみこの委任を受けており、Codex（PM）の役割・route判定・承認record検証を代理・自称しない
-（記録者はすべて`Claude Code`のまま。他AIの名称を名乗らない）。
+本ラウンド（v5）より前のproposal・approval（`#5276309603`/`#5276357583`、`#5278352801`/`#5278387881`
+を含む）は、v5再仕様化に伴う`implementation_start`としては流用しない。
+
+**再仕様化v6（pre-write target binding／A7 marker + A8 payload）**: fixed HEAD
+`4c3effe6f0f5809ec3848d5db069c5a517b67969`（PR #132 current HEAD）に対するCodex独立技術レビュー
+`#5291297447`は `REVIEW_VERDICT: request-changes risk=high`。current P1
+[`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568)
+は、A8がpayload pathnameへの最初のwrite前にfresh target bindingを要求しておらず、同一UIDの
+非協調processが外部fileへのhard linkを先置きするとpathname write/truncateが`RUN_ROOT`外の
+既存実体を書き換え得ると指摘した。同HEADのcurrent P1
+[`discussion_r3782373045`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782373045)
+は、`RUN_INSTANCE_MARKER`のcreate-new後にpathnameを再openしてschema writeし得る同型の欠陥を
+指摘した。Codex（PM）判断`#5291492454`はこれらをvalidと判定し、単なるSSOT同期漏れではなく
+**Issue #54のpre-write target binding契約不足**としてChatGPTへ再仕様化を差し戻した。wontfix /
+後回しは採用していない。本再仕様化では「writer-created regular artifactへの最初のwriteは
+create-newで得た実体へ束縛する」という共通契約にA7/A8を統合する。
+
+canonical proposal `#5289589235` / `HUMAN_APPROVAL_RECORD: v2` `#5289615101` / route確定
+`#5289667993` を含め、**本2026-08-17再仕様化より前のproposal / implementation_start approvalは
+流用しない**。新canonical proposal
+[`#5311085139`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311085139)、
+新 `HUMAN_APPROVAL_RECORD: v2`
+[`#5311256262`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311256262)
+（`proposed_route=cursor`、`decision=approve`）、Codex PM route確定
+[`#5311265605`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311265605)
+（`route=cursor`）が本ラウンドの実装開始正本。
+
+```text
+APPROVAL_SCOPE: implementation_start
+APPROVAL_RECORD: https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311256262
+APPROVAL_STATE: approved
+PM_VERDICT: approve risk=high route=cursor
+```
+
+**（v6）実装**: 固定4ファイルへ A7 `RUN_INSTANCE_MARKER` / A8 payload regular file の
+pre-write create-new + same-handle binding 契約、setup.md 否定例3件、fail-closed 8の
+`verify-before-mutate` / `concurrency-interrupt-residue` 同期、cursor.md 最小同期を反映
+（本コミット。実装tip SHA・CI disposition は自己参照回避のため別コミットで同期予定）。
+
+本ラウンド（v6）より前のproposal・approval（`#5289589235`/`#5289615101`/`#5289667993` を含む）は、
+v6再仕様化に伴う`implementation_start`としては流用しない。Cursorは実装担当としてこの委任を受け、
+Codex（PM）の役割・route判定・承認record検証を代理・自称しない（記録者は`Cursor`）。
 
 ## 採用する方針
 
@@ -3849,6 +3887,13 @@ PM_VERDICT: approve risk=high route=claude-code
 - **（v5・finding 6）** A8のpayload write後recursive safety失敗でも、`payload_written=true`
   `completion_record_created=false` `result=blocked` `auto_cleanup=false` `auto_repair=false`
   `auto_resume=false`を肯定記録し、completion未作成をresidue不存在の根拠にしない
+- **（v6）** `RUN_INSTANCE_MARKER` と payload regular file の最初のcontent writeは、atomic
+  create-new / no-overwrite で得た同一 handle/descriptor へ束縛する。create-new 後の pathname
+  再 open による初回 write / truncate は禁止。expected pathname への既存 entry（外部 file への
+  hard link 先置き含む）は open/truncate しない。pre-write binding を証明不能・不一致なら当該
+  write 前に `path_safety_failed` / `path_safety_unknown` で blocked。A7 失敗時は A8 未進入
+- **（v6）** payload へ1回でも write mutation 成功後の後続失敗は `payload_written=true`
+  `completion_record_created=false` `result=blocked` を肯定記録（残留を隠さない）
 
 ## 採用しない方針 / 却下した代替案
 
@@ -4072,6 +4117,13 @@ cleanup execution に流用しない。
 | Fail-closed success propagation @ `bb3772d` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
 | `git diff --name-only origin/main...HEAD` @ `bb3772d` | 固定4ファイルのみ | ローカル実行確認 |
 | `git diff --check origin/main...HEAD` @ `bb3772d` | **success**（exit 0） | ローカル実行確認 |
+| **（v6）** Codex独立技術レビュー（fixed HEAD `4c3effe`、pre-write binding P1） | **request-changes** risk=high | [#5291297447](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5291297447)。[`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568)（A8 hard-link先置き）、[`discussion_r3782373045`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782373045)（A7 marker pathname再open） |
+| **（v6）** Codex（PM）P1判定・再仕様化差し戻し | valid、ChatGPTへ再仕様化 | [#5291492454](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5291492454) |
+| **（v6）** Issue #54本文のpre-write binding再仕様化 | 完了 | ChatGPTによる本文更新（2026-08-17） |
+| **（v6）** 新canonical proposal（route=cursor） | 固定 | [#5311085139](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311085139) |
+| **（v6）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5311256262](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311256262) |
+| **（v6）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5311265605](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311265605) |
+| **（v6）実装** | 本コミット（未push） | A7/A8 pre-write binding・setup否定例3件・fail-closed 8同期・cursor最小同期。tip SHAは別コミットで同期予定 |
 
 ## 次アクション
 
@@ -4148,8 +4200,17 @@ cleanup execution に流用しない。
 - [x] **（v5）** Claude Codeによる6 finding（Windows share条件・`RUN_ROOT` identity baseline・
   A8 B6同等rescan・directory bottom-up accounting・Windows capability unavailable観測例・
   A8 post-write residue肯定記録）の固定4ファイル実装（本コミット）
-- [ ] **（v5）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
-- [ ] ChatGPT 要件レビュー（v5実装 fixed HEAD）
+- [x] **（v5）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [x] **（v6）** Codex独立技術レビュー（fixed HEAD `4c3effe`、#5291297447）→ pre-write binding P1
+- [x] **（v6）** Codex（PM）P1 valid判定・ChatGPT再仕様化差し戻し（#5291492454）
+- [x] **（v6）** ChatGPTによるIssue #54本文のpre-write binding再仕様化（2026-08-17）
+- [x] **（v6）** 新canonical proposal（#5311085139、route=cursor）
+- [x] **（v6）** 人間 `implementation_start` approve（#5311256262 / HUMAN_APPROVAL_RECORD: v2,
+  route=cursor）
+- [x] **（v6）** Codex（PM）正式route確定（#5311265605 / route=cursor）
+- [x] **（v6）** CursorによるA7/A8 pre-write binding・setup否定例・fail-closed 8同期の固定4ファイル実装（本コミット）
+- [ ] **（v6）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [ ] ChatGPT 要件レビュー（v6実装 fixed HEAD）
 - [ ] Codex 独立技術レビュー（v5実装 fixed HEAD。Claude Codeは自分から起動しない）
 - [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（6 findingすべてを含む）
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）

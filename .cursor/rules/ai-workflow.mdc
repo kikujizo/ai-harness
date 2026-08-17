@@ -58,7 +58,10 @@ Cursor-specific rules only:
   writer `RUN_LOCK` を曖昧な `OpenOrCreate` 一発で扱うこと、取得直後・削除mutation直前の
   handle/path identity 再確認省略、`PATH` 検索の `id`/`getent` 等を identity-root の trusted 入力として
   扱うこと、marker/payload の作成属性を umask/既定ACL任せにすること、削除mutation直前の child 単位
-  identity 再確認省略。
+  identity 再確認省略、**`RUN_INSTANCE_MARKER`/payload regular file の create-new 後に pathname を
+  再 open して初回 content write / truncate すること**、**expected pathname に先置きされた既存
+  entry（外部 file への hard link 含む）を open-existing / truncate して write すること**、
+  **A7 の pre-write binding 失敗後に A8 payload へ進むこと**。
   **A. scratch writer（role=writer）** — 順序固定:
   A0 identity-root resolve（Windows: `CURRENT_SID`→唯一 `Win32_UserProfile.LocalPath`；
   Linux/WSL: `id -u`→`getent passwd` 第6フィールドを、**syscall/NSS API（`getuid(2)`/`getpwuid_r(3)`相当）
@@ -137,11 +140,22 @@ Cursor-specific rules only:
   `instance_nonce` とする（host/user/SID/UID/path/time から導出禁止）。
   (2) `instance_commitment = sha256(raw 32-byte nonce)` を `sha256:<64 lowercase hex>` で表現
   （hex 文字列を hash しない）。
-  (3) `RUN_INSTANCE_MARKER` を create-new/no-overwrite/no-follow で 1件だけ作成する。
+  (3) `RUN_INSTANCE_MARKER` を expected pathname で atomic create-new / no-overwrite / no-follow とする。
+  pathname が既に存在する、または create-new が既存 entry 存在により失敗する場合 →
+  `path_safety_failed`（open-existing・truncate・write 禁止。A8 未進入）。
+  OS/runtime が fresh create-new / no-overwrite を証明できない、create-new 成功で返された
+  handle/descriptor を保持できない、または handle を expected path identity へ束縛できない場合 →
+  `path_safety_unknown`（pathname 再解決による初回 write 禁止。A8 未進入）。
+  create-new 成功時は `WRITE_TARGET` := 返された handle/descriptor とし、canonical schema
+  `scratch-instance/v1`（各 field LF・末尾 LF。extra/重複/欠落/順序違いは invalid）の content を
+  **WRITE_TARGET 経由のみ**で write する（複数回 write が必要なら同一 WRITE_TARGET を使用。
+  **create-new 後の pathname 再 open による初回 content write / truncate は禁止**）。
+  create-new 後に path entry identity が WRITE_TARGET identity と不一致（観測可能）→
+  `path_safety_failed`（write 継続・A8 未進入）。
   **Linux/WSL**: requested mode は **`0600` 固定**（process umaskに安全性を委ねない）。
   **Windows**: create時点から current SID / SYSTEM / BUILTIN\Administrators 以外へ
   write/modify/delete相当を与えない owner/DACL を要求する。
-  canonical schema `scratch-instance/v1`（各 field LF・末尾 LF。extra/重複/欠落/順序違いは invalid）:
+  canonical schema fields:
   `record_type=scratch-instance/v1`、`instance_nonce=<64 lowercase hex>`、
   `repo_slug=<exact>`、`run_id=<exact>`、
   `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`。
@@ -153,6 +167,22 @@ Cursor-specific rules only:
   `provenance_unknown`、payload/completion 未作成。payload は marker を
   変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
   A8 **A7 成功後のみ** scratch payload を create/write する。
+  **payload regular file ごとに** expected pathname で atomic create-new / no-overwrite / no-follow
+  とする。pathname に既存 entry（外部 file への hard link 先置きを含む）がある、または create-new が
+  既存 entry 存在により失敗する場合 → `path_safety_failed`（open-existing・truncate・write 禁止。
+  外部実体未変更）。**まだ当該 entry へ一度も write していない場合は `payload_written=false`。**
+  pre-write binding（fresh create-new・handle 保持・path/handle identity 束縛）を証明不能 →
+  `path_safety_unknown`（pathname 再 open による初回 write 禁止）。**まだ当該 entry へ一度も
+  write していない場合は `payload_written=false`。**
+  create-new 成功時は当該 entry の `WRITE_TARGET` := 返された handle/descriptor とし、
+  初回 write と同一 file への継続 write を **WRITE_TARGET 経由のみ**で行う
+  （**create-new 後の pathname 再 open による初回 content write / truncate は禁止**）。
+  create-new 後に path entry identity が WRITE_TARGET identity と不一致（観測可能）→
+  `path_safety_failed`。**まだ当該 entry へ一度も write していない場合は `payload_written=false`。**
+  いずれかの payload entry へ **1回でも** write mutation が成功した後に、後続 entry の
+  pre-write binding 失敗・本節の recursive safety 再走査失敗・A9 completion 直前の lock/identity
+  失敗 → `payload_written=true` `completion_record_created=false` `result=blocked`（肯定記録。
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false`）。
   **Linux/WSL**: payload directoryは `0700`、fileは `0600` を基本とし、少なくとも B6 の
   recursive path safety（symlink拒否・owner==`CURRENT_UID`・group/world write bits `0022`拒否・
   special entry拒否・canonical boundary内）と互換な属性で作成する。process umaskの偶然の値に
@@ -365,8 +395,11 @@ Cursor-specific rules only:
   評価順序: identity（trusted execution path経由のresolve） → segment → existing path safety /
   writer bootstrap（safe create: Linux/WSL `0700`・Windows safe owner/DACL） → writer `RUN_LOCK`
   （create-new/open-existing区別 + 取得直後 handle/path identity binding） → writer `RUN_ROOT`
-  collision / create → **`RUN_INSTANCE_MARKER` create（Linux/WSL `0600`固定・Windows safe owner/DACL）
-  + verify** → payload（cleanup互換属性で作成 + completion前の全descendant再検証） →
+  collision / create → **`RUN_INSTANCE_MARKER` create-new + pre-write handle binding
+  （Linux/WSL `0600`固定・Windows safe owner/DACL。canonical content は create-new handle 経由のみ。
+  pathname 再 open 初回 write 禁止）+ verify** → payload regular file ごとの create-new +
+  pre-write handle binding（既存 entry/hard link 先置きは open/truncate 禁止。pathname 再 open
+  初回 write 禁止。cleanup互換属性 + completion前の全descendant再検証） →
   completion v2 provenance（`residue=present` only・作成直前 handle/path identity 再確認） →
   cleanup provenance v2 + named chain read-only → cleanup existing `RUN_LOCK`（取得直後 handle/path
   identity binding） → recursive path safety → **local marker commitment ↔ completion v2 exact binding** →

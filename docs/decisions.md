@@ -4168,6 +4168,17 @@ cleanup execution に流用しない。
 | current finding read-back（v6是正着手前・HEAD `56def48`） | **完了** | PM再評価 [#5311506954](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311506954) で当時のnon-outdated thread dispositionを固定。本行は過去確定状態 |
 | current finding read-back（v6是正後・HEAD `a1df393` 以降の再検証） | **未実施** | 過去の#5311506954と混同しない。独立技術レビュー／ゲート前にGitHub一次資料から再read-backする |
 | ChatGPT 要件レビュー（v6是正 fixed HEAD `a1df393`） | **request-changes** risk=high | [#pullrequestreview-4948418881](https://github.com/kikujizo/ai-harness/pull/132#pullrequestreview-4948418881)。blockingはAC4 Decision Log同期のみ（本同期コミットの対象） |
+| **（v7）** canonical proposal（route=cursor） | 固定 | [#5312145952](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312145952) |
+| **（v7）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5312239369](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312239369) |
+| **（v7）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5312291132](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312291132) |
+| **（v7）実装開始時HEAD** | `c0536a5a7bcff562a935e57b53cc2c93bce2135e` | 本ラウンドの実装起点 |
+| **（v7）** 今回修正 finding | [`discussion_r3793661803`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661803)（ancestor directory / `RUN_ROOT` **create-new 前** pre-write binding）、[`discussion_r3793893860`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793893860)（payload mutation 後 write/flush/close 失敗の fail-closed 伝播） | 固定4ファイル文書契約のみ |
+| **（v7）** 非再実装 finding | [`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568)（A8 payload leaf pre-write binding） | 前HEADで addressed。今回再実装・弱体化しない |
+| **（v7）** 旧 proposal / approval / route | **非流用** | v6/v6是正の `#5311558125` / `#5311600611` / `#5311611273` 等は本ラウンドへ流用しない |
+| **（v7）実装差分** | **実装差分準備中**（ローカル未commit） | 固定4ファイルへ **create-new 前** ancestor bind・payload IO fail-closed を反映 |
+| **（v7）** 新HEAD / CI | **未確定** | commit・push・CI 完了前に先書きしない |
+| **（v7）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v7）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 
 ## 次アクション
 

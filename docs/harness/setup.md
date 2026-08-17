@@ -519,6 +519,21 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   同一handle継続write保証、path/handle identity束縛のいずれかをOS/runtimeが証明できない状況を渡し、
   `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false`
   `completion_record_created=false` となり、推測fallbackでpathname writeへ進まないことを確認する。
+- **ancestor directory / `RUN_ROOT` pre-write binding 不能（否定例・A7/A8・discussion_r3793661803）**:
+  A6 後に親 directory が symlink/reparse へ置換され得る状況、または ancestor entity 束縛を証明できない
+  状況を渡し（leaf create-new 成功・`RUN_LOCK` 保持だけでは ancestor-bound とみなさない）、
+  `create_new_attempted=false` `content_write_attempted=false`
+  `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false`
+  `completion_record_created=false` `external_target_written=false` となり、marker/payload の当該
+  create-new も content write も行わず外部 target 未変更のまま A8 未進入で停止することを
+  確認する（write-then-detect 禁止。create-new 後のみの ancestor チェックでは不足）。
+- **payload mutation 後の flush/close 失敗（否定例・A8・discussion_r3793893860）**: payload entry へ
+  1回以上 write mutation 済みの後に short write・後続 write 失敗・`flush` 失敗・`close` 失敗、または
+  content が完全 committed/durable でない equivalent 状態を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は `path_safety_unknown`） `payload_written=true`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  となり、不完全 payload を残留 residue として肯定記録し completion 未作成・自動 delete/repair/resume へ
+  進まないことを確認する（`payload_written=false` への成功丸め禁止）。
 
 **試験実施記録（Issue #54・実装後照合・実施: Cursor）**
 
@@ -579,6 +594,8 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | payload expected pathへの外部file hard-link先置き | `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` `external_target_written=false` | A8 create-new 衝突または既存 entry 検知。open/truncate なし。外部実体未変更 |
 | marker create-new後のpath差し替え | `pathname_reopen_used=false` `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` | A7 canonical content は create-new handle へ。path 再 open 初回 write なし。A8 未進入 |
 | pre-write binding capability不明 | `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` | create-new/handle/path binding 証明不能。pathname write へ進まない |
+| ancestor directory / `RUN_ROOT` bind 不能（A6後symlink/reparse置換） | `create_new_attempted=false` `content_write_attempted=false` `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` `external_target_written=false` | A7/A8 create-new 前停止。create-new 後のみの ancestor チェックでは不足 |
+| payload mutation 後 flush/close 失敗 | `result=blocked` `payload_written=true` `completion_record_created=false` `auto_cleanup=false` | 不完全 payload 残留を肯定。成功丸め禁止 |
 
 ## 既存リポジトリへの導入（差分マージ方式）
 

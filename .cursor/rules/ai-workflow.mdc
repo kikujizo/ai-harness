@@ -61,7 +61,12 @@ Cursor-specific rules only:
   identity 再確認省略、**`RUN_INSTANCE_MARKER`/payload regular file の create-new 後に pathname を
   再 open して初回 content write / truncate すること**、**expected pathname に先置きされた既存
   entry（外部 file への hard link 含む）を open-existing / truncate して write すること**、
-  **A7 の pre-write binding 失敗後に A8 payload へ進むこと**。
+  **A7 の pre-write binding 失敗後に A8 payload へ進むこと**、
+  **marker/payload の ancestor directory / `RUN_ROOT` pre-write binding を省略すること**、
+  **leaf create-new 成功・`RUN_LOCK` 保持・pathname 一度 checked・post-write scan 合格だけで
+  ancestor-bound とみなすこと**、**ancestor/RUN_ROOT bind 保証不能時に create-new または content write
+  を実行してから path safety を検出すること（write-then-detect）**、
+  **ancestor bind 成功前に leaf create-new を実行すること**。
   **A. scratch writer（role=writer）** — 順序固定:
   A0 identity-root resolve（Windows: `CURRENT_SID`→唯一 `Win32_UserProfile.LocalPath`；
   Linux/WSL: `id -u`→`getent passwd` 第6フィールドを、**syscall/NSS API（`getuid(2)`/`getpwuid_r(3)`相当）
@@ -140,7 +145,23 @@ Cursor-specific rules only:
   `instance_nonce` とする（host/user/SID/UID/path/time から導出禁止）。
   (2) `instance_commitment = sha256(raw 32-byte nonce)` を `sha256:<64 lowercase hex>` で表現
   （hex 文字列を hash しない）。
-  (3) `RUN_INSTANCE_MARKER` を expected pathname で atomic create-new / no-overwrite / no-follow とする。
+  (3) **PreWriteAncestorBind（`RUN_INSTANCE_MARKER` expected leaf に対する create-new および
+  初回 content write の両方より前）**: `write_leaf_path`（`RUN_INSTANCE_MARKER`）の親 directory から
+  `RUN_ROOT` までの各 ancestor directory（`RUN_ROOT` 含む）について、identity binding、または
+  no-follow + handle/descriptor based binding、または同等の OS/API 保証のいずれか**一つ**で verified
+  safe directory entity へ束縛する。create/write 時点での pathname 再解決が trusted tree 外または別
+  entity へ redirect され得ないこと（A6 後に親 directory が symlink/reparse へ置換され create-new が
+  trusted tree 外へ escape する攻撃を、create-new 前停止で防ぐ）。
+  **以下だけでは ancestor-bound とみなさない**: pathname を以前一度 checked したこと、`RUN_LOCK` を
+  保持していること、leaf の create-new が成功したこと、post-write scan が pass すると見込まれること。
+  全 required ancestor について上記を証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
+  `completion_record_created=false`（当該 marker の create-new も content write も実行しない。
+  外部 file create なし。外部 target 未変更。A8 未進入。write-then-detect 禁止）。
+  (3a) 上記 ancestor bind 成功後のみ、`RUN_INSTANCE_MARKER` を expected pathname で atomic create-new /
+  no-overwrite / no-follow とする。**create-new 自体も bound ancestor directory handle 経由
+  （例: `openat`/`CreateFile` 相当）または pathname 再解決で trusted tree 外へ escape できない同等の
+  OS/API 保証なしでは実行しない。** bound ancestor 経由 create-new を証明不能 → `path_safety_unknown`
+  （create-new 前停止。外部 file create なし。A8 未進入）。
   pathname が既に存在する、または create-new が既存 entry 存在により失敗する場合 →
   `path_safety_failed`（open-existing・truncate・write 禁止。A8 未進入）。
   OS/runtime が fresh create-new / no-overwrite を証明できない、create-new 成功で返された
@@ -173,18 +194,35 @@ Cursor-specific rules only:
   （`instance_marker_created=false` と報告したり marker/residue を省略で隠さない。A8 未進入）。
   payload は marker を変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
   A8 **A7 成功後のみ** scratch payload を create/write する。
-  **payload regular file ごとに** expected pathname で atomic create-new / no-overwrite / no-follow
-  とする。pathname に既存 entry（外部 file への hard link 先置きを含む）がある、または create-new が
+  **payload regular file ごとに**:
+  (a) **PreWriteAncestorBind（当該 expected leaf pathname に対する create-new および初回 content write
+  の両方より前）**: A7 (3) と同一要件。証明不能 → `path_safety_unknown`。**まだ当該 entry へ一度も
+  write していない場合は `payload_written=false`**。create-new 前停止。外部 file create なし。
+  write-then-detect 禁止。
+  (b) 上記 ancestor bind 成功後のみ、expected pathname で atomic create-new / no-overwrite / no-follow
+  とする。**create-new 自体も bound ancestor directory handle 経由（例: `openat`/`CreateFile` 相当）
+  または同等の OS/API 保証なしでは実行しない。** bound ancestor 経由 create-new を証明不能 →
+  `path_safety_unknown`（create-new 前停止。外部 file create なし）。
+  pathname に既存 entry（外部 file への hard link 先置きを含む）がある、または create-new が
   既存 entry 存在により失敗する場合 → `path_safety_failed`（open-existing・truncate・write 禁止。
   外部実体未変更）。**まだ当該 entry へ一度も write していない場合は `payload_written=false`。**
-  pre-write binding（fresh create-new・handle 保持・path/handle identity 束縛）を証明不能 →
+  OS/runtime が fresh create-new / no-overwrite を証明できない、create-new 成功で返された
+  handle/descriptor を保持できない、または handle を expected path identity へ束縛できない場合 →
   `path_safety_unknown`（pathname 再 open による初回 write 禁止）。**まだ当該 entry へ一度も
   write していない場合は `payload_written=false`。**
   create-new 成功時は当該 entry の `WRITE_TARGET` := 返された handle/descriptor とし、
+  **leaf content write の前に** current path entry identity と `WRITE_TARGET` identity を照合する。
+  不一致（観測可能）→ `path_safety_failed`。**まだ当該 entry へ一度も write していない場合は
+  `payload_written=false`。** 一致を証明不能 → `path_safety_unknown`（content write しない）。
   初回 write と同一 file への継続 write を **WRITE_TARGET 経由のみ**で行う
   （**create-new 後の pathname 再 open による初回 content write / truncate は禁止**）。
-  create-new 後に path entry identity が WRITE_TARGET identity と不一致（観測可能）→
-  `path_safety_failed`。**まだ当該 entry へ一度も write していない場合は `payload_written=false`。**
+  いずれかの payload entry へ **1回でも** write mutation（bytes 書込）が成功した後に、
+  short write・後続 write 失敗・`flush` 失敗・`close` 失敗、または payload content が完全に
+  committed/durable でない equivalent 状態 → `payload_written=true` `completion_record_created=false`
+  `result=blocked` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`（肯定記録。
+  不完全 payload は written residue として扱い、`payload_written=false`・「payload 未作成」と
+  分類してはならない。後続の汎用エラーで本 fail-closed residue を success へ上書きしない。
+  既存 stop reason のみで分類し新規 stop reason は発明しない）。
   いずれかの payload entry へ **1回でも** write mutation が成功した後に、後続 entry の
   pre-write binding 失敗・本節の recursive safety 再走査失敗・A9 completion 直前の lock/identity
   失敗 → `payload_written=true` `completion_record_created=false` `result=blocked`（肯定記録。

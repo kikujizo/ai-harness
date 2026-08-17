@@ -46,11 +46,20 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   cleanup互換の安全属性で作成し、completion record作成前に全descendantを再走査する。
   unsafe/判定不能なdescendantが1件でもあればcompletion recordを作らない（詳細は
   `.cursor/rules/ai-workflow.mdc` A7/A8）。**
-  **`RUN_INSTANCE_MARKER` と payload regular file の最初の content write は、atomic create-new /
-  no-overwrite で得た同一 handle/descriptor へ束縛する。create-new 後の pathname 再 open による
-  初回 write / truncate は禁止。expected pathname への既存 entry（外部 file への hard link
-  先置き含む）は open/truncate しない。pre-write binding を証明不能・不一致なら当該 write 前に
-  blocked（`path_safety_failed` / `path_safety_unknown`）。A7 失敗時は A8 未進入（詳細は正本 A7/A8）。**
+  **`RUN_INSTANCE_MARKER` と payload regular file は、expected leaf pathname に対する create-new および
+  初回 content write の両方より前に、leaf から `RUN_ROOT` までの各 ancestor directory（`RUN_ROOT`
+  含む）を pre-write binding する（leaf create-new 成功・`RUN_LOCK` 保持だけでは ancestor-bound と
+  みなさない。証明不能は create-new 前に blocked：`path_safety_unknown`）。create-new は bound
+  ancestor directory handle 経由（例: `openat`/`CreateFile` 相当）または同等 OS/API 保証がある
+  場合のみ実行する。**
+  **leaf binding**: atomic create-new / no-overwrite で得た同一 handle/descriptor へ束縛する。
+  create-new 後の pathname 再 open による初回 write / truncate は禁止。expected pathname への既存
+  entry（外部 file への hard link 先置き含む）は open/truncate しない。leaf pre-write binding を
+  証明不能・不一致なら当該 write 前に blocked（`path_safety_failed` / `path_safety_unknown`）。
+  A7 失敗時は A8 未進入（詳細は正本 A7/A8）。**
+  **A8: payload entry へ 1回でも write mutation 成功後の short write / flush / close 失敗は
+  `payload_written=true` で fail-closed 残留を肯定し completion 未作成・`auto_*`=false とする
+  （詳細は正本 A8）。**
   **A7のmarker content write後にread-back/decode/schema検証が失敗した場合、
   `run_root_created=true` `instance_marker_created=true` と肯定記録し、marker/residueを
   未作成扱いで隠さない。`auto_cleanup`/`auto_repair`/`auto_resume`へ進まない（詳細は正本 A7）。**

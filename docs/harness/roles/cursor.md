@@ -51,6 +51,9 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   初回 write / truncate は禁止。expected pathname への既存 entry（外部 file への hard link
   先置き含む）は open/truncate しない。pre-write binding を証明不能・不一致なら当該 write 前に
   blocked（`path_safety_failed` / `path_safety_unknown`）。A7 失敗時は A8 未進入（詳細は正本 A7/A8）。**
+  **A7のmarker content write後にread-back/decode/schema検証が失敗した場合、
+  `run_root_created=true` `instance_marker_created=true` と肯定記録し、marker/residueを
+  未作成扱いで隠さない。`auto_cleanup`/`auto_repair`/`auto_resume`へ進まない（詳細は正本 A7）。**
   writerとcleanupは同一 `RUN_LOCK` を non-blocking exclusive で必ず取得する。
   **`RUN_LOCK` の取得は曖昧な `OpenOrCreate` 一発ではなく create-new と open-existing を区別し
   （Linux: `flock` / Windows writer: reparse非followのcreate-new・open-existing + `FileShare=None`、

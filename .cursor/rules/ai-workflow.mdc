@@ -146,12 +146,15 @@ Cursor-specific rules only:
   OS/runtime が fresh create-new / no-overwrite を証明できない、create-new 成功で返された
   handle/descriptor を保持できない、または handle を expected path identity へ束縛できない場合 →
   `path_safety_unknown`（pathname 再解決による初回 write 禁止。A8 未進入）。
-  create-new 成功時は `WRITE_TARGET` := 返された handle/descriptor とし、canonical schema
-  `scratch-instance/v1`（各 field LF・末尾 LF。extra/重複/欠落/順序違いは invalid）の content を
-  **WRITE_TARGET 経由のみ**で write する（複数回 write が必要なら同一 WRITE_TARGET を使用。
-  **create-new 後の pathname 再 open による初回 content write / truncate は禁止**）。
-  create-new 後に path entry identity が WRITE_TARGET identity と不一致（観測可能）→
-  `path_safety_failed`（write 継続・A8 未進入）。
+  create-new 成功時は `WRITE_TARGET` := 返された handle/descriptor（H）とする。
+  **marker content write の前に**、current `RUN_INSTANCE_MARKER` path entry identity と
+  `WRITE_TARGET`（H）identity を照合する。不一致（観測可能）→ `result=blocked`
+  `stop_reason=path_safety_failed`（content write しない。A8 未進入）。
+  一致を証明不能 → `path_safety_unknown`（content write しない。A8 未進入）。
+  照合成功後のみ、canonical schema `scratch-instance/v1`（各 field LF・末尾 LF。extra/重複/欠落/
+  順序違いは invalid）の content を **WRITE_TARGET 経由のみ**で write する（複数回 write が必要なら
+  同一 WRITE_TARGET を使用。**create-new 後の pathname 再 open による初回 content write / truncate
+  は禁止**。pathname 再 open を正常経路へ戻さない）。
   **Linux/WSL**: requested mode は **`0600` 固定**（process umaskに安全性を委ねない）。
   **Windows**: create時点から current SID / SYSTEM / BUILTIN\Administrators 以外へ
   write/modify/delete相当を与えない owner/DACL を要求する。
@@ -162,10 +165,13 @@ Cursor-specific rules only:
   (4) marker 作成直後に、**Linux/WSLは observed mode `0600` exact・owner・entry type・canonical boundary**、
   **Windowsは owner/DACL・reparse・type・canonical boundary** を再検証する。unsafeまたは判定不能は
   `path_safety_failed`/`path_safety_unknown` としてpayloadへ進めない（この分岐で確定した stop reason を
-  `provenance_unknown` で上書きしない）。上記safety再検証に合格した場合のみ、続けて canonical content・
-  read-back exact を検証する。schema不一致・decode不能・read-back不一致等の純粋な provenance 失敗 →
-  `provenance_unknown`、payload/completion 未作成。payload は marker を
-  変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
+  `provenance_unknown` で上書きしない）。  上記safety再検証に合格した場合のみ、続けて canonical content・
+  read-back exact を検証する。**marker content write 完了後**に schema不一致・decode不能・
+  read-back不一致等の純粋な provenance 失敗 → `provenance_unknown`（既存 stop へ収束可）、
+  `result=blocked` `run_root_created=true` `instance_marker_created=true` `payload_written=false`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  （`instance_marker_created=false` と報告したり marker/residue を省略で隠さない。A8 未進入）。
+  payload は marker を変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
   A8 **A7 成功後のみ** scratch payload を create/write する。
   **payload regular file ごとに** expected pathname で atomic create-new / no-overwrite / no-follow
   とする。pathname に既存 entry（外部 file への hard link 先置きを含む）がある、または create-new が

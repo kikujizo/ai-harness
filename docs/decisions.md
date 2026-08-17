@@ -4175,8 +4175,9 @@ cleanup execution に流用しない。
 | **（v7）** 今回修正 finding | [`discussion_r3793661803`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661803)（ancestor directory / `RUN_ROOT` **create-new 前** pre-write binding）、[`discussion_r3793893860`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793893860)（payload mutation 後 write/flush/close 失敗の fail-closed 伝播） | 固定4ファイル文書契約のみ |
 | **（v7）** 非再実装 finding | [`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568)（A8 payload leaf pre-write binding） | 前HEADで addressed。今回再実装・弱体化しない |
 | **（v7）** 旧 proposal / approval / route | **非流用** | v6/v6是正の `#5311558125` / `#5311600611` / `#5311611273` 等は本ラウンドへ流用しない |
-| **（v7）実装差分** | **実装差分準備中**（ローカル未commit） | 固定4ファイルへ **create-new 前** ancestor bind・payload IO fail-closed を反映 |
-| **（v7）** 新HEAD / CI | **未確定** | commit・push・CI 完了前に先書きしない |
+| **（v7）実装 tip** | `70eeab88aa17fee8c602eb5f2901a4dc8ea2a516` | 固定4ファイルへ **create-new 前** ancestor bind・payload IO fail-closed を反映 |
+| **（v7）ローカル検証（tip `70eeab8`）** | **pass** | `git diff --check` / `git diff --name-only`（`c7f2b4c...HEAD` および `c0536a5...HEAD`）いずれも固定4ファイルのみ |
+| **（v7）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
 | **（v7）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v7）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 

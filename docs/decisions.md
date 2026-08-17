@@ -3834,7 +3834,7 @@ pre-write create-new + same-handle binding 契約、setup.md 否定例3件、fai
 
 **（v6是正）実装**: 固定4ファイルへ A7 pre-write identity照合（content write前停止）・
 A7 post-write residue肯定記録、setup.md AC1/residue観測例、decisions.md v5 superseded明示・
-v6レビュー/read-back実状態同期を反映（実装tip SHAは本コミットでは自己参照回避——別コミット予定）。
+v6レビュー/read-back実状態同期を反映（実装tip cfe6154。検証結果は下表。本同期コミットで記録）。
 
 本ラウンド（v6是正）より前のproposal・approval（`#5289589235`/`#5289615101`/`#5289667993`、
 `#5311085139`/`#5311256262`/`#5311265605` を含む）は、v6是正の`implementation_start`としては
@@ -4158,7 +4158,11 @@ cleanup execution に流用しない。
 | **（v6是正）** 新canonical proposal（route=cursor） | 固定 | [#5311558125](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311558125) |
 | **（v6是正）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5311600611](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311600611) |
 | **（v6是正）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5311611273](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311611273) |
-| **（v6是正）実装tip** | （別コミット予定） | A7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue観測例・decisions v5 superseded/v6実状態同期を固定4ファイルへ反映（本コミットでは自己参照回避） |
+| **（v6是正）実装tip** | cfe6154dce98ae8c441c778405cabe9dd3579193 | A7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue観測例・decisions v5 superseded/v6実状態同期を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ cfe6154 | **pass** | ローカル実行: manifest_change_count=4 ctual_change_count=4 |
+| Fail-closed success propagation @ cfe6154 | **pass** | ローカル実行: pplicable=false checked_file_count=0 |
+| git diff --name-only origin/main...HEAD @ cfe6154 | 固定4ファイルのみ | ローカル実行確認 |
+| git diff --check origin/main...HEAD @ cfe6154 | **success**（exit 0） | ローカル実行確認 |
 | ChatGPT 要件レビュー（v6実装 fixed HEAD `c9f2663`） | **未実施** | — |
 | Codex 独立技術レビュー（v6実装 fixed HEAD `c9f2663`） | **未実施** | — |
 | current finding read-back（`is_outdated=false`） | **未実施** | v6是正実装後のfixed HEADで再検証予定（`discussion_r3782248568`等はopenのまま） |
@@ -4254,7 +4258,7 @@ cleanup execution に流用しない。
 - [x] **（v6是正）** Codex（PM）正式route確定（#5311611273 / route=cursor）
 - [x] **（v6是正）** CursorによるA7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue・
   decisions v5 superseded/v6実状態同期の固定4ファイル実装（本コミット）
-- [ ] **（v6是正）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [x] **（v6是正）** 実装tipのSHAと検証結果を docs/decisions.md へ別コミットで同期（自己参照回避のため）
 - [ ] ChatGPT 要件レビュー（v6実装 fixed HEAD `c9f2663`）——**未実施**
 - [ ] Codex 独立技術レビュー（v6実装 fixed HEAD `c9f2663`）——**未実施**（Claude Codeは自分から起動しない）
 - [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（v6是正fixed HEADで再検証予定）

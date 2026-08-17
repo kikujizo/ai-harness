@@ -116,6 +116,15 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   APIでは原子的に排除できないため、read-only再確認が全てpassしても同一実体へのbindingを保証
   できず、delete mutation前に`path_safety_unknown`で停止する（`unlink`等のpathname delete APIを
   使わない。詳細は`.cursor/rules/ai-workflow.mdc` B8(9)）。**
+  **Windows cleanup では各 child candidate open 前に B8(6) baseline 一致の verified `RUN_ROOT`
+  directory handle を取得し、child open〜handle-based disposition 完了まで保持する。rename/delete
+  sharing 排除または同等保証を証明不能なら最初の該当 delete mutation 前に `path_safety_unknown`
+  で blocked（pathname 単発比較・`RUN_LOCK` 保持のみ・child handle のみを安全根拠にしない）。**
+  **marker create-new 成功後の content write / short write / 後続 write / flush / close /
+  durability 結果確認失敗は、mutation 成立または不明なら `instance_marker_created=true`
+  `payload_written=false` `completion_record_created=false` `result=blocked` を肯定伝播し、
+  cached read-back 成功だけで durability 失敗を無視して A8 / completion / auto_* へ進まない
+  （詳細は正本 A7）。**
   **A8のpayload write後recursive safety再走査失敗、またはA9でのlock identity driftにより
   blockedとなった場合、A8で作成済みのpayloadを「未作成」と
   誤報しない。payloadは残留し得る状態として保持し、completion未作成・blockedのまま自動delete/

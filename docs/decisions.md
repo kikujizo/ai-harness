@@ -4192,6 +4192,19 @@ cleanup execution に流用しない。
 | **（v8）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
 | **（v8）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v8）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v9）** canonical proposal（route=cursor） | 固定 | [#5313111564](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5313111564) |
+| **（v9）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5313331045](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5313331045) |
+| **（v9）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5313362865](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5313362865) |
+| **（v9）実装開始時HEAD** | `432dad5ea163c84a59bdcf52f5478d4f7d7058b9` | 本ラウンドの実装起点 |
+| **（v9）** 今回修正 finding | [`discussion_r3794446604`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446604)（B8(9) Windows cleanup: verified `RUN_ROOT` directory handle 保持契約・保証不能時 pre-mutation `path_safety_unknown`）、[`discussion_r3794446609`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446609)（A7 marker: create-new 成功後の write/flush/close/durability 失敗の residue 肯定伝播） | 固定4ファイル文書契約のみ |
+| **（v9）** 非再実装 finding | [`discussion_r3794153887`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153887)、[`discussion_r3794153890`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153890)、[`discussion_r3793893860`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793893860)、[`discussion_r3793661803`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661803)、[`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568) | 前HEADで addressed。今回再実装・弱体化しない |
+| **（v9）** 旧 proposal / approval / route | **非流用** | v8の `#5312568119` / `#5312744438` / `#5312754424` 等は本ラウンドへ流用しない |
+| **（v9）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v9）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v9）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v9）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v9）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v9）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 
 ## 次アクション
 
@@ -4292,6 +4305,8 @@ cleanup execution に流用しない。
 - [x] ChatGPT 要件レビュー（v6是正 fixed HEAD `a1df393`）——request-changes（#4948418881、AC4のみblocking）
 - [x] **（v8）** CursorによるA8 payload directory PreDirCreateAncestorBind・A7/A8 LeafContainmentCapabilityGate・setup Case A/B・cursor.md最小同期の固定4ファイル実装（tip `e0d7609`）
 - [x] **（v8）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（本コミット）
+- [ ] **（v9）** CursorによるB8(9) verified `RUN_ROOT` handle保持・A7 marker write/flush/close/durability失敗伝播・setup Case A/B・cursor.md最小同期の固定4ファイル実装（tip 未確定）
+- [ ] **（v9）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

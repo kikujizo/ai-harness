@@ -70,7 +70,15 @@ Cursor-specific rules only:
   **payload directory の `PreDirCreateAncestorBind` / bound-parent one-level create-new を省略すること**、
   **leaf containment capability 証明不能時に marker/payload regular file へ content write すること**、
   **pathname 単発照合・短時間窓・協調 process 前提・post-write scan・同一 handle 保持のみ・
-  rename/hard-link 隙間が残る link-count 単発比較を leaf containment の安全代替として列挙すること**。
+  rename/hard-link 隙間が残る link-count 単発比較を leaf containment の安全代替として列挙すること**、
+  **marker create-new 成功後の content write / short write / 後続 write / flush / close /
+  durability 結果確認失敗を、mutation 成立または成立可能性を否定できないのに
+  `instance_marker_created=false` と報告したり A8 / completion / auto_cleanup / auto_repair /
+  auto_resume へ進むこと**、**marker の cached read-back 成功だけを根拠に flush / close /
+  durability 失敗を無視して success へ進むこと**、**Windows cleanup で verified `RUN_ROOT`
+  directory handle を child open 前〜handle-based disposition 完了まで保持せず、pathname 単発比較・
+  `RUN_LOCK` 保持のみ・child handle のみ（root binding なし）・時間幅仮定・post-delete /
+  post-operation scan・協調 process 前提・replacement 後再検出を root 実体束縛の安全根拠にすること**。
   **A. scratch writer（role=writer）** — 順序固定:
   A0 identity-root resolve（Windows: `CURRENT_SID`→唯一 `Win32_UserProfile.LocalPath`；
   Linux/WSL: `id -u`→`getent passwd` 第6フィールドを、**syscall/NSS API（`getuid(2)`/`getpwuid_r(3)`相当）
@@ -191,6 +199,16 @@ Cursor-specific rules only:
   順序違いは invalid）の content を **WRITE_TARGET 経由のみ**で write する（複数回 write が必要なら
   同一 WRITE_TARGET を使用。**create-new 後の pathname 再 open による初回 content write / truncate
   は禁止**。pathname 再 open を正常経路へ戻さない）。
+  **marker create-new 成功後**（`instance_marker_created=true` を肯定記録した後）に、content write・
+  short write・後続 write・`flush`・`close`・durability 結果確認のいずれかが失敗し、かつ当該
+  write mutation が成立した、または成立可能性を否定できない場合 → `result=blocked`
+  `run_root_created=true` `instance_marker_created=true` `payload_written=false`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  （`instance_marker_created=false` と報告したり marker/residue を省略で隠さない。A8 未進入。
+  既存 stop reason のみで分類し新規 stop reason は発明しない）。
+  **cached read-back 成功だけを根拠に flush / close / durability 失敗を無視して A8 / completion /
+  auto_cleanup / auto_repair / auto_resume へ進んではならない**（in-memory または cache 上の
+  read-back と OS/API 上の committed/durable 状態は同一とみなさない）。
   **Linux/WSL**: requested mode は **`0600` 固定**（process umaskに安全性を委ねない）。
   **Windows**: create時点から current SID / SYSTEM / BUILTIN\Administrators 以外へ
   write/modify/delete相当を与えない owner/DACL を要求する。
@@ -421,7 +439,18 @@ Cursor-specific rules only:
 
   **Windows native**: `RUN_ROOT`自身を含む各mutation candidateをopenする直前に、上記(9)冒頭の
   root binding確認をcurrent `RUN_ROOT`のdirectory handle identity（`FILE_ID_INFO`相当）でも
-  同様に行う。regular fileは、no-reparseのcreate/open手順で対象へ削除mutation直前に
+  同様に行う。**各 child candidate を open する前に、B8(6) baseline と exact 一致する verified
+  `RUN_ROOT` directory handle を取得し、当該 child の open 前から child handle 取得・child
+  identity/type/content 再検証・handle-based disposition・当該 disposition 完了まで保持する。**
+  この root handle は rename/delete sharing を排除する、または OS/API として同等の安全性を
+  証明できる share 条件でのみ取得する。**以下だけでは `RUN_ROOT` 実体束縛の安全根拠にしない
+  （禁止）**: pathname 単発比較のみ；短い時間窓；`RUN_LOCK` 保持のみ；child verified handle のみ
+  （root binding なし）；post-delete / post-operation scan；協調 process 前提；replacement 後の
+  再検出のみ。**threat model**: 同一 SID の非協調 process による `RUN_ROOT` rename/replacement
+  を維持する。上記 root handle 保持契約を最初の該当 delete mutation 前に証明できない場合 →
+  `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false`
+  `approval_reusable=false`（外部/replacement target への delete mutation は発生しない）。
+  regular fileは、no-reparseのcreate/open手順で対象へ削除mutation直前に
   **verified handle** を取得する。handleはDELETE、および上記のidentity/type/content再確認に
   必要なcontent・attribute accessを持つこと。**競合processによるwrite/rename/replaceを許さない
   ため、このhandleはwrite/delete sharingを許可しない、またはOS/APIとして同等の安全性を証明できる

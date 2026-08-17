@@ -546,6 +546,22 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
   となり、不完全 payload を残留 residue として肯定記録し completion 未作成・自動 delete/repair/resume へ
   進まないことを確認する（`payload_written=false` への成功丸め禁止）。
+- **cleanup 中の `RUN_ROOT` rename/replacement（否定例・B8(9)・Case A・discussion_r3794446604）**:
+  B8(6) baseline 確認後、child candidate を open する前または child 処理中に、同一 SID の非協調
+  process が `RUN_ROOT` の rename/replacement を試みる状況を渡す。verified `RUN_ROOT` directory
+  handle 保持契約（B8(6) baseline 一致・rename/delete sharing 排除または同等保証）を維持できない
+  場合は最初の該当 delete mutation 前に `result=blocked` `stop_reason=path_safety_unknown`
+  `cleanup=false` `delete_attempted=false` `approval_reusable=false` となり、**external /
+  replacement target への delete mutation が発生していない**ことを観測可能にする（pathname 単発比較・
+  `RUN_LOCK` 保持のみ・child handle のみ・時間幅仮定・post-operation scan を安全根拠にしない）。
+- **marker create-new 後の write/flush/close/durability 失敗（否定例・A7・Case B・discussion_r3794446609）**:
+  `RUN_INSTANCE_MARKER` の create-new 成功後に content write・short write・後続 write・`flush`・
+  `close`・durability 結果確認のいずれかが失敗し、write mutation が成立した、または成立可能性を
+  否定できない状況を渡し、`result=blocked` `run_root_created=true` `instance_marker_created=true`
+  `payload_written=false` `completion_record_created=false` `auto_cleanup=false`
+  `auto_repair=false` `auto_resume=false` となり、A8 / completion / auto cleanup / auto repair /
+  auto resume へ進まないことを確認する（cached read-back 成功だけで flush / close / durability
+  失敗を無視して success へ進まない）。
 
 **試験実施記録（Issue #54・実装後照合・実施: Cursor）**
 
@@ -610,6 +626,8 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | payload directory parent 差し替え（Case A） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | A8 PreDirCreateAncestorBind 失敗。directory create 前停止 |
 | leaf containment capability 不成立（Case B） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `external_target_written=false` | create-new 済みなら `create_new_attempted=true` を肯定。content write 前停止 |
 | payload mutation 後 flush/close 失敗 | `result=blocked` `payload_written=true` `completion_record_created=false` `auto_cleanup=false` | 不完全 payload 残留を肯定。成功丸め禁止 |
+| cleanup 中 `RUN_ROOT` rename/replacement（Case A・discussion_r3794446604） | `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false` | verified root handle 保持不能。external/replacement target への delete mutation なし |
+| marker create-new 後 write/flush/close/durability 失敗（Case B・discussion_r3794446609） | `result=blocked` `instance_marker_created=true` `payload_written=false` `completion_record_created=false` `auto_cleanup=false` | A8/completion/auto cleanup/repair/resume 未進入。cached read-back のみで success 化しない |
 
 ## 既存リポジトリへの導入（差分マージ方式）
 

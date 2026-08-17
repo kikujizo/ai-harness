@@ -3818,7 +3818,7 @@ PM_VERDICT: approve risk=high route=cursor
 **（v6）実装**: 固定4ファイルへ A7 `RUN_INSTANCE_MARKER` / A8 payload regular file の
 pre-write create-new + same-handle binding 契約、setup.md 否定例3件、fail-closed 8の
 `verify-before-mutate` / `concurrency-interrupt-residue` 同期、cursor.md 最小同期を反映
-（本コミット。実装tip SHA・CI disposition は自己参照回避のため別コミットで同期予定）。
+（実装tip c9f2663915a0d263e08e6be45e79c11606df626a。検証結果は下表。本同期コミットで記録）。
 
 本ラウンド（v6）より前のproposal・approval（`#5289589235`/`#5289615101`/`#5289667993` を含む）は、
 v6再仕様化に伴う`implementation_start`としては流用しない。Cursorは実装担当としてこの委任を受け、
@@ -4123,7 +4123,11 @@ cleanup execution に流用しない。
 | **（v6）** 新canonical proposal（route=cursor） | 固定 | [#5311085139](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311085139) |
 | **（v6）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5311256262](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311256262) |
 | **（v6）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5311265605](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311265605) |
-| **（v6）実装** | 本コミット（未push） | A7/A8 pre-write binding・setup否定例3件・fail-closed 8同期・cursor最小同期。tip SHAは別コミットで同期予定 |
+| **（v6）実装tip** | `c9f2663915a0d263e08e6be45e79c11606df626a` | A7/A8 pre-write create-new + same-handle binding、setup否定例3件、fail-closed 8同期、cursor.md最小同期を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `c9f2663` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head c9f2663915a0d263e08e6be45e79c11606df626a`） |
+| Fail-closed success propagation @ `c9f2663` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head c9f2663915a0d263e08e6be45e79c11606df626a`） |
+| `git diff --name-only origin/main...HEAD` @ `c9f2663` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `c9f2663` | **success**（exit 0） | ローカル実行確認 |
 
 ## 次アクション
 
@@ -4209,7 +4213,7 @@ cleanup execution に流用しない。
   route=cursor）
 - [x] **（v6）** Codex（PM）正式route確定（#5311265605 / route=cursor）
 - [x] **（v6）** CursorによるA7/A8 pre-write binding・setup否定例・fail-closed 8同期の固定4ファイル実装（本コミット）
-- [ ] **（v6）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [x] **（v6）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
 - [ ] ChatGPT 要件レビュー（v6実装 fixed HEAD）
 - [ ] Codex 独立技術レビュー（v5実装 fixed HEAD。Claude Codeは自分から起動しない）
 - [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（6 findingすべてを含む）

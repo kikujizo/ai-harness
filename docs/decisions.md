@@ -4158,14 +4158,16 @@ cleanup execution に流用しない。
 | **（v6是正）** 新canonical proposal（route=cursor） | 固定 | [#5311558125](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311558125) |
 | **（v6是正）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5311600611](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311600611) |
 | **（v6是正）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5311611273](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311611273) |
-| **（v6是正）実装tip** | cfe6154dce98ae8c441c778405cabe9dd3579193 | A7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue観測例・decisions v5 superseded/v6実状態同期を固定4ファイルへ反映したコミット |
-| Issue manifest diff @ cfe6154 | **pass** | ローカル実行: manifest_change_count=4 ctual_change_count=4 |
-| Fail-closed success propagation @ cfe6154 | **pass** | ローカル実行: pplicable=false checked_file_count=0 |
-| git diff --name-only origin/main...HEAD @ cfe6154 | 固定4ファイルのみ | ローカル実行確認 |
-| git diff --check origin/main...HEAD @ cfe6154 | **success**（exit 0） | ローカル実行確認 |
-| ChatGPT 要件レビュー（v6実装 fixed HEAD `c9f2663`） | **未実施** | — |
-| Codex 独立技術レビュー（v6実装 fixed HEAD `c9f2663`） | **未実施** | — |
-| current finding read-back（`is_outdated=false`） | **未実施** | v6是正実装後のfixed HEADで再検証予定（`discussion_r3782248568`等はopenのまま） |
+| **（v6是正）実装tip** | `cfe6154dce98ae8c441c778405cabe9dd3579193` | A7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue観測例・decisions v5 superseded/v6実状態同期を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `cfe6154` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `cfe6154` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --name-only origin/main...HEAD` @ `cfe6154` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `cfe6154` | **success**（exit 0） | ローカル実行確認 |
+| ChatGPT 要件レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`） | 初回 **approve** → 訂正後 **request-changes** risk=high | 初回 [#pullrequestreview-4948186086](https://github.com/kikujizo/ai-harness/pull/132#pullrequestreview-4948186086)。訂正 [#5311465262](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311465262) |
+| Codex 独立技術レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`） | **request-changes** risk=high | [#5311448260](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311448260) |
+| current finding read-back（v6是正着手前・HEAD `56def48`） | **完了** | PM再評価 [#5311506954](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311506954) で当時のnon-outdated thread dispositionを固定。本行は過去確定状態 |
+| current finding read-back（v6是正後・HEAD `a1df393` 以降の再検証） | **未実施** | 過去の#5311506954と混同しない。独立技術レビュー／ゲート前にGitHub一次資料から再read-backする |
+| ChatGPT 要件レビュー（v6是正 fixed HEAD `a1df393`） | **request-changes** risk=high | [#pullrequestreview-4948418881](https://github.com/kikujizo/ai-harness/pull/132#pullrequestreview-4948418881)。blockingはAC4 Decision Log同期のみ（本同期コミットの対象） |
 
 ## 次アクション
 
@@ -4259,9 +4261,12 @@ cleanup execution に流用しない。
 - [x] **（v6是正）** CursorによるA7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue・
   decisions v5 superseded/v6実状態同期の固定4ファイル実装（本コミット）
 - [x] **（v6是正）** 実装tipのSHAと検証結果を docs/decisions.md へ別コミットで同期（自己参照回避のため）
-- [ ] ChatGPT 要件レビュー（v6実装 fixed HEAD `c9f2663`）——**未実施**
-- [ ] Codex 独立技術レビュー（v6実装 fixed HEAD `c9f2663`）——**未実施**（Claude Codeは自分から起動しない）
-- [ ] current findingの`is_outdated=false && is_resolved=true`のread-back（v6是正fixed HEADで再検証予定）
+- [x] ChatGPT 要件レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`）——初回approve後、訂正でrequest-changes（#4948186086 / #5311465262）
+- [x] Codex 独立技術レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`）——request-changes（#5311448260）
+- [x] current finding read-back（v6是正着手前・HEAD `56def48`）——完了（#5311506954）。過去確定状態
+- [ ] current finding read-back（v6是正後・HEAD `a1df393` 以降の再検証）——未実施（#5311506954と混同しない）
+- [x] ChatGPT 要件レビュー（v6是正 fixed HEAD `a1df393`）——request-changes（#4948418881、AC4のみblocking）
+- [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）
 - [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

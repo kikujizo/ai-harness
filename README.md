@@ -82,12 +82,6 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節（AI判断
 | `plan-gate` | lab | 実行境界を越える計画の可読性ゲート（最弱読者復唱） | 明示指定、または AI 判断（宣言必須） |
 | `reframe-question` | lab | 依頼の前提検証と問いの再定義 | 明示指定、または AI 判断（宣言必須） |
 | `stall-rescue` | lab | 停滞案件の安全な診断と最小再開手順（同種失敗2回以上など） | 明示指定、または AI 判断（宣言必須） |
-| `mino-socratic-requirements` | lab（凍結） | 複数ターン要求定義 | **通常業務では提案・実行しない** |
-| `mino-context-discovery` | lab | 用語・境界・ユビキタス言語の整理 | 明示指定、または AI 判断（宣言必須） |
-| `mino-event-storming` | lab | 業務時系列・イベント・集約候補の整理 | 明示指定、または AI 判断（宣言必須） |
-| `mino-model-deepening` | lab | 設計Checkpointでのモデル深化 | 明示指定、または AI 判断（宣言必須） |
-| `mino-contract-driven-coding` | lab | 承認済みIssueから導出する契約駆動実装 | 明示指定、または AI 判断（宣言必須） |
-| `mino-changeability-review` | lab | 変更容易性の補助所見 | 明示指定、または AI 判断（宣言必須。core補助限定） |
 
 ### Archive済みSkill（`.agents/skills-archive/`）
 
@@ -106,17 +100,16 @@ lab 規則の規範的正本は [AGENTS.md](AGENTS.md)「Skills」節（AI判断
 3. lab Skill の AI 判断発動（宣言・実績記録必須。同一対象では core の補助のみ）
 4. 複数 core が候補のときは [AGENTS.md](AGENTS.md) の標準フロー（仕様化→PM→実装→レビュー）に沿い、最上流の工程Skillを優先する
 
-凍結済みの`mino-socratic-requirements`と Archive 済み Skill は上記優先順位の対象外とし、通常業務では提案・実行しない。
+Archive 済み Skill は上記優先順位の対象外とし、通常業務では提案・実行しない。
 
 **責務境界（重複時の原則）**:
 
-- 仕様化・Issue起票: ChatGPT（ロール）＋ `pm-review`（Skill）。`mino-socratic-requirements` は lab のまま凍結し、通常業務では提案・実行しない
+- 仕様化・Issue起票: ChatGPT（ロール）＋ `pm-review`（Skill）
 - 実装前設計: `design-check`（core）。lab の分析系Skillは補助としてのみ重ねられる
-- コードレビュー: `recursive-review`（core）。`mino-changeability-review` は lab の補助レンズ
+- コードレビュー: `recursive-review`（core）
 - 横断走査・還流: `lateral-sweep`（lab）と `knowledge-reflux`（core）
 - 停滞案件の立て直し: `stall-rescue`（lab）。通常デバッグ・`pm-review` を代替しない
 
-mino 共通原則の規範的正本は [docs/mino-skills/core/mino-core-principles.md](docs/mino-skills/core/mino-core-principles.md) の1ファイルのみ。各 mino Skill は参照し、全文複製しない。
 
 ## 既知の負債
 

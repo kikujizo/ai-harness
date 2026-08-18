@@ -4234,6 +4234,10 @@ cleanup execution に流用しない。
 | **（v10）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
 | **（v10）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v10）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v10是正）** ChatGPT要件レビュー | **request-changes blocking** | [review 4956733864](https://github.com/kikujizo/ai-harness/pull/132#pullrequestreview-4956733864)（A7/A8 `LeafContainmentCapabilityGate` の canonical OR と実分岐 AND の不一致） |
+| **（v10是正）** 今回修正 finding | OR 一致への文書修正 | 仕様変更ではない（Windows native への `demonstrated` 追加要求はしない） |
+| **（v10是正）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー完了まで |
+| **（v10是正）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 
 ## 次アクション
 
@@ -4338,6 +4342,8 @@ cleanup execution に流用しない。
 - [ ] **（v9）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] **（v10）** Cursorによる fresh-writer `LeafContainmentCapability` 同期・setup 矛盾解消・cursor.md 最小同期・decisions v10 追記の固定4ファイル実装（tip 未確定）
 - [ ] **（v10）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v10是正）** CursorによるA7/A8 `LeafContainmentCapabilityGate` OR分岐・評価順序要約同期・decisions v10是正追記の固定2ファイル実装（`ai-workflow.mdc` + `docs/decisions.md`。tip 未確定）
+- [ ] **（v10是正）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

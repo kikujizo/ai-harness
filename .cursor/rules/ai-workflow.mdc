@@ -200,8 +200,7 @@ Cursor-specific rules only:
   集合（open descriptor + non-blocking exclusive `flock` + file mode + ancestor / `RUN_ROOT` binding）
   だけでは、同一 UID 非協調 process の rename / replace / external hard-link を初回 content write
   完了まで排除できず `not_demonstrated`** とする。
-  IF `leaf_containment_capability=demonstrated` AND (`platform=windows_native` OR capability が
-  OS/API として実証済み):
+  IF `platform=windows_native` OR `leaf_containment_capability=demonstrated`:
     THEN 既存契約どおり `WRITE_TARGET` 経由の content write へ進む（create-new 後の pathname 再 open
     初回 write 禁止は維持）。
   ELSE（`write_phase=before_first_content_write`。Linux/WSL で現行プリミティブだけでは
@@ -281,8 +280,7 @@ Cursor-specific rules only:
   `LeafContainmentCapabilityGate` と同一の分類入力・`demonstrated` 定義・非成立リスト・分岐を適用する
   （writer fresh 成功経路は `platform=windows_native`、または `leaf_containment_capability=demonstrated`
   を OS/API 実証できる環境に限定。Linux/WSL の現行契約プリミティブだけでは `not_demonstrated`）。
-  IF `leaf_containment_capability=demonstrated` AND (`platform=windows_native` OR capability が
-  OS/API として実証済み):
+  IF `platform=windows_native` OR `leaf_containment_capability=demonstrated`:
     THEN 既存契約どおり当該 entry の `WRITE_TARGET` 経由の content write へ進む。
   ELSE（`write_phase=before_first_content_write`）:
     EARLY STOP: `result=blocked` `stop_reason=path_safety_unknown`
@@ -527,8 +525,8 @@ Cursor-specific rules only:
   writer bootstrap（safe create: Linux/WSL `0700`・Windows safe owner/DACL） → writer `RUN_LOCK`
   （create-new/open-existing区別 + 取得直後 handle/path identity binding） → writer `RUN_ROOT`
   collision / create → **`RUN_INSTANCE_MARKER` create-new + pre-write handle binding +
-  LeafContainmentCapabilityGate（create-new 後・初回 content write 前。`leaf_containment_capability=demonstrated`
-  かつ（`platform=windows_native` または OS/API 実証済み）の場合のみ content write へ。Linux/WSL `0600`
+  LeafContainmentCapabilityGate（create-new 後・初回 content write 前。`platform=windows_native` または
+  `leaf_containment_capability=demonstrated` の場合のみ content write へ。Linux/WSL `0600`
   固定・Windows safe owner/DACL は **create 属性契約**であり gate 成立根拠にしない。現行契約プリミティブ
   （open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）だけでは
   `demonstrated` にならない。canonical content は create-new handle 経由のみ。pathname 再 open 初回

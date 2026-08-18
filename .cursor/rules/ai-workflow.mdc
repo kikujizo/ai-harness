@@ -115,17 +115,30 @@ Cursor-specific rules only:
   即時親 P は1段上の既存 component（`CACHE_ROOT` の親は `TRUSTED_HOME`）とし、次の順序のみ許可:
   (A4-1) P を read-only path safety 検証。(A4-2) P unsafe → `path_safety_failed`（EARLY）。
   (A4-3) P 評価不能 → `path_safety_unknown`（EARLY）。
-  (A4-4) **PreDirCreateParentBind**: 検証済み親 directory entity P そのものへ identity binding、
-  または no-follow + handle/descriptor based binding、または同等 OS/API 保証のいずれかで束縛する。
-  bound parent handle/descriptor 基準の relative one-level create、または「検証した親実体と create 対象の
-  親実体が同一」と OS/API として保証できる方式のみ許可。
-  (A4-5) parent_binding を証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
-  `create_dir_attempted=false`（**directory create 前**。mkdir/CreateDirectory 呼出0。write-then-detect /
-  create-then-detect 禁止）。pathname 事前 check 単独・create 後再検証単独・`RUN_LOCK` 保持・
-  協調 process 前提は parent_binding=bound の根拠にしない。
-  (A4-6) bind 成功後のみ、bound parent から C を **1 段だけ** 作成（pathname-only mkdir を成功条件にしない。
-  複数階層一括作成禁止）。
-  (A4-7) 作成直後に同一 OS 検査で再検証。
+  (A4-4) **PreDirCreateTrustedChainContainment**: trusted anchor A から即時親 P まで（chain 上の各
+  directory D 含む）について、分類入力 `platform`（`windows_native` | `linux_or_wsl` | `other`）、
+  `chain_containment_capability`（`demonstrated` | `not_demonstrated`）、`create_phase`
+  （`before_dir_create` | `after_dir_create`）。**`create_phase=before_dir_create` のとき**、
+  `chain_containment_capability != demonstrated` なら EARLY STOP: `result=blocked`
+  `stop_reason=path_safety_unknown` `create_dir_attempted=false`（directory mutation なし。
+  mkdir/CreateDirectory 呼出0。write-then-detect / create-then-detect 禁止）。
+  `chain_containment_capability=demonstrated` は、trusted anchor A→…→P の chain 上で必要な各
+  directory handle を取得・再検証し、A4-6 create と A4-7 ImmediatePostCreateVerify 完了まで保持できる
+  こと。Windows native では上記に加え delete sharing 拒否（rename を許さない）。
+  Linux/WSL/other では ancestor rename を create 完了まで排除する同等 OS/API guarantee を実証できない
+  → `not_demonstrated`。現行の `openat`/`openat2`/`mkdirat`、pathname precheck、**即時親だけの
+  PreDirCreateParentBind 単独**、create 後 pathname recheck は `demonstrated` にしない。
+  `demonstrated` の場合、chain 上の各 D について acquire/re-verify directory handle を保持し、
+  Windows native では delete sharing 拒否で ancestor rename を create+verify 完了まで排除する。
+  (A4-5) chain containment を証明不能、または `chain_containment_capability=not_demonstrated` →
+  `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`（**directory create 前**。
+  mkdir/CreateDirectory 呼出0。write-then-detect / create-then-detect 禁止）。pathname 事前 check 単独・
+  即時親だけの PreDirCreateParentBind 単独・create 後再検証単独・`RUN_LOCK` 保持・協調 process 前提は
+  chain containment=bound の根拠にしない。
+  (A4-6) chain handle 保持中のみ、bound parent P から C を **1 段だけ** 作成（pathname-only mkdir を
+  成功条件にしない。複数階層一括作成禁止）。
+  (A4-7) **ImmediatePostCreateVerify**: 作成直後に同一 OS 検査で再検証。完了後に保持していた chain
+  handles を解放してよい。
   **Linux/WSL**: requested mode は **`0700` 固定**。process umask に安全性を委ねない。
   作成直後の observed mode が `0700` exact でない、owner不一致、symlink/special、canonical boundary
   不一致は `path_safety_failed`。mode/owner/type/canonical 判定不能は `path_safety_unknown`。
@@ -159,12 +172,14 @@ Cursor-specific rules only:
   completion record 作成直前にも handle/path identity exact 一致を再確認する（drift 時は blocked）。
   A6 **lock 保持後のみ**（A6-0: `RUN_LOCK` 取得・保持後にのみ進入。A4 より前倒ししない）`RUN_CHAIN` を検証
   （A6-1）。`RUN_BASE` missing は lock 保持中に verified 親 `SCRATCH_BASE` へ A4 と同一の
-  **PreDirCreateParentBind**（A4-4〜A4-5）を適用し、bound 状態から 1 段作成→直後再検証（A6-2）。
-  parent_binding 証明不能 → 当該 create 前 `path_safety_unknown` `create_dir_attempted=false`。
+  **PreDirCreateTrustedChainContainment**（A4-4〜A4-7）を適用し、chain handle 保持中に bound parent
+  から 1 段作成→ImmediatePostCreateVerify 完了まで保持（A6-2）。
+  chain containment 証明不能 → 当該 create 前 `path_safety_unknown` `create_dir_attempted=false`。
   `RUN_ROOT` missing も verified `RUN_BASE` へ同様（A6-3）。証明不能なら当該 create 前
   `path_safety_unknown` `create_dir_attempted=false`。
   （いずれも A4 と同一の Linux/WSL `0700` 固定・Windows safe owner/DACL 要求規則を A4-7 で適用する。
-  pathname 事前 check + create + post-check だけを成功条件にしない）。
+  pathname 事前 check + create + post-check だけを成功条件にしない。即時親だけの
+  PreDirCreateParentBind 単独は不十分）。
   （A6-4）**`RUN_ROOT` が既に存在し安全な directory であっても再利用・resume・上書きしない** →
   `result=blocked` `stop_reason=run_root_collision` `instance_marker_created=false`
   `payload_written=false` `completion_record_created=false` `existing_run_root_modified=false`
@@ -207,23 +222,28 @@ Cursor-specific rules only:
   完了まで。path/handle identity 照合の直後・最初の content write の直前。必須）**: 分類入力:
   `platform`（`windows_native` | `linux_or_wsl` | `other`）、`leaf_containment_capability`
   （`demonstrated` | `not_demonstrated`）、`write_phase`（`before_first_content_write` |
-  `after_first_content_write`）。`demonstrated` は、現行の同一 UID/SID 非協調 process 脅威モデルに
-  対し、create-new 成功から最初の content write 完了まで、leaf の `RUN_ROOT` 外 rename/replace と
-  同一 entity への external hard-link 追加を OS/API として排除できることのみ。writer の fresh 成功経路
-  （最初の content write 成功）は **`platform=windows_native`、または
-  `leaf_containment_capability=demonstrated` を OS/API 実証できる環境に限定**する。
+  `after_first_content_write`）。`platform` は分類入力として残すが、write 許可の独立 OR 条件にしては
+  ならない。`leaf_containment_capability=demonstrated` は、次を一体の契約としてすべて満たし、同一
+  SID/UID 非協調 process による rename / replace / external hard-link 作成が sharing violation または
+  同等 OS/API enforcement で排除されることを実証した場合のみ: (1) trusted chain 上の必要な ancestor
+  directory handle を保持、(2) ancestor 側で delete sharing を拒否、(3) leaf を create-new /
+  no-overwrite（CREATE_NEW 相当）、(4) reparse を follow しない、(5) leaf handle で write/delete
+  sharing を拒否、(6) create-new で取得した同一 handle を使って content write、(7) FILE_ID_INFO 等の
+  既存 identity guarantee で対象 entity を照合、(8) 最初の content write 完了まで必要な ancestor /
+  leaf handle を保持、(9) 上記 rename / replace / external hard-link 排除の実証。writer の fresh 成功経路
+  （最初の content write 成功）は **`leaf_containment_capability=demonstrated` を OS/API 実証できる
+  環境に限定**する（`platform=windows_native` 単独では成立しない）。
   **以下だけでは `leaf_containment_capability=demonstrated` とみなさない（禁止）**: 単なる宣言；
-  platform 名；lock 取得；open descriptor 保持；mode / ACL；ancestor / `RUN_ROOT` binding；直前確認；
-  pathname identity の単発照合のみ；短い時間窓；協調 process 前提；post-write scan；同一 handle
-  保持のみ；rename/hard-link 隙間が残る link-count 単発比較のみ。**Linux/WSL の現行契約プリミティブ
-  集合（open descriptor + non-blocking exclusive `flock` + file mode + ancestor / `RUN_ROOT` binding）
-  だけでは、同一 UID 非協調 process の rename / replace / external hard-link を初回 content write
-  完了まで排除できず `not_demonstrated`** とする。
-  IF `platform=windows_native` OR `leaf_containment_capability=demonstrated`:
+  **`platform=windows_native` 単独**；lock 取得；open descriptor 保持；mode / ACL；ancestor /
+  `RUN_ROOT` binding；直前確認；pathname identity の単発照合のみ；短い時間窓；協調 process 前提；
+  post-write scan；同一 handle 保持のみ；rename/hard-link 隙間が残る link-count 単発比較のみ。
+  **Linux/WSL の現行契約プリミティブ集合（open descriptor + non-blocking exclusive `flock` + file mode
+  + ancestor / `RUN_ROOT` binding）だけでは `not_demonstrated`** とする。
+  IF `leaf_containment_capability=demonstrated`:
     THEN 既存契約どおり `WRITE_TARGET` 経由の content write へ進む（create-new 後の pathname 再 open
     初回 write 禁止は維持）。
-  ELSE（`write_phase=before_first_content_write`。Linux/WSL で現行プリミティブだけでは
-  `not_demonstrated` を含む）:
+  ELSE（`write_phase=before_first_content_write`。`platform=windows_native` かつ
+  `leaf_containment_capability=not_demonstrated` を含む）:
     EARLY STOP: `result=blocked` `stop_reason=path_safety_unknown`
     `completion_record_created=false` `content_write_attempted=false`。create-new は実施済みのため
     `instance_marker_created=true` と肯定記録し residue を隠さない。content write は実行しない。
@@ -297,11 +317,13 @@ Cursor-specific rules only:
   **LeafContainmentCapabilityGate（leaf content write の前。create-new 成功後・初回 content write
   完了まで。path/handle identity 照合の直後・最初の content write の直前。必須）**: A7 (3) の
   `LeafContainmentCapabilityGate` と同一の分類入力・`demonstrated` 定義・非成立リスト・分岐を適用する
-  （writer fresh 成功経路は `platform=windows_native`、または `leaf_containment_capability=demonstrated`
-  を OS/API 実証できる環境に限定。Linux/WSL の現行契約プリミティブだけでは `not_demonstrated`）。
-  IF `platform=windows_native` OR `leaf_containment_capability=demonstrated`:
+  （writer fresh 成功経路は `leaf_containment_capability=demonstrated` を OS/API 実証できる環境に限定。
+  `platform=windows_native` 単独では成立しない。Linux/WSL の現行契約プリミティブだけでは
+  `not_demonstrated`）。
+  IF `leaf_containment_capability=demonstrated`:
     THEN 既存契約どおり当該 entry の `WRITE_TARGET` 経由の content write へ進む。
-  ELSE（`write_phase=before_first_content_write`）:
+  ELSE（`write_phase=before_first_content_write`。`platform=windows_native` かつ
+  `leaf_containment_capability=not_demonstrated` を含む）:
     EARLY STOP: `result=blocked` `stop_reason=path_safety_unknown`
     `content_write_attempted=false` `external_target_written=false`。**まだ当該 entry へ一度も
     write していない場合は `payload_written=false`。** create-new は実施済みのため
@@ -541,11 +563,14 @@ Cursor-specific rules only:
   `run_state_not_completed` `inventory_unavailable` `inventory_changed` `approval_stale`
   `cleanup_interrupted` `cleanup_result_unknown`。各停止は `result=blocked`（成功丸め禁止）。
   評価順序: identity（trusted execution path経由のresolve） → segment → existing path safety /
-  writer bootstrap（safe create: Linux/WSL `0700`・Windows safe owner/DACL） → writer `RUN_LOCK`
+  writer bootstrap（**PreDirCreateTrustedChainContainment**: `chain_containment_capability=demonstrated`
+  の場合のみ missing directory create。Linux/WSL 現行 `openat`/`mkdirat` は `not_demonstrated`。
+  create 属性: Linux/WSL `0700`・Windows safe owner/DACL） → writer `RUN_LOCK`
   （create-new/open-existing区別 + 取得直後 handle/path identity binding） → writer `RUN_ROOT`
   collision / create → **`RUN_INSTANCE_MARKER` create-new + pre-write handle binding +
-  LeafContainmentCapabilityGate（create-new 後・初回 content write 前。`platform=windows_native` または
-  `leaf_containment_capability=demonstrated` の場合のみ content write へ。Linux/WSL `0600`
+  LeafContainmentCapabilityGate（create-new 後・初回 content write 前。
+  `leaf_containment_capability=demonstrated` の場合のみ content write へ（`platform=windows_native`
+  単独では不十分）。Linux/WSL `0600`
   固定・Windows safe owner/DACL は **create 属性契約**であり gate 成立根拠にしない。現行契約プリミティブ
   （open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）だけでは
   `demonstrated` にならない。canonical content は create-new handle 経由のみ。pathname 再 open 初回

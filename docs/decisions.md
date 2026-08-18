@@ -3922,13 +3922,21 @@ Codex（PM）の役割・route判定・承認record検証を代理・自称し�
   未作成扱い・省略で隠さない（既存`provenance_unknown`等へ収束可。新stop/schema禁止）
 - **（v10）** writer の fresh 成功経路（A7/A8 最初の content write 成功）は `platform=windows_native`、
   または `leaf_containment_capability=demonstrated` を現行の同一 UID/SID 非協調 process 脅威モデルに
-  対し OS/API として実証できる環境に限定する
+  対し OS/API として実証できる環境に限定する（**v12 で superseded**。v12 では `demonstrated` のみ）
 - **（v10）** Linux/WSL の現行契約プリミティブ（open descriptor / `flock` / file mode /
   ancestor・`RUN_ROOT` binding）だけでは `leaf_containment_capability=demonstrated` にならず、
   A7/A8 最初の content write 前に既存 `path_safety_unknown` で blocked とする
 - **（v10）** `discussion_r3795298185` / `discussion_r3800278015` で指摘された fail-closed 契約と
   Linux/WSL 無条件 writer 成功例の矛盾を `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
   の双方で解消する
+- **（v12）** A4/A6 の各 missing directory create は **PreDirCreateTrustedChainContainment**
+  （trusted anchor→immediate parent を create+ImmediatePostCreateVerify 完了まで保持。
+  `chain_containment_capability=demonstrated` のみ create 許可。即時親だけの PreDirCreateParentBind 単独は
+  不十分）。証明不能は create 前 `path_safety_unknown` `create_dir_attempted=false`
+- **（v12）** A7/A8 の content write は **`leaf_containment_capability=demonstrated` のみ**許可
+  （9条件一体の enforcing handle contract。`platform=windows_native` 単独 bypass 廃止）
+- **（v12）** v10 の「`platform=windows_native` または demonstrated」writer 成功経路は **superseded**
+  （削除せず履歴として残す）
 
 ## 採用しない方針 / 却下した代替案
 
@@ -4250,6 +4258,22 @@ cleanup execution に流用しない。
 | **（v11）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
 | **（v11）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v11）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v12）** canonical proposal（route=cursor） | 固定 | [#5323954222](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323954222) |
+| **（v12）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5324063330](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324063330) |
+| **（v12）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5324089492](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324089492) |
+| **（v12）実装開始時HEAD** | `bac3f058b5f5b2cc3cb883157f2bc0faa6aee998` | 本ラウンドの実装起点 |
+| **（v12）** 今回修正 finding | [`discussion_r3801196643`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3801196643)（A4/A6 trusted chain containment。即時親だけの PreDirCreateParentBind 単独は不十分）、[`discussion_r3801196648`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3801196648)（A7/A8 `platform=windows_native` OR bypass 廃止。`leaf_containment_capability=demonstrated` のみ） | 固定4ファイル文書契約のみ |
+| **（v12）** 旧 proposal / approval / route | **非流用** | v10/v11 の `#5322502680` / `#5322556820` / `#5322580929` / `#5323410162` / `#5323510935` / `#5323522123` 等は本ラウンドへ流用しない |
+| **（v12）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v12）** 採用方針 | A4/A6: **PreDirCreateTrustedChainContainment**（trusted anchor→parent を create+ImmediatePostCreateVerify 完了まで保持。`chain_containment_capability=demonstrated` のみ create 許可）。A7/A8: **`leaf_containment_capability=demonstrated` のみ** content write 許可（9条件一体契約。`platform=windows_native` 単独 bypass 廃止） | v10 の「`platform=windows_native` または demonstrated」採用方針は **superseded**（履歴は残す） |
+| **（v12）** 保証不能時 | directory create 前 / content write 前に既存 `path_safety_unknown` で fail-closed（`create_dir_attempted=false` / `content_write_attempted=false`） | 新 stop reason なし |
+| **（v12）** カテゴリ③と④の分離 | 本ラウンドはカテゴリ③（文書正本変更）のみ。実cleanup（カテゴリ④）は別発効点 | merge / execution / 実cleanup は未承認・未実施 |
+| **（v12）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v12）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v12）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v12）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v12）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v12）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v10/v11 記録と同型 |
 
 ## 次アクション
 
@@ -4358,6 +4382,8 @@ cleanup execution に流用しない。
 - [ ] **（v10是正）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [x] **（v11）** CursorによるA4/A6 verified-parent PreDirCreateParentBind・setup否定例・cursor.md最小同期・decisions v11追記の固定4ファイル実装（本コミットで文書契約を入れた）
 - [ ] **（v11）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v12）** CursorによるA4/A6 PreDirCreateTrustedChainContainment・A7/A8 `windows_native` OR 廃止・setup/cursor.md最小同期・decisions v12追記の固定4ファイル実装（tip 未確定）
+- [ ] **（v12）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

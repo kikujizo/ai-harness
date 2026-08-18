@@ -35,18 +35,20 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   `RUN_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する
   （単一 `PATH_CHAIN` ではない）。
   writerは lock 系 directory（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
-  **A4 では各 missing component について verified 親へ create 前 **PreDirCreateParentBind** を証明してから
-  1 段作成→直後再検証する（parent_binding 証明不能は directory create 前 `path_safety_unknown`
-  `create_dir_attempted=false`）。`RUN_LOCK` 取得後に `RUN_BASE`/`RUN_ROOT` を作成する（A6 も同様の
-  create 前 binding 原則。`RUN_LOCK` 順序は A4 より前倒ししない）**、**payload 前に fresh 256-bit `instance_nonce` と
+  **A4 では各 missing component について trusted anchor→parent へ create 前
+  **PreDirCreateTrustedChainContainment**（`chain_containment_capability=demonstrated`）を証明し、
+  chain handle を create+ImmediatePostCreateVerify 完了まで保持してから 1 段作成する（chain containment
+  証明不能は directory create 前 `path_safety_unknown` `create_dir_attempted=false`）。`RUN_LOCK`
+  取得後に `RUN_BASE`/`RUN_ROOT` を作成する（A6 も同一 chain 契約。`RUN_LOCK` 順序は A4 より前倒ししない）**、**payload 前に fresh 256-bit `instance_nonce` と
   `RUN_INSTANCE_MARKER`（create-new/read-back）を作成**する。既存 safe `RUN_ROOT` は
   `run_root_collision` で blocked（再利用・resume 禁止）。completion は `scratch-completion/v2`
   （`instance_commitment` のみ。v1 非受理。**`run_state=completed` / `residue=present` only**——
   `residue=none` は writer 正常フローでは受理しない。到達状態と否定例の正本は `.cursor/rules/ai-workflow.mdc` A9）。
   **新規 directory は umask/既定 ACL に頼らず、Linux/WSL は requested/observed mode `0700` 固定、
-  Windows は作成時点から safe owner/DACL を要求する。各 missing directory は verified 親へ create 前
-  **PreDirCreateParentBind** を証明してから bound parent から 1 段作成し、作成直後に同一 OS の path safety を
-  再検証する（pathname 事前 check + create + post-check だけでは不足。証明不能は create 前
+  Windows は作成時点から safe owner/DACL を要求する。各 missing directory は trusted anchor→parent へ
+  **PreDirCreateTrustedChainContainment** を証明し、chain handle を create+verify 完了まで保持してから
+  bound parent から 1 段作成し、ImmediatePostCreateVerify 後に解放する（pathname 事前 check + create +
+  post-check だけでは不足。即時親だけの PreDirCreateParentBind 単独は不十分。証明不能は create 前
   `path_safety_unknown` `create_dir_attempted=false`）。
   （`RUN_LOCK`・`RUN_INSTANCE_MARKER` も同じ規則で Linux/WSL は `0600` 固定）。payload descendantも
   cleanup互換の安全属性で作成し、completion record作成前に全descendantを再走査する。
@@ -68,10 +70,10 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   （詳細は正本 A8）。**
   **leaf containment（`LeafContainmentCapabilityGate`）**: `RUN_INSTANCE_MARKER` と payload regular file は
   create-new 成功〜初回 content write 完了までの leaf containment を OS/API で証明できる場合のみ write。
-  writer の fresh 成功経路は **`platform=windows_native`、または `leaf_containment_capability=demonstrated`
-  を実証できる環境に限定**する。Linux/WSL の現行契約プリミティブだけでは `demonstrated` にならず、
-  証明不能は content write 前 `path_safety_unknown`（pathname 単発照合・短時間窓・post-write scan 等は
-  安全代替にしない。詳細は正本 A7/A8）。**
+  writer の fresh 成功経路は **`leaf_containment_capability=demonstrated` を実証できる環境に限定**する
+  （`platform=windows_native` 単独では不十分。詳細は正本 A7/A8）。Linux/WSL の現行契約プリミティブだけでは
+  `demonstrated` にならず、証明不能は content write 前 `path_safety_unknown`（pathname 単発照合・短時間窓・
+  post-write scan 等は安全代替にしない。詳細は正本 A7/A8）。**
   **A8: payload entry へ 1回でも write mutation 成功後の short write / flush / close 失敗は
   `payload_written=true` で fail-closed 残留を肯定し completion 未作成・`auto_*`=false とする
   （詳細は正本 A8）。**

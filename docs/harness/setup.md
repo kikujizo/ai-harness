@@ -572,7 +572,18 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   directory を作成する直前に、当該 directory の親が symlink/reparse へ置換された状況を渡し、
   `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`
   `external_target_written=false` となり、directory create mutation 前に停止し外部 target 未変更のまま
-  であることを確認する（write-then-detect / create-then-detect 禁止）。
+  であることを確認する（write-then-detect / create-then-detect 禁止）。identity bind 単独では不足で、
+  trusted anchor→`parent(D)` の **PreDirCreateTrustedChainContainment**（A4-4〜A4-7 参照）が
+  各段で成立していることが前提。
+- **A8 payload nested directory chain containment 不能（否定例・EARLY・discussion_r3801575707）**:
+  A8 で payload nested directory を作成する直前に、identity/descriptor bind 後〜create 前に
+  同一 UID/SID の非協調 process が `RUN_ROOT` または bound parent を rename/relocation し得る状況、
+  または Linux/WSL/other で trusted anchor→`parent(D)` の chain containment を create 前に
+  実証できない状況を渡す。`result=blocked` `stop_reason=path_safety_unknown`
+  `create_dir_attempted=false` `external_target_written=false` となり、directory create mutation 前に
+  停止し外部 target 未変更のまま後続 nested 段・leaf regular file へ進まないことを確認する
+  （mkdir/mkdirat/CreateDirectory 呼出0。外部 directory を一度作ってから検出する経路を成功・安全扱いしない。
+  identity bind 単独・前段 containment 流用・pathname precheck だけを成功経路にしない）。
 - **leaf containment capability 不成立（否定例・A7/A8・Case B・discussion_r3794153890 /
   discussion_r3795298185 / discussion_r3800278015）**:
   marker または payload regular file の create-new 成功後、初回 content write 前に `RUN_ROOT` 外
@@ -631,7 +642,7 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 
 | 入力 | 期待出力 | EARLY証明 |
 |---|---|---|
-| fresh `.cache` missing（writer・LeafContainmentCapability 実証環境） | `scratch_created=true`（bootstrap 後 lock→run 作成→marker→payload） | 成功例は `leaf_containment_capability=demonstrated` に限定（`platform=windows_native` 単独では不十分）。**かつ** A4/A6 各 missing directory で `chain_containment_capability=demonstrated`。`RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成。marker 検証前 payload 未作成 |
+| fresh `.cache` missing（writer・LeafContainmentCapability 実証環境） | `scratch_created=true`（bootstrap 後 lock→run 作成→marker→payload） | 成功例は `leaf_containment_capability=demonstrated` に限定（`platform=windows_native` 単独では不十分）。**かつ** A4/A6 各 missing directory で `chain_containment_capability=demonstrated`。**payload nested directory まで進める場合も各段で `chain_containment_capability=demonstrated` が前提**。`RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成。marker 検証前 payload 未作成 |
 | Linux/WSL 現行プリミティブのみ（open descriptor / `flock` / mode / ancestor binding） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `completion_record_created=false` | A7/A8 最初の content write 前停止。payload write・completion 未作成（`discussion_r3795298185` / `r3800278015`） |
 | existing safe `RUN_ROOT`（writer） | `result=blocked` `stop_reason=run_root_collision` `instance_marker_created=false` `payload_written=false` | A6 collision。marker/payload 前に停止 |
 | cross-host/profile 同 `repo_slug/run_id` | `result=blocked` `stop_reason=provenance_mismatch` `cleanup=false` `approval_reusable=false` | B6 marker commitment と v2 不一致で inventory/cleanup 未宣言 |
@@ -671,7 +682,8 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | marker create-new後のpath差し替え | `pathname_reopen_used=false` `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` | A7 canonical content は create-new handle へ。path 再 open 初回 write なし。A8 未進入 |
 | pre-write binding capability不明 | `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` | create-new/handle/path binding 証明不能。pathname write へ進まない |
 | ancestor directory / `RUN_ROOT` bind 不能（A6後symlink/reparse置換） | `create_new_attempted=false` `content_write_attempted=false` `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` `external_target_written=false` | A7/A8 create-new 前停止。create-new 後のみの ancestor チェックでは不足 |
-| payload directory parent 差し替え（Case A） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | A8 PreDirCreateAncestorBind 失敗。directory create 前停止 |
+| payload directory parent 差し替え（Case A） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | A8 PreDirCreateTrustedChainContainment 失敗（identity bind 単独では不足）。directory create 前停止 |
+| A8 payload nested directory chain containment 不能（identity bind後〜create前の RUN_ROOT/parent rename 含む） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | directory create 前停止。mkdir/CreateDirectory 呼出0。後続 nested 段・leaf 未進入。外部 dir 作ってから検出する経路を成功扱いしない |
 | leaf containment capability 不成立（Case B・`platform=windows_native` 単独・Linux/WSL 現行プリミティブのみを含む） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `external_target_written=false` | create-new 済みなら `create_new_attempted=true` を肯定。content write 前停止 |
 | payload mutation 後 flush/close 失敗 | `result=blocked` `payload_written=true` `completion_record_created=false` `auto_cleanup=false` | 不完全 payload 残留を肯定。成功丸め禁止 |
 | cleanup 中 `RUN_ROOT` rename/replacement（Case A・discussion_r3794446604） | `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false` | verified root handle 保持不能。external/replacement target への delete mutation なし |

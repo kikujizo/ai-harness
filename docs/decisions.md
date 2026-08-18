@@ -4274,6 +4274,30 @@ cleanup execution に流用しない。
 | **（v12）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v12）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 | **（v12）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v10/v11 記録と同型 |
+| **（v13）** current P1 finding | [`discussion_r3801575707`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3801575707)（A8 payload nested directory 各段へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** 参照適用。identity bind 単独・前段流用は不十分） | 固定4ファイル文書契約のみ |
+| **（v13）** feasibility | [#5324693749](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5324693749) | — |
+| **（v13）** canonical proposal（route=cursor） | 固定 | [#5324709516](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324709516) |
+| **（v13）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5324824239](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324824239) |
+| **（v13）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5324841376](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324841376) |
+| **（v13）** 旧 proposal / approval / route | **非流用** | v12 の `#5323954222` / `#5324063330` / `#5324089492` は本ラウンドへ流用しない |
+| **（v13）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | SPEC_IMPACT:none。新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v13）** 採用方針 | A8 payload directory 各 one-level 段へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** を参照適用（各段独立に再取得・再検証。段1の containment を後続段へ無条件流用しない）。`chain_containment_capability=demonstrated` のみ directory create 許可。identity bind 単独・pathname precheck・`RUN_LOCK`・短時間窓・create 後 scan・platform 名だけの宣言は代替にしない | v12 の A4/A6 chain containment 方針を A8 payload directory 段へ拡張（A4/A6 本文・A7/A8 leaf 9条件一体契約は非退行） |
+| **（v13）** 保証不能時 | payload directory 各段の directory create 前に既存 `path_safety_unknown` で fail-closed（`create_dir_attempted=false` / mkdir 呼出0） | 新 stop reason なし |
+| **（v13）** カテゴリ③と④の分離 | 本ラウンドはカテゴリ③（文書正本変更）のみ。実cleanup（カテゴリ④）は別発効点 | merge / execution / 実cleanup は未承認・未実施 |
+| **（v13）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v13）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v13）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v13）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v13）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v13）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v12 記録と同型 |
+
+**（v13）採用方針（段落）**: A8 の payload nested directory は、one-level 各段 D について trusted anchor
+`TRUSTED_HOME`→`parent(D)` へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** を参照適用する。
+各段は独立に chain を再取得・再検証し、段1の containment 結果を後続段へ無条件流用しない。
+`chain_containment_capability=demonstrated` の場合のみ chain handle 保持中に bound parent から D を
+1 段 create-new し ImmediatePostCreateVerify(D) 完了まで保持する。保証不能 platform/段は create 前
+`path_safety_unknown` `create_dir_attempted=false` で fail-closed とする（A4/A6 本文・A7/A8 leaf
+9条件一体契約・public schema は非退行）。
 
 ## 次アクション
 
@@ -4384,6 +4408,8 @@ cleanup execution に流用しない。
 - [ ] **（v11）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] **（v12）** CursorによるA4/A6 PreDirCreateTrustedChainContainment・A7/A8 `windows_native` OR 廃止・setup/cursor.md最小同期・decisions v12追記の固定4ファイル実装（tip 未確定）
 - [ ] **（v12）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v13）** CursorによるA8 payload directory PreDirCreateTrustedChainContainment参照適用・setup否定例・cursor.md最小同期・decisions v13追記の固定4ファイル実装（tip 未確定）
+- [ ] **（v13）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

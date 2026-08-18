@@ -67,7 +67,8 @@ Cursor-specific rules only:
   ancestor-bound とみなすこと**、  **ancestor/RUN_ROOT bind 保証不能時に create-new または content write
   を実行してから path safety を検出すること（write-then-detect）**、
   **ancestor bind 成功前に leaf create-new を実行すること**、
-  **payload directory の `PreDirCreateAncestorBind` / bound-parent one-level create-new を省略すること**、
+  **payload directory の `PreDirCreateTrustedChainContainment`（A4-4〜A4-7 参照）省略・identity bind 単独・
+  前段 containment 結果の無条件流用・bound-parent one-level create-new を省略すること**、
   **leaf containment capability 証明不能時に marker/payload regular file へ content write すること**、
   **pathname 単発照合・短時間窓・協調 process 前提・post-write scan・同一 handle 保持のみ・
   rename/hard-link 隙間が残る link-count 単発比較を leaf containment の安全代替として列挙すること**、
@@ -281,19 +282,23 @@ Cursor-specific rules only:
   payload は marker を変更・削除・rename しない。unsafe/unknownなmarkerを正常completionへ昇格させない。
   A8 **A7 成功後のみ** scratch payload を create/write する。
   **payload directory ごとに**（one-level nesting の各段。親→子の1段 create-new のみ）:
-  (c0) **PreDirCreateAncestorBind（directory create mutation の前）**: 当該 directory D の親
-  `parent(D)` から `RUN_ROOT` まで inclusive の各 ancestor directory について、identity binding、
-  no-follow + handle/descriptor based binding、または同等 OS/API 保証のいずれかで verified safe
-  directory entity へ束縛する。いずれかを証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
-  `create_dir_attempted=false`（当該段）。外部 target 未変更。directory create mutation 前停止。
-  write-then-detect / create-then-detect 禁止。
-  (c1) **DirectoryCreateNewFromBoundParent**: 上記 bind 成功後のみ、bound parent からの
-  OS/API one-level create-new を要求（pathname-only 過去 checked・`RUN_LOCK` 保持・後続 recursive scan・
-  短い race window は代替にしない）。bound-parent create-new を証明不能 → `path_safety_unknown`
-  （mkdir 前停止。`create_dir_attempted=false`）。
-  (c2) **ImmediatePostCreateVerify(D)**: 新規 D の identity / type / path safety を直後再検証。
-  unsafe/mismatch → 既存 fail-closed class（`path_safety_failed` または `path_safety_unknown`）。
-  合格後のみ次のネスト段または leaf regular file へ進む。
+  各段 D について、directory create mutation の前に A4-4〜A4-7 の
+  **PreDirCreateTrustedChainContainment** を参照適用する。trusted anchor は A4 と同じ
+  `TRUSTED_HOME`。即時親は当該 `parent(D)`。分類入力・`demonstrated` 定義・非成立リスト・
+  EARLY 停止（`path_safety_unknown` / `create_dir_attempted=false` / mkdir/mkdirat/CreateDirectory
+  呼出0）は A4-4〜A4-5 と同一。各段は独立: 例 `RUN_ROOT/a/b/c/file` では `a` 作成前に
+  `TRUSTED_HOME`→`RUN_ROOT`、`b` 作成前に `TRUSTED_HOME`→`RUN_ROOT/a`、`c` 作成前に
+  `TRUSTED_HOME`→`RUN_ROOT/a/b` を再取得・再検証・保持する。段1の containment 結果を後続段へ
+  無条件流用しない。
+  `chain_containment_capability=demonstrated` の場合のみ、chain handle 保持中に bound parent から
+  D を 1 段 create-new し（A4-6）、ImmediatePostCreateVerify(D) 完了まで保持する（A4-7。完了前に
+  handle を解放しない）。Windows native では必要な chain handle の delete sharing 拒否を含む
+  enforcing contract。Linux/WSL/other で同等保証を実証できない段は当該 create 前に
+  `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` で停止し、
+  後続段・leaf へ進まない（directory mutation なし。mkdir/mkdirat/CreateDirectory 呼出0。
+  write-then-detect / create-then-detect 禁止。外部 target 未変更）。
+  pathname precheck、immediate parent identity/descriptor binding だけ、`RUN_LOCK`、短い時間幅、
+  create 後 pathname scan、platform 名だけの宣言、前段の containment 結果の無条件流用は代替にしない。
   **payload regular file ごとに**:
   (a) **PreWriteAncestorBind（当該 expected leaf pathname に対する create-new および初回 content write
   の両方より前）**: A7 (3) と同一要件。証明不能 → `path_safety_unknown`。**まだ当該 entry へ一度も
@@ -575,7 +580,8 @@ Cursor-specific rules only:
   （open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）だけでは
   `demonstrated` にならない。canonical content は create-new handle 経由のみ。pathname 再 open 初回
   write 禁止）+ verify** → payload directory ごとの
-  PreDirCreateAncestorBind + bound-parent one-level create-new + ImmediatePostCreateVerify →
+  PreDirCreateTrustedChainContainment（A4-4〜A4-7 参照。各段再取得）+ bound-parent one-level
+  create-new + ImmediatePostCreateVerify →
   payload regular file ごとの create-new + pre-write handle binding +
   LeafContainmentCapabilityGate（A7 と同一 gate 契約。既存 entry/hard link 先置きは open/truncate 禁止。
   pathname 再 open 初回 write 禁止。cleanup互換属性 + completion前の全descendant再検証） →

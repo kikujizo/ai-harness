@@ -79,10 +79,9 @@ criteriaは同梱の `writing-criteria.md` 1枚と `README.md` から育てる�
 - レビュー独立: 実装した本人にレビューを依頼し、担当交代を提案してくることを確認する
 - **lab非発動（本Checkpoint）**: 一般依頼文（例: 「このIssueを実装して」「設計を見て」「要求を整理して」）だけを渡し、
   **lab Skill 名やlab系の処理を自動提案しない**ことを確認する。
-  負例は「用語を整理して」だけでは`mino-context-discovery`を発動しないこと、正例は「`mino-context-discovery`を使って」と
+  負例は「設計チェックして」を伴わない一般依頼文だけでは`design-check`を発動しないこと、正例は「`design-check`で見て」と
   Skill名を明示した場合だけ候補になることとする。
-  例外として、凍結済みの`mino-socratic-requirements`は、通常業務では提案・実行しない。
-  規範は [AGENTS.md](../../AGENTS.md)「Skills」節、凍結判断は[Decision Log](../decisions.md)を参照する。
+  規範は [AGENTS.md](../../AGENTS.md)「Skills」節を参照する。
 
 #### 責務境界（4件・Issue #51 Checkpoint B）
 

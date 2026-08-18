@@ -110,16 +110,30 @@ Cursor-specific rules only:
   canonical full path は `TRUSTED_HOME` の component 境界内。
   いずれか失敗 → `path_safety_failed` または `path_safety_unknown` → `result=blocked`（EARLY）
   A4 lock bootstrap ONLY（`RUN_LOCK` 取得前。作成可は `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` のみ。
-  **`RUN_BASE`/`RUN_ROOT`/payload は作成禁止**。各 missing component について:
-  (1) safe 親を read-only 検証 (2) **1 段だけ** 作成 (3) 直後に同一 OS 検査で再検証。
+  **`RUN_BASE`/`RUN_ROOT`/payload は作成禁止**（A4-0: `RUN_LOCK` 未取得時は run 側・payload 作成禁止）。
+  各 missing component C ∈ {`CACHE_ROOT`,`SCRATCH_BASE`,`LOCK_BASE`,`LOCK_ROOT`} について、
+  即時親 P は1段上の既存 component（`CACHE_ROOT` の親は `TRUSTED_HOME`）とし、次の順序のみ許可:
+  (A4-1) P を read-only path safety 検証。(A4-2) P unsafe → `path_safety_failed`（EARLY）。
+  (A4-3) P 評価不能 → `path_safety_unknown`（EARLY）。
+  (A4-4) **PreDirCreateParentBind**: 検証済み親 directory entity P そのものへ identity binding、
+  または no-follow + handle/descriptor based binding、または同等 OS/API 保証のいずれかで束縛する。
+  bound parent handle/descriptor 基準の relative one-level create、または「検証した親実体と create 対象の
+  親実体が同一」と OS/API として保証できる方式のみ許可。
+  (A4-5) parent_binding を証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
+  `create_dir_attempted=false`（**directory create 前**。mkdir/CreateDirectory 呼出0。write-then-detect /
+  create-then-detect 禁止）。pathname 事前 check 単独・create 後再検証単独・`RUN_LOCK` 保持・
+  協調 process 前提は parent_binding=bound の根拠にしない。
+  (A4-6) bind 成功後のみ、bound parent から C を **1 段だけ** 作成（pathname-only mkdir を成功条件にしない。
+  複数階層一括作成禁止）。
+  (A4-7) 作成直後に同一 OS 検査で再検証。
   **Linux/WSL**: requested mode は **`0700` 固定**。process umask に安全性を委ねない。
   作成直後の observed mode が `0700` exact でない、owner不一致、symlink/special、canonical boundary
   不一致は `path_safety_failed`。mode/owner/type/canonical 判定不能は `path_safety_unknown`。
   **Windows**: create時点から current SID / SYSTEM / BUILTIN\Administrators 以外へ
   write/modify/delete相当を与えない owner/DACL を要求する。作成直後に owner/DACL/reparse/type/
   canonical boundary を再検証し、unsafe は `path_safety_failed`、評価不能は `path_safety_unknown`。
-  複数段一括作成・再検証省略・別 path 作成・unsafe entry の chmod/ACL 修復・作成済み unsafe entry の
-  自動削除は禁止。他 process が先に作成した場合は自分の create 成功とみなさず、existing entry として
+  複数段一括作成・再検証省略・別 path 作成・unsafe entry の chmod/ACL 修復（A4-9）・作成済み unsafe entry の
+  自動削除は禁止（A4-9）。(A4-8) 他 process が先に作成した場合は自分の create 成功とみなさず、existing entry として
   read-only 再検証する。安全性不明・型不一致は blocked。bootstrap 失敗時は `RUN_LOCK`/`RUN_BASE`/
   `RUN_ROOT`/payload を新規作成しない
   A5 `RUN_LOCK` は曖昧な `OpenOrCreate` 一発ではなく **create-new と open-existing を区別**して
@@ -143,13 +157,18 @@ Cursor-specific rules only:
   を作らず、作成済み `RUN_LOCK` を自動削除・GC・renameしない。
   writer は scratch 活動終了と completion record 確定まで同じ opened lock handle を保持し、
   completion record 作成直前にも handle/path identity exact 一致を再確認する（drift 時は blocked）。
-  A6 **lock 保持後のみ** `RUN_CHAIN` を検証。`RUN_BASE` missing は lock 保持中に safe 親直下へ
-  **1 段作成→直後再検証**可。`RUN_ROOT` missing も同様に safe `RUN_BASE` 直下へ **1 段作成→直後再検証**可
-  （いずれも A4 と同一の Linux/WSL `0700` 固定・Windows safe owner/DACL 要求規則を適用する）。
-  **`RUN_ROOT` が既に存在し安全な directory であっても再利用・resume・上書きしない** →
+  A6 **lock 保持後のみ**（A6-0: `RUN_LOCK` 取得・保持後にのみ進入。A4 より前倒ししない）`RUN_CHAIN` を検証
+  （A6-1）。`RUN_BASE` missing は lock 保持中に verified 親 `SCRATCH_BASE` へ A4 と同一の
+  **PreDirCreateParentBind**（A4-4〜A4-5）を適用し、bound 状態から 1 段作成→直後再検証（A6-2）。
+  parent_binding 証明不能 → 当該 create 前 `path_safety_unknown` `create_dir_attempted=false`。
+  `RUN_ROOT` missing も verified `RUN_BASE` へ同様（A6-3）。証明不能なら当該 create 前
+  `path_safety_unknown` `create_dir_attempted=false`。
+  （いずれも A4 と同一の Linux/WSL `0700` 固定・Windows safe owner/DACL 要求規則を A4-7 で適用する。
+  pathname 事前 check + create + post-check だけを成功条件にしない）。
+  （A6-4）**`RUN_ROOT` が既に存在し安全な directory であっても再利用・resume・上書きしない** →
   `result=blocked` `stop_reason=run_root_collision` `instance_marker_created=false`
   `payload_written=false` `completion_record_created=false` `existing_run_root_modified=false`
-  （collision 時は既存 root 無変更）。`RUN_ROOT` が unsafe/type 不一致なら collision より path safety を優先し
+  （collision 時は既存 root 無変更）。（A6-5）`RUN_ROOT` が unsafe/type 不一致なら collision より path safety を優先し
   `path_safety_failed|path_safety_unknown`。check→create 間に他 process が `RUN_ROOT` を作った場合も
   再検証後 `run_root_collision` で blocked。
   A7 **新規 `RUN_ROOT` の path safety 成功後・payload 前**（lock 保持のまま）:

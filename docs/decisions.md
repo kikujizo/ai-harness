@@ -4238,6 +4238,18 @@ cleanup execution に流用しない。
 | **（v10是正）** 今回修正 finding | OR 一致への文書修正 | 仕様変更ではない（Windows native への `demonstrated` 追加要求はしない） |
 | **（v10是正）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー完了まで |
 | **（v10是正）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v11）** canonical proposal（route=cursor） | 固定 | [#5323410162](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323410162) |
+| **（v11）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5323510935](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323510935) |
+| **（v11）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5323522123](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323522123) |
+| **（v11）実装開始時HEAD** | `eac0f6cd5fe54574d3f5820c5a647c7c8af2dce5` | 本ラウンドの実装起点 |
+| **（v11）** 今回修正 finding | A4/A6 bootstrap verified-parent **PreDirCreateParentBind** P1（PR #132 [#5323372170](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5323372170)） | 固定4ファイル文書契約のみ |
+| **（v11）** 旧 proposal / approval / route | **非流用** | v10 の `#5322502680` / `#5322556820` / `#5322580929` 等は本ラウンドへ流用しない |
+| **（v11）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v11）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v11）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v11）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v11）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v11）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 
 ## 次アクション
 
@@ -4344,6 +4356,8 @@ cleanup execution に流用しない。
 - [ ] **（v10）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] **（v10是正）** CursorによるA7/A8 `LeafContainmentCapabilityGate` OR分岐・評価順序要約同期・decisions v10是正追記の固定2ファイル実装（`ai-workflow.mdc` + `docs/decisions.md`。tip 未確定）
 - [ ] **（v10是正）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [x] **（v11）** CursorによるA4/A6 verified-parent PreDirCreateParentBind・setup否定例・cursor.md最小同期・decisions v11追記の固定4ファイル実装（本コミットで文書契約を入れた）
+- [ ] **（v11）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

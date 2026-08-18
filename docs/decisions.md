@@ -3920,6 +3920,15 @@ Codex（PM）の役割・route判定・承認record検証を代理・自称し�
   `completion_record_created=false` `result=blocked`を肯定記録する。
   `auto_cleanup=false` `auto_repair=false` `auto_resume=false`。作成済みmarker/residueを
   未作成扱い・省略で隠さない（既存`provenance_unknown`等へ収束可。新stop/schema禁止）
+- **（v10）** writer の fresh 成功経路（A7/A8 最初の content write 成功）は `platform=windows_native`、
+  または `leaf_containment_capability=demonstrated` を現行の同一 UID/SID 非協調 process 脅威モデルに
+  対し OS/API として実証できる環境に限定する
+- **（v10）** Linux/WSL の現行契約プリミティブ（open descriptor / `flock` / file mode /
+  ancestor・`RUN_ROOT` binding）だけでは `leaf_containment_capability=demonstrated` にならず、
+  A7/A8 最初の content write 前に既存 `path_safety_unknown` で blocked とする
+- **（v10）** `discussion_r3795298185` / `discussion_r3800278015` で指摘された fail-closed 契約と
+  Linux/WSL 無条件 writer 成功例の矛盾を `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
+  の双方で解消する
 
 ## 採用しない方針 / 却下した代替案
 
@@ -3986,6 +3995,13 @@ Codex（PM）の役割・route判定・承認record検証を代理・自称し�
 - **（v5・finding 6）A8 post-write failureを契機とした自動cleanup/repair/resume**: 残留状態を
   肯定記録することと、そこから自動的に後続処理を進めることは別問題であり、後者は誤った自動復旧の
   リスクを生むため却下し、`auto_cleanup=false` `auto_repair=false` `auto_resume=false`を明示する
+- **（v10）platform 名・Linux/WSL で lock 取得成功だけを根拠に fresh writer 成功経路（marker/payload
+  content write・completion 作成）へ進むこと**: `leaf_containment_capability=demonstrated` を
+  OS/API 実証できない環境での content write は fail-closed 違反のため却下
+- **（v10）Linux/WSL で leaf containment を成立させる helper / isolation / runtime / daemon を
+  本 Checkpoint へ追加すること**: 固定4ファイル scope 外のため却下し、別 Checkpoint へ分離
+- **（v10）v9 以前の `implementation_start` / merge approval / route record を本ラウンドへ流用すること**:
+  非流用（v10 は新 proposal / approval / route に基づく）
 
 ## 判断理由
 
@@ -4205,6 +4221,19 @@ cleanup execution に流用しない。
 | **（v9）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
 | **（v9）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v9）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v10）** canonical proposal（route=cursor） | 固定 | [#5322502680](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5322502680) |
+| **（v10）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5322556820](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5322556820) |
+| **（v10）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5322580929](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5322580929) |
+| **（v10）実装開始時HEAD** | `db1685d986a7d35098631bf570ca32a5f46d93be` | 本ラウンドの実装起点 |
+| **（v10）** 今回修正 finding | [`discussion_r3795298185`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3795298185)（fail-closed 契約と Linux/WSL 無条件 writer 成功例の矛盾）、[`discussion_r3800278015`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3800278015)（同上・`LeafContainmentCapabilityGate` 成立条件の platform 名 / lock 取得だけでは不十分） | 固定4ファイル文書契約のみ |
+| **（v10）** 非再実装 finding | [`discussion_r3794446604`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446604)、[`discussion_r3794446609`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446609)、[`discussion_r3794153887`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153887)、[`discussion_r3794153890`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153890) | 前HEADで addressed。今回再実装・弱体化しない |
+| **（v10）** 旧 proposal / approval / route | **非流用** | v9 の `#5313111564` / `#5313331045` / `#5313362865` 等は本ラウンドへ流用しない |
+| **（v10）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v10）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v10）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v10）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v10）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v10）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 
 ## 次アクション
 
@@ -4307,6 +4336,8 @@ cleanup execution に流用しない。
 - [x] **（v8）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（本コミット）
 - [ ] **（v9）** CursorによるB8(9) verified `RUN_ROOT` handle保持・A7 marker write/flush/close/durability失敗伝播・setup Case A/B・cursor.md最小同期の固定4ファイル実装（tip 未確定）
 - [ ] **（v9）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v10）** Cursorによる fresh-writer `LeafContainmentCapability` 同期・setup 矛盾解消・cursor.md 最小同期・decisions v10 追記の固定4ファイル実装（tip 未確定）
+- [ ] **（v10）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

@@ -62,6 +62,8 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   （詳細は正本 A8）。**
   **leaf containment（`LeafContainmentCapabilityGate`）**: `RUN_INSTANCE_MARKER` と payload regular file は
   create-new 成功〜初回 content write 完了までの leaf containment を OS/API で証明できる場合のみ write。
+  writer の fresh 成功経路は **`platform=windows_native`、または `leaf_containment_capability=demonstrated`
+  を実証できる環境に限定**する。Linux/WSL の現行契約プリミティブだけでは `demonstrated` にならず、
   証明不能は content write 前 `path_safety_unknown`（pathname 単発照合・短時間窓・post-write scan 等は
   安全代替にしない。詳細は正本 A7/A8）。**
   **A8: payload entry へ 1回でも write mutation 成功後の short write / flush / close 失敗は

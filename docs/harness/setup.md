@@ -281,13 +281,19 @@ A8=payload、A9=completion provenance）。
 EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write/cleanup deleteより前に
 停止することを各否定例で観測する（`ai-workflow.mdc` の EARLY呼禁止節を構造grepで確認可能）。
 
-- **fresh `.cache` missing — writer成功**: `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` が
-  missing でも、writer が `CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` を各1段作成→直後再検証後、
+- **fresh `.cache` missing — writer成功（Windows native または LeafContainmentCapability 実証環境）**:
+  **前提**: `platform=windows_native`、または `leaf_containment_capability=demonstrated` を現行の同一
+  UID/SID 非協調 process 脅威モデルに対し OS/API として実証できる環境に限定。Linux/WSL で現行契約
+  プリミティブ（open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）のみの場合は
+  本成功例には到達しない（下記「Linux/WSL … content write 前停止」否定例を参照）。
+  `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` が missing でも、writer が
+  `CACHE_ROOT`→`SCRATCH_BASE`→`LOCK_BASE`→`LOCK_ROOT` を各1段作成→直後再検証後、
   `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→
   **fresh 256-bit `instance_nonce` 生成→`RUN_INSTANCE_MARKER` create-new/read-back→commitment 算出**→
   payload write→`scratch-completion/v2`（`instance_commitment` のみ）作成を確認する
   （`RUN_LOCK` 前に run 側を作成しない。marker 検証前に payload を書かない）。
-- **fresh writer bootstrap成功**: `LOCK_ROOT` missing かつ `RUN_ROOT` missing で、
+- **fresh writer bootstrap成功（Windows native または LeafContainmentCapability 実証環境）**: 上記と同一
+  前提。`LOCK_ROOT` missing かつ `RUN_ROOT` missing で、
   lock bootstrap（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` のみ1段作成→直後再検証）後に
   `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` 作成→
   marker 作成・検証→payload write→`scratch-completion/v2` 作成を確認する。
@@ -326,9 +332,15 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   non-blocking exclusive取得する。取得直後にopened handleと現在の `RUN_LOCK` path entryの
   stable file identity（`FILE_ID_INFO`相当）をexact照合し、一致した場合のみlock保持中に
   `RUN_ROOT` へ書込できることを確認する（`OpenOrCreate`一発の陽性経路は使わない）。
-- **Linux/WSL identity-root・lock取得成功**: `id -u`→`getent passwd`第6フィールドで
+- **Linux/WSL identity-root・lock取得成功（lock まで。content write 前停止）**: `id -u`→`getent passwd`第6フィールドで
   `TRUSTED_HOME` が得られ、mountinfo 評価・symlink/owner/mode/ACL/special/canonical検証後、
-  `flock` non-blocking exclusive 取得→lock保持中に `RUN_ROOT` 書込→completion record作成を確認する。
+  `flock` non-blocking exclusive 取得まで成功することを確認する。**現行契約プリミティブ
+  （open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）だけでは
+  `leaf_containment_capability=demonstrated` にならないため、A7/A8 の最初の content write 前に
+  `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false`
+  `completion_record_created=false` となり、`RUN_ROOT` への marker/payload content write・
+  completion record 作成へ進まない**（`discussion_r3795298185` / `discussion_r3800278015` の
+  fail-closed 契約と Linux/WSL 無条件 writer 成功例の矛盾を解消）。
 - **Windows / Linux 不一致停止（否定例・EARLY）**: `TRUSTED_HOME=C:\Users\alice` かつ
   `USERPROFILE=C:\Temp\fake`、または getent home=`/home/alice` かつ `HOME=/tmp/fake` を渡し、
   `result=blocked`、`stop_reason=identity_root_mismatch`、`scratch_created=false`、`cleanup=false`
@@ -532,13 +544,16 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`
   `external_target_written=false` となり、directory create mutation 前に停止し外部 target 未変更のまま
   であることを確認する（write-then-detect / create-then-detect 禁止）。
-- **leaf containment capability 不成立（否定例・A7/A8・Case B・discussion_r3794153890）**:
+- **leaf containment capability 不成立（否定例・A7/A8・Case B・discussion_r3794153890 /
+  discussion_r3795298185 / discussion_r3800278015）**:
   marker または payload regular file の create-new 成功後、初回 content write 前に `RUN_ROOT` 外
-  rename escape または external hard-link 追加を OS/API で排除できることを証明不能な状況を渡し、
-  `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false`
-  `external_target_written=false` となる。create-new 済みの場合は `create_new_attempted=true` を
-  実順序どおり肯定し residue を隠さない（marker: `instance_marker_created=true`；
-  payload 未write: `payload_written=false`）。「たぶん安全」で content write へ進まないことを確認する。
+  rename escape または external hard-link 追加を OS/API で排除できることを証明不能な状況を渡す
+  （**Linux/WSL で open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding のみが
+  利用可能な場合を含む**）。`result=blocked` `stop_reason=path_safety_unknown`
+  `content_write_attempted=false` `external_target_written=false` となる。create-new 済みの場合は
+  `create_new_attempted=true` を実順序どおり肯定し residue を隠さない（marker:
+  `instance_marker_created=true`；payload 未write: `payload_written=false`）。
+  payload write・completion record 作成へ進まないことを確認する。
 - **payload mutation 後の flush/close 失敗（否定例・A8・discussion_r3793893860）**: payload entry へ
   1回以上 write mutation 済みの後に short write・後続 write 失敗・`flush` 失敗・`close` 失敗、または
   content が完全 committed/durable でない equivalent 状態を渡し、`result=blocked`
@@ -587,7 +602,8 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 
 | 入力 | 期待出力 | EARLY証明 |
 |---|---|---|
-| fresh `.cache` missing（writer） | `scratch_created=true`（bootstrap 後 lock→run 作成→marker→payload） | `RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成。marker 検証前 payload 未作成 |
+| fresh `.cache` missing（writer・Windows native または LeafContainmentCapability 実証環境） | `scratch_created=true`（bootstrap 後 lock→run 作成→marker→payload） | 成功例は `platform=windows_native` または `leaf_containment_capability=demonstrated` に限定。`RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成。marker 検証前 payload 未作成 |
+| Linux/WSL 現行プリミティブのみ（open descriptor / `flock` / mode / ancestor binding） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `completion_record_created=false` | A7/A8 最初の content write 前停止。payload write・completion 未作成（`discussion_r3795298185` / `r3800278015`） |
 | existing safe `RUN_ROOT`（writer） | `result=blocked` `stop_reason=run_root_collision` `instance_marker_created=false` `payload_written=false` | A6 collision。marker/payload 前に停止 |
 | cross-host/profile 同 `repo_slug/run_id` | `result=blocked` `stop_reason=provenance_mismatch` `cleanup=false` `approval_reusable=false` | B6 marker commitment と v2 不一致で inventory/cleanup 未宣言 |
 | marker missing/invalid | `result=blocked` `stop_reason=provenance_unknown` `cleanup=false` | B4/B6 で marker 必須。v1 受理・推測昇格なし |
@@ -624,7 +640,7 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | pre-write binding capability不明 | `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` | create-new/handle/path binding 証明不能。pathname write へ進まない |
 | ancestor directory / `RUN_ROOT` bind 不能（A6後symlink/reparse置換） | `create_new_attempted=false` `content_write_attempted=false` `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` `external_target_written=false` | A7/A8 create-new 前停止。create-new 後のみの ancestor チェックでは不足 |
 | payload directory parent 差し替え（Case A） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | A8 PreDirCreateAncestorBind 失敗。directory create 前停止 |
-| leaf containment capability 不成立（Case B） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `external_target_written=false` | create-new 済みなら `create_new_attempted=true` を肯定。content write 前停止 |
+| leaf containment capability 不成立（Case B・Linux/WSL 現行プリミティブのみを含む） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `external_target_written=false` | create-new 済みなら `create_new_attempted=true` を肯定。content write 前停止 |
 | payload mutation 後 flush/close 失敗 | `result=blocked` `payload_written=true` `completion_record_created=false` `auto_cleanup=false` | 不完全 payload 残留を肯定。成功丸め禁止 |
 | cleanup 中 `RUN_ROOT` rename/replacement（Case A・discussion_r3794446604） | `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false` | verified root handle 保持不能。external/replacement target への delete mutation なし |
 | marker create-new 後 write/flush/close/durability 失敗（Case B・discussion_r3794446609） | `result=blocked` `instance_marker_created=true` `payload_written=false` `completion_record_created=false` `auto_cleanup=false` | A8/completion/auto cleanup/repair/resume 未進入。cached read-back のみで success 化しない |

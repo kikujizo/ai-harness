@@ -185,16 +185,31 @@ Cursor-specific rules only:
   `stop_reason=path_safety_failed`（content write しない。A8 未進入）。
   一致を証明不能 → `path_safety_unknown`（content write しない。A8 未進入）。
   **LeafContainmentCapabilityGate（marker content write の前。create-new 成功後・初回 content write
-  完了まで）**: OS/API として、create-new 成功から初回 content write 完了までの間に leaf が
-  `RUN_ROOT` 外へ rename escape できないこと、および同一 entity への external hard-link 等の
-  外部参照追加を排除できることを証明できる場合のみ content write へ進む。
-  **以下だけでは safe とみなさない（禁止）**: pathname identity の単発照合のみ；短い時間窓；
-  協調 process 前提；post-write scan；同一 handle 保持のみ；rename/hard-link 隙間が残る
-  link-count 単発比較のみ。
-  上記 containment capability を証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
-  `completion_record_created=false` `content_write_attempted=false`。create-new は実施済みのため
-  `instance_marker_created=true` と肯定記録し residue を隠さない。content write は実行しない。
-  A8 未進入。write-then-detect / auto_cleanup / auto_repair / auto_resume 禁止。
+  完了まで。path/handle identity 照合の直後・最初の content write の直前。必須）**: 分類入力:
+  `platform`（`windows_native` | `linux_or_wsl` | `other`）、`leaf_containment_capability`
+  （`demonstrated` | `not_demonstrated`）、`write_phase`（`before_first_content_write` |
+  `after_first_content_write`）。`demonstrated` は、現行の同一 UID/SID 非協調 process 脅威モデルに
+  対し、create-new 成功から最初の content write 完了まで、leaf の `RUN_ROOT` 外 rename/replace と
+  同一 entity への external hard-link 追加を OS/API として排除できることのみ。writer の fresh 成功経路
+  （最初の content write 成功）は **`platform=windows_native`、または
+  `leaf_containment_capability=demonstrated` を OS/API 実証できる環境に限定**する。
+  **以下だけでは `leaf_containment_capability=demonstrated` とみなさない（禁止）**: 単なる宣言；
+  platform 名；lock 取得；open descriptor 保持；mode / ACL；ancestor / `RUN_ROOT` binding；直前確認；
+  pathname identity の単発照合のみ；短い時間窓；協調 process 前提；post-write scan；同一 handle
+  保持のみ；rename/hard-link 隙間が残る link-count 単発比較のみ。**Linux/WSL の現行契約プリミティブ
+  集合（open descriptor + non-blocking exclusive `flock` + file mode + ancestor / `RUN_ROOT` binding）
+  だけでは、同一 UID 非協調 process の rename / replace / external hard-link を初回 content write
+  完了まで排除できず `not_demonstrated`** とする。
+  IF `leaf_containment_capability=demonstrated` AND (`platform=windows_native` OR capability が
+  OS/API として実証済み):
+    THEN 既存契約どおり `WRITE_TARGET` 経由の content write へ進む（create-new 後の pathname 再 open
+    初回 write 禁止は維持）。
+  ELSE（`write_phase=before_first_content_write`。Linux/WSL で現行プリミティブだけでは
+  `not_demonstrated` を含む）:
+    EARLY STOP: `result=blocked` `stop_reason=path_safety_unknown`
+    `completion_record_created=false` `content_write_attempted=false`。create-new は実施済みのため
+    `instance_marker_created=true` と肯定記録し residue を隠さない。content write は実行しない。
+    A8 未進入。write-then-detect / auto_cleanup / auto_repair / auto_resume 禁止。
   照合成功後のみ、canonical schema `scratch-instance/v1`（各 field LF・末尾 LF。extra/重複/欠落/
   順序違いは invalid）の content を **WRITE_TARGET 経由のみ**で write する（複数回 write が必要なら
   同一 WRITE_TARGET を使用。**create-new 後の pathname 再 open による初回 content write / truncate
@@ -262,17 +277,19 @@ Cursor-specific rules only:
   不一致（観測可能）→ `path_safety_failed`。**まだ当該 entry へ一度も write していない場合は
   `payload_written=false`。** 一致を証明不能 → `path_safety_unknown`（content write しない）。
   **LeafContainmentCapabilityGate（leaf content write の前。create-new 成功後・初回 content write
-  完了まで）**: OS/API として、create-new 成功から初回 content write 完了までの間に leaf が
-  `RUN_ROOT` 外へ rename escape できないこと、および同一 entity への external hard-link 等の
-  外部参照追加を排除できることを証明できる場合のみ content write へ進む。
-  **以下だけでは safe とみなさない（禁止）**: pathname identity の単発照合のみ；短い時間窓；
-  協調 process 前提；post-write scan；同一 handle 保持のみ；rename/hard-link 隙間が残る
-  link-count 単発比較のみ。
-  上記 containment capability を証明不能 → `result=blocked` `stop_reason=path_safety_unknown`
-  `content_write_attempted=false` `external_target_written=false`。**まだ当該 entry へ一度も
-  write していない場合は `payload_written=false`。** create-new は実施済みのため
-  `create_new_attempted=true` と肯定記録し residue を隠さない。content write は実行しない。
-  write-then-detect / auto_cleanup / auto_repair / auto_resume 禁止。
+  完了まで。path/handle identity 照合の直後・最初の content write の直前。必須）**: A7 (3) の
+  `LeafContainmentCapabilityGate` と同一の分類入力・`demonstrated` 定義・非成立リスト・分岐を適用する
+  （writer fresh 成功経路は `platform=windows_native`、または `leaf_containment_capability=demonstrated`
+  を OS/API 実証できる環境に限定。Linux/WSL の現行契約プリミティブだけでは `not_demonstrated`）。
+  IF `leaf_containment_capability=demonstrated` AND (`platform=windows_native` OR capability が
+  OS/API として実証済み):
+    THEN 既存契約どおり当該 entry の `WRITE_TARGET` 経由の content write へ進む。
+  ELSE（`write_phase=before_first_content_write`）:
+    EARLY STOP: `result=blocked` `stop_reason=path_safety_unknown`
+    `content_write_attempted=false` `external_target_written=false`。**まだ当該 entry へ一度も
+    write していない場合は `payload_written=false`。** create-new は実施済みのため
+    `create_new_attempted=true` と肯定記録し residue を隠さない。content write は実行しない。
+    write-then-detect / auto_cleanup / auto_repair / auto_resume 禁止。
   初回 write と同一 file への継続 write を **WRITE_TARGET 経由のみ**で行う
   （**create-new 後の pathname 再 open による初回 content write / truncate は禁止**）。
   いずれかの payload entry へ **1回でも** write mutation（bytes 書込）が成功した後に、
@@ -510,12 +527,16 @@ Cursor-specific rules only:
   writer bootstrap（safe create: Linux/WSL `0700`・Windows safe owner/DACL） → writer `RUN_LOCK`
   （create-new/open-existing区別 + 取得直後 handle/path identity binding） → writer `RUN_ROOT`
   collision / create → **`RUN_INSTANCE_MARKER` create-new + pre-write handle binding +
-  LeafContainmentCapabilityGate（Linux/WSL `0600`固定・Windows safe owner/DACL。canonical content は
-  create-new handle 経由のみ。pathname 再 open 初回 write 禁止）+ verify** → payload directory ごとの
+  LeafContainmentCapabilityGate（create-new 後・初回 content write 前。`leaf_containment_capability=demonstrated`
+  かつ（`platform=windows_native` または OS/API 実証済み）の場合のみ content write へ。Linux/WSL `0600`
+  固定・Windows safe owner/DACL は **create 属性契約**であり gate 成立根拠にしない。現行契約プリミティブ
+  （open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）だけでは
+  `demonstrated` にならない。canonical content は create-new handle 経由のみ。pathname 再 open 初回
+  write 禁止）+ verify** → payload directory ごとの
   PreDirCreateAncestorBind + bound-parent one-level create-new + ImmediatePostCreateVerify →
   payload regular file ごとの create-new + pre-write handle binding +
-  LeafContainmentCapabilityGate（既存 entry/hard link 先置きは open/truncate 禁止。pathname 再 open
-  初回 write 禁止。cleanup互換属性 + completion前の全descendant再検証） →
+  LeafContainmentCapabilityGate（A7 と同一 gate 契約。既存 entry/hard link 先置きは open/truncate 禁止。
+  pathname 再 open 初回 write 禁止。cleanup互換属性 + completion前の全descendant再検証） →
   completion v2 provenance（`residue=present` only・作成直前 handle/path identity 再確認） →
   cleanup provenance v2 + named chain read-only → cleanup existing `RUN_LOCK`（取得直後 handle/path
   identity binding） → recursive path safety → **local marker commitment ↔ completion v2 exact binding** →

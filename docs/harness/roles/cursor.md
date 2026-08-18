@@ -38,8 +38,10 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   **A4 では各 missing component について trusted anchor→parent へ create 前
   **PreDirCreateTrustedChainContainment**（`chain_containment_capability=demonstrated`）を証明し、
   chain handle を create+ImmediatePostCreateVerify 完了まで保持してから 1 段作成する（chain containment
-  証明不能は directory create 前 `path_safety_unknown` `create_dir_attempted=false`）。`RUN_LOCK`
-  取得後に `RUN_BASE`/`RUN_ROOT` を作成する（A6 も同一 chain 契約。`RUN_LOCK` 順序は A4 より前倒ししない）**、**payload 前に fresh 256-bit `instance_nonce` と
+  証明不能は directory create 前 `path_safety_unknown` `create_dir_attempted=false`。
+  create 成功後の ImmediatePostCreateVerify 失敗時の肯定記録＋fail-closed は正本 A4-7 参照）。`RUN_LOCK`
+  取得後に `RUN_BASE`/`RUN_ROOT` を作成する（A6 も同一 chain 契約・post-create verify 失敗時は正本 A4-7 参照。
+  `RUN_LOCK` 順序は A4 より前倒ししない）**、**payload 前に fresh 256-bit `instance_nonce` と
   `RUN_INSTANCE_MARKER`（create-new/read-back）を作成**する。既存 safe `RUN_ROOT` は
   `run_root_collision` で blocked（再利用・resume 禁止）。completion は `scratch-completion/v2`
   （`instance_commitment` のみ。v1 非受理。**`run_state=completed` / `residue=present` only**——
@@ -68,7 +70,8 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   **payload directory**: 各 one-level create 前に正本 A8 の **PreDirCreateTrustedChainContainment**
   （A4-4〜A4-7 参照。trusted anchor→`parent(D)` を各段独立に再取得・再検証。mutation 前 containment
   必須）。`chain_containment_capability=demonstrated` のみ bound-parent one-level create-new。
-  証明不能は create 前 `path_safety_unknown` `create_dir_attempted=false`（詳細は正本 A8）。**
+  証明不能は create 前 `path_safety_unknown` `create_dir_attempted=false`。
+  create 成功後の ImmediatePostCreateVerify 失敗時の肯定記録＋fail-closed は正本 A8（A4-7 同一契約）参照）。**
   **leaf containment（`LeafContainmentCapabilityGate`）**: `RUN_INSTANCE_MARKER` と payload regular file は
   create-new 成功〜初回 content write 完了までの leaf containment を OS/API で証明できる場合のみ write。
   writer の fresh 成功経路は **`leaf_containment_capability=demonstrated` を実証できる環境に限定**する

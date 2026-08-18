@@ -146,6 +146,16 @@ Cursor-specific rules only:
   **Windows**: create時点から current SID / SYSTEM / BUILTIN\Administrators 以外へ
   write/modify/delete相当を与えない owner/DACL を要求する。作成直後に owner/DACL/reparse/type/
   canonical boundary を再検証し、unsafe は `path_safety_failed`、評価不能は `path_safety_unknown`。
+  **`create_phase=after_dir_create` で ImmediatePostCreateVerify の outcome が `unsafe` または `unknown` の場合**
+  （directory create-new 成功後）: EARLY STOP。`result=blocked`
+  `stop_reason=path_safety_failed`（unsafe）または `path_safety_unknown`（unknown）。
+  directory create は実施済みのため `create_dir_attempted=true` と肯定記録し、作成済み
+  directory/residue を隠さない（存在しなかったものとして省略・隠さない）。create 前の
+  `create_dir_attempted=false` と混同しない。`completion_record_created=false`
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false`。completion record 作成・
+  unsafe entry の chmod/ACL 修復・作成済み unsafe entry の自動削除/GC・後続 directory 段の create・
+  A8 leaf create/write（A8 経路）・A5 以降への前進（A4 経路で lock bootstrap dir が失敗した場合の
+  既存禁止は維持）へ進まない。新 stop reason は発明しない。
   複数段一括作成・再検証省略・別 path 作成・unsafe entry の chmod/ACL 修復（A4-9）・作成済み unsafe entry の
   自動削除は禁止（A4-9）。(A4-8) 他 process が先に作成した場合は自分の create 成功とみなさず、existing entry として
   read-only 再検証する。安全性不明・型不一致は blocked。bootstrap 失敗時は `RUN_LOCK`/`RUN_BASE`/
@@ -178,6 +188,10 @@ Cursor-specific rules only:
   chain containment 証明不能 → 当該 create 前 `path_safety_unknown` `create_dir_attempted=false`。
   `RUN_ROOT` missing も verified `RUN_BASE` へ同様（A6-3）。証明不能なら当該 create 前
   `path_safety_unknown` `create_dir_attempted=false`。
+  create 成功後の ImmediatePostCreateVerify 失敗は A4-7 と同一（`create_dir_attempted=true` で
+  作成済み directory/residue を肯定記録。`completion_record_created=false`
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false`。create 前の
+  `create_dir_attempted=false` と混同しない）。
   （いずれも A4 と同一の Linux/WSL `0700` 固定・Windows safe owner/DACL 要求規則を A4-7 で適用する。
   pathname 事前 check + create + post-check だけを成功条件にしない。即時親だけの
   PreDirCreateParentBind 単独は不十分）。
@@ -292,7 +306,11 @@ Cursor-specific rules only:
   無条件流用しない。
   `chain_containment_capability=demonstrated` の場合のみ、chain handle 保持中に bound parent から
   D を 1 段 create-new し（A4-6）、ImmediatePostCreateVerify(D) 完了まで保持する（A4-7。完了前に
-  handle を解放しない）。Windows native では必要な chain handle の delete sharing 拒否を含む
+  handle を解放しない）。create 成功後の ImmediatePostCreateVerify(D) 失敗（`unsafe`/`unknown`）は
+  A4-7 と同一（`create_dir_attempted=true` で作成済み directory/residue を肯定記録。
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`。
+  create 前の `create_dir_attempted=false` と混同しない）。当該段の verify 失敗時は後続段・leaf へ
+  進まない。Windows native では必要な chain handle の delete sharing 拒否を含む
   enforcing contract。Linux/WSL/other で同等保証を実証できない段は当該 create 前に
   `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` で停止し、
   後続段・leaf へ進まない（directory mutation なし。mkdir/mkdirat/CreateDirectory 呼出0。

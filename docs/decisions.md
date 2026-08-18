@@ -4290,6 +4290,22 @@ cleanup execution に流用しない。
 | **（v13）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v13）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 | **（v13）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v12 記録と同型 |
+| **（v14）** current finding | [`discussion_r3802203073`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3802203073)（A4/A6/A8 directory create 成功後 ImmediatePostCreateVerify 失敗時の肯定記録＋fail-closed。create 前 `create_dir_attempted=false` との区別） | 固定4ファイル文書契約のみ |
+| **（v14）** canonical proposal（route=cursor） | 固定 | [#5325742959](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5325742959) |
+| **（v14）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5326049149](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5326049149) |
+| **（v14）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5326063070](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5326063070) |
+| **（v14）実装開始時HEAD** | `0de1148461991e274f377c39c957bf98ac79d209` | 本ラウンドの実装起点 |
+| **（v14）** 旧 proposal / approval / route | **非流用** | v13 の `#5324709516` / `#5324824239` / `#5324841376` を含む。本 scope へ流用しない |
+| **（v14）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | SPEC_IMPACT:none。新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v14）** 採用方針 | A4/A6/A8 directory create 成功後 ImmediatePostCreateVerify `unsafe`/`unknown` は `create_dir_attempted=true` で residue 肯定記録。completion 未作成。既存 stop reason のみ。`auto_*`=false | v13 の create 前 fail-closed（`create_dir_attempted=false`）は非退行。A7 marker 肯定記録パターンを directory 用に文章模倣（新フィールド名は発明しない） |
+| **（v14）** 保証不能時 | 上記 fail-closed。新 stop reason なし | create 前経路の `create_dir_attempted=false` は維持 |
+| **（v14）** カテゴリ③と④の分離 | 本ラウンドはカテゴリ③（文書正本変更）のみ。実cleanup（カテゴリ④）は別発効点 | merge / execution / 実cleanup は未承認・未実施 |
+| **（v14）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v14）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v14）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v14）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v14）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v14）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v13 記録と同型 |
 
 **（v13）採用方針（段落）**: A8 の payload nested directory は、one-level 各段 D について trusted anchor
 `TRUSTED_HOME`→`parent(D)` へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** を参照適用する。
@@ -4298,6 +4314,14 @@ cleanup execution に流用しない。
 1 段 create-new し ImmediatePostCreateVerify(D) 完了まで保持する。保証不能 platform/段は create 前
 `path_safety_unknown` `create_dir_attempted=false` で fail-closed とする（A4/A6 本文・A7/A8 leaf
 9条件一体契約・public schema は非退行）。
+
+**（v14）採用方針（段落）**: A4/A6 bootstrap と A8 payload directory 各 one-level 段について、
+directory create-new 成功後の ImmediatePostCreateVerify(D) が `unsafe` または `unknown` のときは
+`create_dir_attempted=true` で作成済み directory/residue を肯定記録し、`result=blocked` と既存
+`path_safety_failed`/`path_safety_unknown` のみで停止する。`completion_record_created=false`
+`auto_cleanup=false` `auto_repair=false` `auto_resume=false` とし、create 前の
+`create_dir_attempted=false` と混同しない。A7 marker の肯定記録文を directory 用に文章模倣するが、
+新フィールド名は発明しない。後続段・leaf・completion・auto_* へ進まない（create 前経路は非退行）。
 
 ## 次アクション
 
@@ -4410,6 +4434,8 @@ cleanup execution に流用しない。
 - [ ] **（v12）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] **（v13）** CursorによるA8 payload directory PreDirCreateTrustedChainContainment参照適用・setup否定例・cursor.md最小同期・decisions v13追記の固定4ファイル実装（tip 未確定）
 - [ ] **（v13）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [x] **（v14）** CursorによるA4/A6/A8 directory create成功後ImmediatePostCreateVerify失敗時の肯定記録＋fail-closed・setup否定例・cursor.md最小同期・decisions v14追記の固定4ファイル実装（本コミットで文書契約を入れた）
+- [ ] **（v14）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

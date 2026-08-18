@@ -321,6 +321,14 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   技術的に証明できない環境を渡し、`result=blocked` `stop_reason=path_safety_unknown`
   `create_dir_attempted=false` とし、当該 missing component の directory create が行われないことを確認する
   （Linux/WSL だから mkdir 成功、等の成功例を捏造しない）。
+- **A4/A6/A8 directory create成功後 ImmediatePostCreateVerify unsafe/unknown（否定例）**:
+  A4/A6 または A8 payload directory 各段で directory create-new 成功後、ImmediatePostCreateVerify が
+  `unsafe` または `unknown` となる状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（unsafe）または `path_safety_unknown`（unknown）
+  `create_dir_attempted=true`、作成済み directory/residue を肯定記録、
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  となることを確認する（create 前の `create_dir_attempted=false` と混同しない。自動
+  cleanup/repair/resume へ進まない。後続段・leaf 未進入）。
 - **existing `RUN_ROOT` collision（否定例・EARLY）**: `RUN_LOCK` exclusive 取得後、
   `RUN_ROOT` が既に safe directory として存在する状況を渡し、`result=blocked`
   `stop_reason=run_root_collision` `instance_marker_created=false` `payload_written=false`
@@ -654,6 +662,7 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | `LOCK_ROOT` 親 safety 不明 | `result=blocked` `stop_reason=path_safety_unknown` `run_root_created=false` | bootstrap 失敗後 marker/payload 未作成 |
 | A4/A6 chain containment 不能（Linux/WSL openat/mkdirat 含む） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` | directory create 前停止。mkdir/CreateDirectory 呼出0。pathname check→create→post-check だけを成功経路にしない |
 | A4/A6 parent bind 不能（親 rename/replace 可能・binding 未証明） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`（A4 なら `run_lock_created=false`） | directory create 前停止。即時親だけの PreDirCreateParentBind 単独を成功経路にしない |
+| A4/A6/A8 create-new 成功後 ImmediatePostCreateVerify unsafe/unknown | `result=blocked` `stop_reason=path_safety_failed`\|`path_safety_unknown` `create_dir_attempted=true` `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false` | 作成済み directory/residue を肯定。`create_dir_attempted=false` と区別。後続段/leaf/completion/auto_* 未進入 |
 | binding 証明不能環境（helper/runtime なし） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` | 当該 missing component の mkdir/create 未実行。成功例捏造なし |
 | mountinfo 評価不能 | `result=blocked` `stop_reason=path_safety_unknown` `scratch_created=false` | device ID 照合だけで pass しない |
 | `USERPROFILE`/`HOME` が `TRUSTED_HOME` と不一致 | `result=blocked` `stop_reason=identity_root_mismatch` | mkdir/marker/payload/cleanup より前に停止 |

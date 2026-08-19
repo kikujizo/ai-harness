@@ -421,9 +421,7 @@ EARLY ラベル付き否定例でも、常に mkdir 前・residue なしを意�
 - **post-approve drift（否定例）**: approve 後に provenance `updated_at` または path safety が
   pre-approval と不一致の状況を渡し、`result=blocked` `stop_reason=approval_stale` `cleanup=false`
   `path_created=false` となることを確認する。
-- **approve後 lock再取得・削除完了まで保持**: approve後に古いlock結果を流用せず `RUN_LOCK` を
-  再取得し、canonical/path safety/run_state/inventoryを全再検証したうえで削除し、
-  `RUN_ROOT` 消失確認までlockを保持することを確認する（実deleteは本PRスコープ外）。
+- **approve後 lock再取得・削除完了まで保持（正例は Windows native + demonstrated handle binding のみ）**: 人間approvalは技術ゲートを代替しない。approve後でも古いlock結果を流用せず `RUN_LOCK` を再取得し、canonical/path safety/run_state/inventoryを全再検証する。**実deleteへ進む正例は `platform=windows_native` かつ demonstrated handle binding が成立する場合に限定する**（検証済みchildを実delete targetへ束縛できる場合のみ。本PRでは実delete未実行。pathname-only delete禁止）。lock再取得やread-only再検証だけでは Linux/WSL を含む任意環境で安全にdeleteできる根拠にしない。**Linux/WSLで検証済みchildと実delete targetを安全にbindingできない場合は、最初のdelete mutationより前にfail-closed停止する**: `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false`（既存B8(9)どおり `approval_reusable=false` も維持。新しいstop reasonは作らない）。削除完了確認まで、Windows正例では再取得した同じ opened lock handle を保持することを確認する。
 - **中断・部分失敗・確認不能**: cleanup中断・部分失敗・結果確認不能を成功扱いせず、
   `stop_reason=cleanup_interrupted` または `cleanup_result_unknown` で `blocked` とし、
   残留再検出と前回approve再利用禁止を確認する。
@@ -464,9 +462,7 @@ EARLY ラベル付き否定例でも、常に mkdir 前・residue なしを意�
   絶対パスcommand）で解決できない場合は `result=blocked` `stop_reason=identity_root_unresolved` となり、
   差し替え可能な `PATH` 上のcommand結果を `CURRENT_UID`/`TRUSTED_HOME` の正本として採用しないことを
   確認する。
-- **umask=0002下でのmarker safe mode成功**: `umask 0002` 環境で `RUN_INSTANCE_MARKER` を作成する状況を
-  渡し、requested/observed modeがumaskに関わらず `0600` exactで作成され、直後のpath safety再検証に
-  合格し、payload/completionへ進めることを確認する（正例）。
+- **umask=0002下でのmarker safe mode成功（payload/completion進行は `leaf_containment_capability=demonstrated` 必須）**: `umask 0002` 環境で `RUN_INSTANCE_MARKER` を作成する状況を渡し、requested/observed modeがumaskに関わらず `0600` exactで作成され、owner/path-safety確認に合格することを確認する。**marker mode `0600` と owner/path-safety確認だけでは payload/content write へ進めない。** payload/completionへ進む正例には **`leaf_containment_capability=demonstrated` を明示前提**として追加する。`leaf_containment_capability` が未実証の場合は、marker属性確認が成功していても最初のcontent write前にfail-closed停止する（既存A7: `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `completion_record_created=false`。create-new実施済みなら `instance_marker_created=true` と肯定記録しresidueを隠さない。A8未進入。新しいstate field/schemaは追加しない）。未実証時にpayload/completion成功を期待するtest caseにしない。
 - **marker unsafe mode拒否（否定例・A7）**: `RUN_INSTANCE_MARKER` の作成直後のobserved modeが `0600`
   exactでない（例: umask由来の `0664`）状況を渡し、`result=blocked` `stop_reason=path_safety_failed`
   `payload_written=false` `completion_record_created=false` となり、unsafe markerを正常completionへ

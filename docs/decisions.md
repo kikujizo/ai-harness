@@ -4,6 +4,90 @@
 
 ---
 
+# Decision: PR #152の4つの正本変更（executor軸・revert副作用範囲・G6独立verdict引用・Codex単一技術PM）
+
+Date: 2026-08-19
+Status: Accepted
+Related Issues: #144, #154
+Related PRs: #152
+
+## 決定事項
+
+Issue #144 / PR #152 で採択された4つの設計判断を正本として記録する。
+
+1. `executor` を実装 `route` とは別軸として定義する。`route`（`cursor|claude-code`）は実装AI選定用、`executor`（`cursor|claude-code|codex|human_local_operator`）は `scope=execution|settings_apply` の発効点で使用する別fieldとする。
+2. revert可逆性を git 差分だけでなく、実行後に発生した送信・公開・migration 等の副作用まで含めて判定する。「`git revert`で完全に戻せる変更は通常リスク」に、副作用の可逆性で上書きする条件を追記する。
+3. G6 merge実行者は既存の独立verdict（G2の`REVIEW_VERDICT`、G5の`PM_VERDICT`）の exact URL を引用し、自分で G1〜G6 を再判定しない。引用元の PR番号・対象HEAD SHA・紐づくIssue番号が現在のmerge対象と完全一致しない場合、G6は不成立とする。
+4. Codex を、評価・リスク分類・ルーティング・独立技術レビュー・最終判断を一貫して担当する単一の技術PMとして表記統一する。「Codex PM評価」「Codex PM判断」等の表記ゆれを、同一Codexによる工程遷移として読める文体へ統一する。
+
+Status=Accepted は「4つの設計判断が Issue #144 / PR #152 で既に採択されている」記録であり、PR #152 の merge 承認、人間approve、settings_apply、execution を意味しない。
+
+## 背景・課題
+
+Issue #144（https://github.com/kikujizo/ai-harness/issues/144）は、AGENTS.md 正本に対する4項目の縦切りCheckpointである。`executor`契約新設、revert可逆性の等式修正、G6独立verdict引用ルール、Codex体制記述のActor≠Gate表記統一のいずれもPM判定=可に到達し、PR #152（固定HEAD `e7223217cb353b997035b9a3f49f98302f3e8689`）で `AGENTS.md` と `docs/harness/roles/chatgpt.md` への反映が実装済みである。
+
+PR #152 は固定HEAD `e7223217cb353b997035b9a3f49f98302f3e8689` で要件レビュー・独立技術レビュー・必須CI・`HIGH_RISK_TECH_GATE: passed`（https://github.com/kikujizo/ai-harness/pull/152#issuecomment-5339670836）まで一度成立した。しかしカテゴリ③必須の Decision Log が main の `docs/decisions.md` に無いため、Codex経路判定（https://github.com/kikujizo/ai-harness/pull/152#issuecomment-5339855020）では `DECISION_LOG_STATE: missing` / `MERGE_PROPOSAL_STATE: blocked` となり、merge-scope の canonical pending proposal は発行されない。
+
+Decision Log を PR #152 へ後付けすると、同PRの HEAD / manifest / CI / review / tech gate の対象が変わるため、Codexは当該案を却下し、別Checkpoint（Issue #154）の別PRで先行成立させる経路を推奨した。本エントリはその記録である。
+
+## 採用する方針
+
+- 上記4点を `docs/decisions.md` の正本 Decision Log として記録する
+- 本エントリは PR #152 の merge承認、人間approve、settings_apply、execution を意味しない
+- 旧 `HIGH_RISK_TECH_GATE: passed`（PR #152 固定HEAD `e7223217cb353b997035b9a3f49f98302f3e8689` 基準）を自動流用しない
+- Issue #154 自身は Codex 判定 `risk=normal`（https://github.com/kikujizo/ai-harness/issues/154#issuecomment-5339953368）。親PR #152 はカテゴリ③ `risk=high` のまま。通常リスク判定を親PRへ流用しない
+- Decision Log 専用PRは PR #152 の `implementation_start` 承認・route・レビュー・`HIGH_RISK_TECH_GATE` を流用せず、独立した手続きを経る
+
+## 採用しない方針 / 却下した代替案
+
+- **executor契約をIssueコメント等だけに残し、実効正本へ定義しない案**: メリット / Issue本文への記載だけで迅速に合意を残せる / デメリット / AGENTS.mdだけを読むAIは拘束されず、ai-dev-workflow等の実運用契約と正本が乖離する / 却下理由 / Issue #144の起点は「正本に定義がない」こと自体であり、コメントのみでは再発を防げない
+- **git diff が revert可能なら、実行後副作用を問わず通常リスクとする案**: メリット / 判定が単純で機械化しやすい / デメリット / 一度送信・公開・migrationした副作用は差分revertでは戻らず、G1リスク判定が過小評価になる / 却下理由 / Issue #144でPM判定=可となった等式修正と矛盾する
+- **G6実行者自身が独立verdictを再判定する案**: メリット / merge直前に最新状態を再確認できるように見える / デメリット / G6実行者が自分に都合よくG1〜G6を書き直して即mergeする抜け道が生まれる / 却下理由 / PR #143の実運用手順（独立判定の引用merge）をルール化する方針と逆行する
+- **`Codex` と `Codex PM` を別主体と誤読できる表記を維持する案**: メリット / 既存コメント・体制図との字面一致を保てる / デメリット / 2026-08-19に技術レビュー担当CodexとPM判断担当「Codex PM」を別主体と誤読する事故が実際に発生した / 却下理由 / Actor≠Gate表記統一はIssue #144の4項目目としてPM判定=可済み
+- **Decision LogをPR #152へ後付けし、同PRの固定HEAD・manifest・CI・review・tech gate証拠を失効させる案**: メリット / 1PRで完結するように見える / デメリット / Issue manifestが2ファイルから3ファイルへ変わり、固定HEAD `e7223217cb353b997035b9a3f49f98302f3e8689` で成立したCI・レビュー・tech gate証跡をそのまま使えなくなる / 却下理由 / Codex経路判定（https://github.com/kikujizo/ai-harness/pull/152#issuecomment-5339855020）で明示的に却下
+
+## 判断理由
+
+- 4項目はIssue #144で独立して観測可能なCheckpointとして分割・PM判定=可済みであり、正本への記録だけが欠落していた
+- Decision Logを別PRで先行成立させることで、PR #152の固定HEAD証跡を汚さず、成立後に最新main基準で再判定できる
+- merge承認と設計判断の記録を分離することで、Decision Log追記をmerge承認と誤読する事故を防ぐ
+- カテゴリ③の親PR #152と、記録追記のみのIssue #154でリスク分類を混同しない
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- 記録対象の PR #152 自体はカテゴリ③の `risk=high`（`AGENTS.md` 実効ルール正本および `docs/harness/roles/chatgpt.md` の書き換え）
+- Issue #154 の Decision Log 追記自体は Codex 判定上 `risk=normal`（既存運用ルール・AI設定・CI/CD・権限・secret・データを変更せず、可逆な記録追記）
+- 本 Decision Log は PR #152 の merge承認 / 人間approve / settings_apply / execution を意味しない
+
+## 影響範囲
+
+- `docs/decisions.md` のみ（本Issue #154の実装scope）
+- 後続: 本PRが main 成立した後の PR #152 再判定（別scope）
+- 変更しない: PR #152 ソース（`AGENTS.md` / `docs/harness/roles/chatgpt.md`）、AGENTS.md、role文書、Issue #144 本文
+
+## 取り消し手順
+
+- PR #152 の正本変更を撤回する場合: 対象変更を revert し、本 Decision Log の Status を `Superseded` とする
+- 本 Decision Log 追記だけを撤回する場合: 本Issueの実装PRを `git revert`
+- PR #152 の HEAD または main 基準が変わった場合、旧固定HEAD証拠を自動流用せず再評価する
+
+## 見直す条件
+
+- PR #152 の HEAD または base/main が変わったとき
+- 4つの設計判断のいずれかが再仕様化されたとき
+- Issue #154 の scope が docs/decisions.md 以外へ広がりそうなとき（広がらず Codex PM へ戻す）
+
+## 次アクション
+
+- [ ] 本Decision LogのPRが main へ成立した後、PR #152 の最新main SHA、base、head、manifest、累積diff、CIを再取得する
+- [ ] ChatGPT要件レビューとCodex独立技術レビューを最新main基準で再確認する（差分が変わっていればやり直し）
+- [ ] その後に `HIGH_RISK_TECH_GATE` を新しい base/head で再判定する
+- [ ] 現在の旧 `HIGH_RISK_TECH_GATE: passed` を自動流用しない
+- [ ] 空の status / run 一覧を成功扱いしない
+- [ ] Decision Log と全非人間ゲート成立後にのみ、PR #152 の別scopeの merge pending proposal へ進む
+
+---
+
 # Decision: 高リスク承認状態とPM_VERDICT遷移の正本化（Issue #134）
 
 Date: 2026-08-10

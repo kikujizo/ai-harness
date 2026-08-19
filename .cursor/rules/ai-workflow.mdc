@@ -378,11 +378,16 @@ Cursor-specific rules only:
   write/modify/delete拒否（評価不能は`path_safety_unknown`）・special/type不明拒否・canonical
   boundary外拒否）を適用して再走査する。unsafeまたは判定不能なdescendantが1件でもあれば
   `scratch-completion/v2` を作成しない**（`path_safety_failed`/`path_safety_unknown`、
-  completion未作成）。**A8はpayload作成後にのみ到達するため、この再走査に失敗した場合は
-  payload作成済みの状態として `payload_written=true` `completion_record_created=false`
-  `result=blocked` を肯定的に記録する（`payload_written=false`・payload不存在とは報告しない）。
-  `auto_cleanup=false` `auto_repair=false` `auto_resume=false` とし、既存の技術ゲート（B0–B8）を
-  経ずにcleanupを開始しない。** scratch 活動終了まで lock 保持。
+  completion未作成）。unsafeまたは判定不能なdescendantが1件でもあれば EARLY STOP:
+  `result=blocked` `completion_record_created=false`
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false`。
+  いずれかの payload regular file へ **1 byte 以上の** content write mutation が成立済み
+  （`byte_write_committed=true`）なら `payload_written=true`。未成立なら `payload_written=false`。
+  いずれかの payload directory create-new が成立済みなら `create_dir_attempted=true` と
+  作成済み directory/residue を肯定記録する（隠さない）。zero-byte leaf create-new のみで
+  content write 未成立の場合は `payload_written=true` にしない。
+  既存 stop reason のみで分類し新規 stop reason は発明しない。
+  既存の技術ゲート（B0–B8）を経ずにcleanupを開始しない。** scratch 活動終了まで lock 保持。
   A9 **A8のdescendant再検証成功後のみ**、lock 保持のまま exact GitHub completion record 1件を作成
   （`record_type=scratch-completion/v2`、`repo_full_name`、`repo_slug`、`run_id`、
   `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、
@@ -392,12 +397,13 @@ Cursor-specific rules only:
   `residue=none` を成立させる別 writer フローは新設しない）**）。
   作成直前に、保持している opened lock handle と現在の `RUN_LOCK` path entry の file identity を
   再確認する（不一致 → `path_safety_failed`、判定不能 → `path_safety_unknown`。いずれも blocked、
-  completion 未作成。**A8 は既に成功しておりpayloadは作成済みのため、この分岐は
-  `payload_written=true` `completion_record_created=false` `result=blocked` として記録する
-  （`payload_written=false` と報告してはならない）。`auto_cleanup=false` `auto_repair=false`
-  `auto_resume=false` とし、payloadは作成済み・残留し得る状態として
-  recovery/residue処理のために記録を保持する。cleanupは
-  既存の技術ゲート（B0–B8）を経ずに開始しない**）。
+  completion 未作成。**`payload_written` は `byte_write_committed` から導出する**：いずれかの
+  payload regular file へ 1 byte 以上の content write mutation が成立済みなら
+  `payload_written=true`、未成立なら `payload_written=false`。A8 の descendant 再検証成功または
+  A8 到達を `payload_written=true` の十分条件にしない。directory create-new のみ成立済みなら
+  `create_dir_attempted=true` と作成済み directory/residue を肯定記録する。
+  `completion_record_created=false` `result=blocked` `auto_cleanup=false` `auto_repair=false`
+  `auto_resume=false` とし、cleanupは既存の技術ゲート（B0–B8）を経ずに開始しない**）。
   **`scratch-completion/v1`、`residue=none`、`residue` 欠落、field 不足/重複/extra/invalid は
   valid completion v2 として受理しない → `provenance_unknown`。v1 から instance binding を
   推測・補完・昇格しない。**

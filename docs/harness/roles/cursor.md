@@ -81,6 +81,8 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   **A8: payload entry へ 1回でも write mutation 成功後の short write / flush / close 失敗は
   `payload_written=true` で fail-closed 残留を肯定し completion 未作成・`auto_*`=false とする
   （詳細は正本 A8）。**
+  **実 byte write 未成立の directory-only / zero-byte leaf では `payload_written=false` とし、
+  directory residue は正本 A8 の `create_dir_attempted=true` で肯定記録する（独立仕様名は作らない）。**
   **A7のmarker content write後にread-back/decode/schema検証が失敗した場合、
   `run_root_created=true` `instance_marker_created=true` と肯定記録し、marker/residueを
   未作成扱いで隠さない。`auto_cleanup`/`auto_repair`/`auto_resume`へ進まない（詳細は正本 A7）。**
@@ -139,10 +141,10 @@ Claude Codeは通常フローの既定レビュアーではない（例外委譲
   `payload_written=false` `completion_record_created=false` `result=blocked` を肯定伝播し、
   cached read-back 成功だけで durability 失敗を無視して A8 / completion / auto_* へ進まない
   （詳細は正本 A7）。**
-  **A8のpayload write後recursive safety再走査失敗、またはA9でのlock identity driftにより
-  blockedとなった場合、A8で作成済みのpayloadを「未作成」と
-  誤報しない。payloadは残留し得る状態として保持し、completion未作成・blockedのまま自動delete/
-  repair/resumeへ進まない（詳細は`.cursor/rules/ai-workflow.mdc` A8/A9）。**
+  **A8で byte write 成立後の recursive safety 再走査失敗、または A9 での lock identity drift により
+  blocked となった場合、成立済み byte-write payload を `payload_written=false` と誤報しない。
+  directory-only residue は `create_dir_attempted=true` で肯定し、completion 未作成・blocked のまま
+  自動 delete/repair/resume へ進まない（詳細は `.cursor/rules/ai-workflow.mdc` A8/A9）。**
   カテゴリ③（`.mdc` merge）とカテゴリ④（実cleanup）は別発効点。
   詳細・制御順序・否定例の正本は `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
   （本ファイルは複製しない）。

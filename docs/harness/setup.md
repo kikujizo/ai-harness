@@ -278,8 +278,15 @@ branch `issue-121-ambiguous-comprehensive-instruction-scope`。
 制御フロー正本: `.cursor/rules/ai-workflow.mdc`（A0–A9: role=writer / B0–B8: role=cleanup。
 A8=payload、A9=completion provenance）。
 `LOCK_CHAIN` と `RUN_CHAIN` は兄弟系統として別 branch 定義。単一 `PATH_CHAIN` は使わない。
-EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write/cleanup deleteより前に
-停止することを各否定例で観測する（`ai-workflow.mdc` の EARLY呼禁止節を構造grepで確認可能）。
+**pre-create fail-closed（EARLY）**: directory mutation 前に停止する経路では
+`create_dir_attempted=false`・directory residue なし。この部分集合では
+`scratch_created=false`・`cleanup=false`・run側 mkdir/write/cleanup delete より前に停止することを
+各否定例で観測する（`ai-workflow.mdc` の EARLY呼禁止節を構造grepで確認可能）。
+**post-create verification failure**: directory create-new 成立済みで
+ImmediatePostCreateVerify または A8 completion 前 recursive safety 再走査が失敗した経路では
+`create_dir_attempted=true`・作成済み directory/residue を肯定記録・`completion_record_created=false`
+・`auto_cleanup=false` `auto_repair=false` `auto_resume=false`・`result=blocked`。
+EARLY ラベル付き否定例でも、常に mkdir 前・residue なしを意味する一般化は禁止する。
 
 - **fresh `.cache` missing — writer成功（LeafContainmentCapability 実証環境）**:
   **前提**: `leaf_containment_capability=demonstrated` を現行の同一 UID/SID 非協調 process 脅威モデルに
@@ -532,12 +539,22 @@ EARLY停止時は `scratch_created=false`・`cleanup=false`・run側 mkdir/write
   未削除の検証済みchildもない）状況を渡し、`stop_reason=inventory_changed`とならず
   directory自体の削除契約上のmutation candidateへ進めることを確認する（child集合の減少自体は
   正常でありdriftとして扱わない）。
-- **A9到達後のlock drift時のpayload保全（否定例・A9）**: A8がpayload作成まで成功した後、completion
+- **A9到達後のlock drift時のpayload保全（否定例・A9）**: A8で 1 byte 以上の payload content write が
+  成立した後、completion
   作成直前の `RUN_LOCK` handle/path identity再確認でdriftを検出した状況を渡し、`result=blocked`
   `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `payload_written=true`
   `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
   となり、既に作成済みのpayloadを `payload_written=false` として誤報せず、残留し得る状態として
   保持したまま自動delete/repair/resumeへ進まないことを確認する。
+- **A8 directory-only（または zero-byte leaf・byte write 未成立）で recursive safety scan 失敗
+  （否定例・A8）**: payload directory のみ作成（byte write 0）または zero-byte leaf create-new のみで
+  content write 未成立の状態で、completion record 作成前の B6 同等 recursive safety 再走査が
+  unsafe または判定不能となる状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は `path_safety_unknown`）
+  `create_dir_attempted=true` `payload_written=false` `completion_record_created=false`
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false` となり、directory residue を
+  肯定記録しつつ byte write 未成立では `payload_written=true` にしないこと、および自動
+  cleanup/repair/resume へ進まないことを確認する。
 - **A8 post-write safety failure（否定例・A8・finding 6）**: payloadへ1回以上write mutation済みの
   状態で、completion record作成前のB6同等recursive safety再走査（Linux/WSLはnested mount/bind
   mount・mountinfo評価を含む）がunsafeまたは判定不能となる状況を渡し、`result=blocked`
@@ -686,7 +703,8 @@ merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は
 | inventory記録後のchild追加・置換（Windows） | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` `delete_attempted=false` | B8(9)でchild単位no-follow実体identity再確認により検出、承認snapshot外の対象を削除しない |
 | 同一inode上のregular file in-place write（Windows） | `result=blocked` `stop_reason=inventory_changed` `cleanup=false` `delete_attempted=false` | B8(9)でverified handle disposition直前のsize/SHA-256再照合により検出、identity一致をcontent一致の代替にしない |
 | directory child集合の削除直前drift（Windows） | `result=blocked` `stop_reason=inventory_changed` `cleanup=false` `delete_attempted=false` | B8(9)でdirectory自身の削除直前に同一directory handle上でchild集合を再列挙しinventoryと照合 |
-| A8後・completion直前のRUN_LOCK identity drift | `result=blocked` `stop_reason=path_safety_failed` `payload_written=true` `completion_record_created=false` | A9でpayload残留を`payload_written=false`と誤報せず保持、自動delete/repair/resumeへ進まない |
+| A8 directory-only（byte write 0）で recursive safety scan 失敗 | `result=blocked` `stop_reason=path_safety_failed`\|`path_safety_unknown` `create_dir_attempted=true` `payload_written=false` `completion_record_created=false` `auto_cleanup=false` | directory residue 肯定。byte write 未成立では `payload_written=true` にしない。completion/auto_* 未進入 |
+| A8後・completion直前のRUN_LOCK identity drift（byte write 成立済み） | `result=blocked` `stop_reason=path_safety_failed` `payload_written=true` `completion_record_created=false` | A9でbyte write成立済みpayload残留を`payload_written=false`と誤報せず保持、自動delete/repair/resumeへ進まない |
 | payload expected pathへの外部file hard-link先置き | `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` `external_target_written=false` | A8 create-new 衝突または既存 entry 検知。open/truncate なし。外部実体未変更 |
 | marker create-new後のpath差し替え | `pathname_reopen_used=false` `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` | A7 canonical content は create-new handle へ。path 再 open 初回 write なし。A8 未進入 |
 | pre-write binding capability不明 | `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` | create-new/handle/path binding 証明不能。pathname write へ進まない |

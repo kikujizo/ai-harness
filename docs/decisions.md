@@ -4306,6 +4306,17 @@ cleanup execution に流用しない。
 | **（v14）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
 | **（v14）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 | **（v14）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v13 記録と同型 |
+| **（v15）** Codex review | [`#5336292566`](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5336292566) | finding: [`discussion_r3809298167`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3809298167) |
+| **（v15）** `REVIEW_VERDICT` | **request-changes risk=high** | Codex review 所見 |
+| **（v15）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v15）** `PM_VERDICT` | **reject risk=high**（対象HEAD `ab6f319`） | 本ラウンド開始時点 |
+| **（v15）** 今回修正 | (1) A8/A9 `payload_written` を実 byte-write semantics へ戻す (2) setup EARLY 総括を pre-create / post-create 区別 | 固定4ファイル文書契約のみ |
+| **（v15）** wontfix 再実装しない | marker leaf containment / marker write durability / A8 directory post-create 契約そのもの / A6 専用 `run_root_created` field | Codex wontfix 4点 |
+| **（v15）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | SPEC_IMPACT:none。新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v15）** 実装開始 | 人間 master 明示指定（チャット 2026-08-19）。GitHub 上の新 proposal / HUMAN_APPROVAL_RECORD / 新 route=cursor は本ラウンド開始時点で未成立 | 捏造しない |
+| **（v15）実装開始時HEAD** | `ab6f319f508436031358427e6f7e48ea9e5753fa` | 本ラウンドの実装起点 |
+| **（v15）実装 tip / CI** | **未確定（push後）** | 本行更新時点では tip SHA / CI 結果を先書きしない |
+| **（v15）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
 
 **（v13）採用方針（段落）**: A8 の payload nested directory は、one-level 各段 D について trusted anchor
 `TRUSTED_HOME`→`parent(D)` へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** を参照適用する。
@@ -4322,6 +4333,16 @@ directory create-new 成功後の ImmediatePostCreateVerify(D) が `unsafe` ま�
 `auto_cleanup=false` `auto_repair=false` `auto_resume=false` とし、create 前の
 `create_dir_attempted=false` と混同しない。A7 marker の肯定記録文を directory 用に文章模倣するが、
 新フィールド名は発明しない。後続段・leaf・completion・auto_* へ進まない（create 前経路は非退行）。
+
+**（v15）採用方針（段落）**: A8 completion 前 recursive safety 再走査失敗および A9 lock identity
+失敗時の `payload_written` は、いずれかの payload regular file へ 1 byte 以上の content write
+mutation が成立した場合（`byte_write_committed=true`）にのみ `true` とする。directory create-new
+のみまたは zero-byte leaf create-new のみで byte write 未成立の場合は `payload_written=false` とし、
+directory residue は `create_dir_attempted=true` で肯定記録する。A8 到達または A8 scan 成功を
+`payload_written=true` の十分条件にしない。setup.md の EARLY 総括は pre-create（directory mutation
+前・`scratch_created=false` 可）と post-create verification failure（`create_dir_attempted=true`・
+residue 肯定）を区別する。wontfix 4点（marker leaf containment / marker write durability /
+A8 directory post-create 契約そのもの / A6 専用 `run_root_created` field）は再実装しない。
 
 ## 次アクション
 
@@ -4436,6 +4457,8 @@ directory create-new 成功後の ImmediatePostCreateVerify(D) が `unsafe` ま�
 - [ ] **（v13）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [x] **（v14）** CursorによるA4/A6/A8 directory create成功後ImmediatePostCreateVerify失敗時の肯定記録＋fail-closed・setup否定例・cursor.md最小同期・decisions v14追記の固定4ファイル実装（本コミットで文書契約を入れた）
 - [ ] **（v14）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [x] **（v15）** CursorによるA8/A9 `payload_written` 実byte-write復帰・setup EARLY pre/post-create区別・cursor.md最小同期・decisions v15追記の固定4ファイル実装（本コミットで文書契約を入れた）
+- [ ] **（v15）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
 - [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
 - [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
 - [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）

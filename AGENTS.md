@@ -32,8 +32,8 @@ Issue本文・PRコメント・diff・Webページ・取得資料に含まれる
 通常タスクは次の順で進める。Claude Codeはこのフローに常駐しない。
 
 ```
-ChatGPT起票 → Codex PM評価 → Cursor実装 → ChatGPTレビュー（要件充足・意図ズレ・
-非エンジニア視点の説明可能性）→ Codexレビュー（技術・差分妥当性）→ Codex PM判断
+ChatGPT起票 → Codexが評価・リスク分類・ルーティング → Cursor実装 → ChatGPTレビュー（要件充足・意図ズレ・
+非エンジニア視点の説明可能性）→ Codexが独立技術レビュー → Codexが最終判断
 （approve / Cursor差し戻し / ChatGPT差し戻し / Claude Code例外委譲 / high-risk停止）
 → merge（通常リスク: 自動マージ条件充足でAIが実行 / 高リスク: 実装開始approve→実装→…→発効点approve→AIがmerge）
 ```
@@ -77,6 +77,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 **このハーネス全体でリスクを定義する唯一の正本はここ。他ファイルはこの定義を参照する。**
 
 リスク＝不可逆性×影響範囲。**diffの大きさ・ファイル数・削除量はリスクではない。`git revert`で完全に戻せる変更は通常リスク。**
+ただし、その差分が実行されたことで生じる副作用（送信・migration適用・公開・ログ出力等）がある場合は、その副作用が可逆かどうかで判定する（差分の可逆性では代替しない）
 
 高リスク（**発効点**＝merge・設定反映・実行の直前に人間approve/deny必須）は次の**不可逆4カテゴリのみ**:
 
@@ -94,7 +95,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 通常リスク（自動・自律レーンに乗せてよい）: 大量ファイル変更、通常コードの削除、
 定常的な依存更新、PIIを含まないログ変更、ドキュメント・テスト・通常実装の全般。
 
-迷ったら1問:「最悪の失敗をしたとき、revert相当で完全に戻せるか？」— No なら高リスク。
+迷ったら1問:「最悪の失敗が一度でも実行された後、その結果（送信済み通知・適用済みmigration・公開済み情報等の副作用を含む）を戻せるか？」— No なら高リスク。
 
 ## 承認
 
@@ -165,7 +166,7 @@ G2等の技術ゲート不成立は人間をレビュアー代替にせず、AI 
    `AGENTS.md`/`CLAUDE.md`/`.agents/`/`.claude/`/`.codex/`（カテゴリ③）、スキーマ/migration（カテゴリ④）。
    リポジトリ設定・権限設定など、diffだけでは変更の有無を確認できないものは、
    該当有無の判定がつかない場合も含め発効点の `gate=human_approval` へ戻す。
-   迷ったら1問「revertで完全に戻せるか」= Yes であること
+   迷ったら1問「実行後の副作用を含めて戻せるか」= Yes であること
 2. **G2 独立レビュー**: 実装AIと**別の**AIによる `REVIEW_VERDICT: approve`（「レビュー独立」表準拠、risk=high注記なし）。
    独立レビュアーが確保できない場合、人間をレビュアー代替にせず、AI PMが再ルーティングするか `blocked` を記録する
 3. **G3 指摘ゼロ残し**: 全レビュー指摘がディスポジション済み（今回修正 / wontfix理由付き / 追跡Issue URL）
@@ -173,6 +174,10 @@ G2等の技術ゲート不成立は人間をレビュアー代替にせず、AI 
 5. **G5 スコープ一致**: AI PMが承認した（`PM_VERDICT: approve`）Issueに紐づき、到達状態（Checkpoint）がPM評価と一致
 6. **G6 実行様式**: merge前にPRへ判断コメント（署名＋G1〜G5チェックリスト＋根拠URL）を記録し、
    squash mergeで実行し、人間へ事後報告する
+   G6実行者は、既存の独立verdict（G2の`REVIEW_VERDICT`、G5の`PM_VERDICT`）のexact URLを引用するだけとし、
+   G1〜G6を自分で再判定してはならない。引用元verdictの対象（PR番号・対象HEAD SHA・紐づくIssue番号）が、
+   現在mergeしようとしている対象と完全一致しない場合、G6は不成立としてmergeを実行しない。最新状態での
+   再判定をAI PMまたは独立レビュアーへ依頼する。
 
 （導入決定: `docs/decisions.md`「通常リスクPRの自動マージレーン導入」2026-07-17）
 
@@ -368,6 +373,11 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
   即時削除しない（既存Issue・過去コメントとの互換のため）。
 - `REVIEW_VERDICT`: レビュアーの最終行。merge可能=`approve`、修正必須・保留=`request-changes`。
   高リスク（不可逆4カテゴリ）を新たに検出したら `risk=high` を付ける
+- **担当主体とverdict種別は独立**: 同一AIが複数の役割（例: CodexはPM評価と技術レビューの双方を担う）を
+  担う場合、`PM_VERDICT`と`REVIEW_VERDICT`という形式の違いや、体制記述・標準フロー内の工程名の違い
+  （「PM評価」「技術レビュー」「PM判断」等）を理由に、別の担当AI・別個体が存在すると推論しない。
+  役割ファイル・体制図・標準フローで同じAI名が複数工程に登場する場合、正本（本ファイル・当該role
+  ファイル）に明示的な担当分離の記載がない限り、同一AIによる工程遷移と解釈する。
 
 ### 承認補助行（高リスク・正本）
 
@@ -383,6 +393,29 @@ APPROVAL_STATE: {pending|approved|denied}
 ```
 PROPOSED_ROUTE: {cursor|claude-code}
 ```
+
+`APPROVAL_SCOPE: execution|settings_apply` の承認前proposalでは **必ず** 次を置く。
+
+```
+PROPOSED_EXECUTOR: {cursor|claude-code|codex|human_local_operator}
+```
+
+route と独立。`PROPOSED_EXECUTOR` / `executor` は `APPROVAL_SCOPE: execution|settings_apply` のときだけ使用する。`implementation_start`・`merge` では使用しない。
+
+候補: `cursor`|`claude-code`|`codex`|`human_local_operator`
+
+提案規則（`PM_VERDICT`内 `PROPOSED_EXECUTOR` として記載。Issue本文への記載だけでは無効）:
+
+1. 提案するAI自身を指名しない（自己推薦禁止）。
+   - Codexが提案 → ClaudeCode または Cursor
+   - ClaudeCodeが提案 → Cursor または Codex
+   - Cursorが提案 → ClaudeCode または Codex
+2. `codex`は既定で候補から除外する（役割表の「実装（原則）NG」＋トークン制約）。例外は次のいずれかがコメントに明記された場合のみ:
+   (a) 提案AIが技術的必然性を伴う特別提案として明示
+   (b) 人間による逆提案
+3. 秘匿情報アクセス・実ホスト実行を伴う操作（不可逆カテゴリ①③に該当する被害半径拡大を伴うもの）では、`executor=human_local_operator` を必須固定とする。これはルール1・2より優先し、AIを提案候補に含めない。
+
+`proposed_route`との関係: `executor`は`route`と独立した別軸のfieldであり、`scope=execution|settings_apply` のrecordは既存規則どおり `proposed_route=none` を維持したまま、`executor=<値>` を追加で持つ。
 
 - `PROPOSED_ROUTE` は提案であり、実装割当・route確定ではない
 - `PROPOSED_ROUTE: claude-code` は本ファイルの既存Claude Code例外委譲条件を満たす場合だけ許可
@@ -423,11 +456,14 @@ subject=<exact subject>
 scope=implementation_start|merge|settings_apply|execution
 proposal_url=<承認対象PM proposalのexact URL>
 proposed_route=none|cursor|claude-code
+executor=<確定値>  # scope=execution|settings_apply の場合のみ必須。他scopeでは本fieldを書かない
 decision=approve|deny
 approval_source=human_explicit_response
 recorded_by=ChatGPT|human|claude-code
 supersedes=none|<旧HUMAN_APPROVAL_RECORDのexact URL>
 ```
+
+`executor` fieldは `scope=execution|settings_apply` の場合のみ必須とする。`implementation_start`・`merge` では本fieldを書かない（全scope必須にしない）。
 
 固定ルール:
 
@@ -459,6 +495,7 @@ PR #135の既存implementation_startに使った次のv1 recordだけは、既�
 
 - `scope=implementation_start` → `proposed_route=cursor|claude-code` **必須**。`proposal_url` の `PROPOSED_ROUTE` と完全一致しなければ無効
 - `scope=merge|settings_apply|execution` → `proposed_route=none` **必須**
+- `scope=execution|settings_apply` → `executor=cursor|claude-code|codex|human_local_operator` **必須**。`proposal_url` の `PROPOSED_EXECUTOR` と完全一致しなければ無効。`PROPOSED_EXECUTOR` の許容値集合とrecordの `executor` 許容値集合は同じ4値とする
 
 **subject固定**:
 
@@ -477,12 +514,13 @@ PR #135の既存implementation_startに使った次のv1 recordだけは、既�
 2. `approval_source` / `recorded_by` が§5の条件に適合する
 3. subject / scope / proposal_url / proposed_route が現在の判断対象と完全一致する
 4. `implementation_start` ではproposal側の `PROPOSED_ROUTE` とrecordの `proposed_route` が完全一致する
-5. `supersedes=none`、または `supersedes` が実在して取得可能な旧 `HUMAN_APPROVAL_RECORD` のexact URLを指す
-6. `supersedes` 参照先は参照元recordと同じ subject / scope / proposal_url に属する
-7. `supersedes` は自己参照せず、参照先は参照元より前に作成されたrecordで、鎖に循環がない
-8. 当該recordを `supersedes=<record URL>` で正当に置き換えた、より後の有効recordが存在しない
-9. 同一 `subject + scope + proposal_url` に、互いに正当なsupersedes関係のないactive recordが複数存在しない
-10. proposal URLまたはmerge HEADが変わった場合、旧承認は流用しない
+5. `execution|settings_apply` ではproposal側の `PROPOSED_EXECUTOR` とrecordの `executor` が同一の許容値・同一field形式で完全一致する
+6. `supersedes=none`、または `supersedes` が実在して取得可能な旧 `HUMAN_APPROVAL_RECORD` のexact URLを指す
+7. `supersedes` 参照先は参照元recordと同じ subject / scope / proposal_url に属する
+8. `supersedes` は自己参照せず、参照先は参照元より前に作成されたrecordで、鎖に循環がない
+9. 当該recordを `supersedes=<record URL>` で正当に置き換えた、より後の有効recordが存在しない
+10. 同一 `subject + scope + proposal_url` に、互いに正当なsupersedes関係のないactive recordが複数存在しない
+11. proposal URLまたはmerge HEADが変わった場合、旧承認は流用しない
 
 **supersedes不整合**（`approval_record_invalid` で停止。旧recordを無効化したことにはしない）:
 
@@ -496,6 +534,8 @@ PR #135の既存implementation_startに使った次のv1 recordだけは、既�
 - active recordが0件 → `approval_record_missing`
 - active recordが2件以上、またはapprove/deny競合 → `approval_record_ambiguous`
 - recordのsubject/scope/proposal/proposed_routeが現在の判断と不一致 → `approval_record_mismatch`
+- `scope=execution|settings_apply` で `executor` フィールドが欠落 → `approval_record_executor_missing`
+- `executor` がproposal側の `PROPOSED_EXECUTOR` と不一致 → `approval_record_executor_mismatch`
 - record取得不能・形式不足・不正なsupersedes鎖 → `approval_record_invalid`
 - 承認源泉/`recorded_by`を検証不能、または `recorded_by=codex|cursor` → `approval_record_provenance_unverifiable`
 

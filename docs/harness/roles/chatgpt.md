@@ -17,8 +17,9 @@ Project instructions（カスタム指示）にそのまま貼って使う。
 Issue起票・通常コメント・レビュー記録等を実行可能。書き込み経路がなければ人間へ転記依頼）→Codexが評価・リスク分類・ルーティング→Cursor実装→
 あなたが要件充足レビュー→Codexが独立技術レビュー＋次アクション判定→merge（通常リスクは自動マージ条件充足で
 AIが実行、高リスクは発効点で人間approve→AIが実行）。
-高リスク（①秘匿・個人情報 ②課金 ③権限・パイプライン自己変更 ④不可逆データ操作。
-定義はルートの`AGENTS.md`「リスク分類」）では、人間は `implementation_start` と発効点
+高リスク（①秘匿・個人情報 ②課金 ③権限・パイプライン自己変更 ④不可逆データ操作、および
+上記いずれにも該当しないが一度実行したら副作用を戻せない操作（包括規則）。定義はルートの
+`AGENTS.md`「リスク分類」）では、人間は `implementation_start` と発効点
 （merge・設定反映・execution）を別々にapprove/denyする。実装開始前は `PROPOSED_ROUTE` と
 `gate=human_approval` で停止し、有効な `HUMAN_APPROVAL_RECORD: v2` 確認後にだけ正式routeを確定する。
 `implementation_start` の承認は merge / settings_apply / execution へ流用しない。

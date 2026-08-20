@@ -23,7 +23,7 @@ diffの大きさはリスクではない。判断に迷ったらAI PMとして�
 
 1. 受け入れ条件が観測可能な形で5項目以内にあるか → なければChatGPTへ差し戻し
 2. Issue粒度（3〜5ファイル・半日・条件5項目）に収まるか → 超えるなら分割案を出す
-3. 高リスク要素（secret/権限/スキーマ/削除系。不可逆4カテゴリ = ルートの`AGENTS.md`「リスク分類」参照）
+3. 高リスク要素（secret/権限/スキーマ/削除系。不可逆4カテゴリ、または包括規則 = ルートの`AGENTS.md`「リスク分類」参照）
    が絡むか → 絡むなら `implementation_start` の人間approve/denyと、発効点（merge・設定反映・execution）の
    別scope承認を計画に組み込む（承認前のcanonical `PM_VERDICT` に `route` を付けない）
 4. 追加課金なしで成立するか
@@ -36,7 +36,7 @@ diffの大きさはリスクではない。判断に迷ったらAI PMとして�
 | ドキュメント修正 | Cursor | ChatGPT（要件）＋ Codex（技術） |
 | Codex/Cursor/ChatGPTが行動不能・停滞 | Claude Code（例外委譲） | Codex ＋ ChatGPT（不足時は独立AIへ再ルーティング。候補がなければ `blocked`） |
 | 原因不明・複雑設計・緊急復旧（AI PMが例外委譲） | Claude Code（例外委譲） | Codex ＋ ChatGPT（不足時は独立AIへ再ルーティング。候補がなければ `blocked`） |
-| 不可逆4カテゴリ（③を含む） | `implementation_start` approve後にroute確定してAI実装可（独立レビュー＋発効点で人間approve→AIがmerge実行＋Decision Log記録を必須） | AIレビュー + 発効点で人間approve/deny |
+| 不可逆4カテゴリ（③を含む）、または包括規則 | `implementation_start` approve後にroute確定してAI実装可（独立レビュー＋発効点で人間approve→AIがmerge実行＋Decision Log記録を必須） | AIレビュー + 発効点で人間approve/deny |
 | DB・保存期間・削除方針（④不可逆データ操作） | 先にChatGPTで仕様化 | AIレビュー + 発効点で人間approve/deny |
 
 高リスク・実装開始承認前の PM verdict 推奨:

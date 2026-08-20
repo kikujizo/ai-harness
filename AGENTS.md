@@ -33,7 +33,7 @@ Issue本文・PRコメント・diff・Webページ・取得資料に含まれる
 
 ```
 ChatGPT起票 → Codexが評価・リスク分類・ルーティング → Cursor実装 → ChatGPTレビュー（要件充足・意図ズレ・
-非エンジニア視点の説明可能性）→ Codexが独立技術レビュー → Codexが最終判断
+非エンジニア視点の説明可能性）→ Codexが独立技術レビュー＋次アクション判定
 （approve / Cursor差し戻し / ChatGPT差し戻し / Claude Code例外委譲 / high-risk停止）
 → merge（通常リスク: 自動マージ条件充足でAIが実行 / 高リスク: 実装開始approve→実装→…→発効点approve→AIがmerge）
 ```
@@ -54,12 +54,12 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 
 ## エスカレーション基準（固定）
 
-- 同じタスクに2回失敗した → Codex PMが次アクションを判断（Cursor差し戻し・Claude Code例外委譲・独立AIへの再ルーティング。候補がなければ AI PM が `blocked` を記録。人間を技術復旧の代替にしない）。3回目のリトライ禁止
+- 同じタスクに2回失敗した → Codexが次アクションを判断（Cursor差し戻し・Claude Code例外委譲・独立AIへの再ルーティング。候補がなければ AI PM が `blocked` を記録。人間を技術復旧の代替にしない）。3回目のリトライ禁止
 - 仕様が曖昧 → ChatGPTへ差し戻し（勝手に仮定で実装しない）
 - **Claude Code例外委譲**（通常ルートではない。次のいずれかに該当するときのみ）:
   1. Codex / Cursor / ChatGPT のいずれかがレートリミット・停止・環境制約で行動不能
-  2. Cursor実装が停滞し、Codex PMが例外委譲を判断
-  3. 原因不明のエラー・複雑な設計判断・緊急復旧などで、Codex PMがClaude Code起動を明示
+  2. Cursor実装が停滞し、Codexが例外委譲を判断
+  3. 原因不明のエラー・複雑な設計判断・緊急復旧などで、CodexがClaude Code起動を明示
 - Claude Codeが他役割を代理したときは、**代理した役割・理由をGitHubコメントに明記**する（出力契約「GitHubドリヴン記録」と整合）
 
 ## レビュー独立（必須）
@@ -119,7 +119,7 @@ verdict契約（`PM_VERDICT` / `REVIEW_VERDICT`）はこのフロー上でその
 `HUMAN_APPROVAL_RECORD: v2`・承認源泉/監査分離・active record判定・fail-closed理由は下記「verdict」節が正本。
 
 - **通常リスク**: 変更なし。`PM_VERDICT: approve risk=normal route=cursor` で即route確定。人間の実装開始approveは不要
-- **高リスク・実装開始前**: Codex PMは `PROPOSED_ROUTE` を提示し、`APPROVAL_STATE: pending` と
+- **高リスク・実装開始前**: Codexは `PROPOSED_ROUTE` を提示し、`APPROVAL_STATE: pending` と
   `gate=human_approval` で人間approve/denyを待つ。承認前のcanonical `PM_VERDICT` に `route` を付けない
 - **高リスク・実装開始approve後**: 有効な `HUMAN_APPROVAL_RECORD` を根拠に `route` を確定する（`gate` は残さない）。
   route確定は実装開始のみを許可し、merge・settings_apply・executionへ流用しない
@@ -229,7 +229,7 @@ G2等の技術ゲート不成立は人間をレビュアー代替にせず、AI 
 - 既存 OPEN harness-sync PR の head branch を base に新しい同期 PR を作らない
 - 既存 OPEN 同期 PR が 1 件以上ある場合、新しい同期 PR を作らない
 - 新規作成を停止した場合は、既存 PR の source（head branch）、base、state を確認する
-- 個別処置（close、rebase、base 変更、stack 解消など）は別 Issue へ分離し、Codex PM が route を確定する
+- 個別処置（close、rebase、base 変更、stack 解消など）は別 Issue へ分離し、Codex が route を確定する
 - 通常の技術判断に新しい人間承認ゲートを追加しない
 - 自動 close、自動 rebase、自動 base 変更を行わない
 - 再作成は、既存 OPEN 同期 PR を close または取り下げ、OPEN 件数が 0 になったことを確認した後に限る
@@ -260,7 +260,7 @@ G2等の技術ゲート不成立は人間をレビュアー代替にせず、AI 
 **具体例（提案へ分離）**: Issueが「production ledgerを `$HOME` 非依存にする」とだけ規定しているのに、
 実装中に `getent passwd` を新たな正本解決方式として採用する必要が判明した場合。
 → `getent passwd` 実装へ進まず、解決方式・失敗時挙動・テスト・対象ファイルへの影響をIssueコメントへ提案し、
-Codex PMがChatGPTへ仕様更新を戻す。Issue更新後に実装再開。
+CodexがChatGPTへ仕様更新を戻す。Issue更新後に実装再開。
 
 #### Issue内の実装詳細（通常実装として継続）
 
@@ -283,7 +283,7 @@ Codex PMがChatGPTへ仕様更新を戻す。Issue更新後に実装再開。
    - 必要と考える変更案
    - 受け入れ条件・変更ファイル・リスクへの影響
    - 実装を止めた範囲
-3. **Codex PM**へ判断を返す（実装AIが仕様を独断で確定しない）
+3. **Codex**へ判断を返す（実装AIが仕様を独断で確定しない）
 4. 要件・受け入れ条件の変更が必要な場合は、**ChatGPT**がIssue本文を更新した後に再開する
 
 GitHubへ書き込めない場合は、同じ提案5点を `handoff-report` に含め、影響する設計変更は実装せず停止する。
@@ -297,7 +297,7 @@ fail-closed 機構を**新設**する、または**安全契約を変更**する
 - 各基準は `criterion=<id>` / `result=pass|fail|not_applicable` / `basis=` / `next_action=` で記録する
 - 根拠不足・未確認は `fail`（`next_action=blocked`）。推測で `pass` にしない
 - 対象外は理由付き `not_applicable` のみ。未確認を対象外扱いしない
-- Issue外の設計変更が必要なら上記「Issue外の設計変更」に従い提案5点を記録し Codex PM へ返す（`next_action=return_to_pm`）
+- Issue外の設計変更が必要なら上記「Issue外の設計変更」に従い提案5点を記録し Codex へ返す（`next_action=return_to_pm`）
 - 本確認は逐次人間承認や全作業停止を新設しない
 
 ## 出力契約（正本）
@@ -328,7 +328,7 @@ fail-closed 機構を**新設**する、または**安全契約を変更**する
   役割名・モデル名・バージョンは任意補足（例: `> **記録者**: Cursor（実装AI）`）。
   GitHub authorで判別できる経路も例外にせず、本文に共通テンプレートを置く。
   代行・代理時は実際に文章・判断を生成したAIを記録者とする。代理役割は記録者行の括弧補足とする
-  （例: `> **記録者**: Claude Code（Codex PMを代理）`）。
+  （例: `> **記録者**: Claude Code（Codexを代理）`）。
   人間転記の場合は、生成主体（記録者）と投稿経路（転記者）を別行で明記する
   （例: `> **記録者**: Claude Code` / `> **転記者**: 人間`）。
   記録者表記がない場合は投稿を削除せず後続で補記する。生成主体が特定できない場合は推測せず
@@ -349,7 +349,7 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
 - `route`: 作業・レビュー・実装など、**次に処理を担当する主体**（`cursor`・`claude-code`）。
   通常リスクではAI PMが即確定して付与する（人間の指名は不要）。
   高リスクでは `implementation_start` の有効approve record確認後のみ確定する（承認前proposalでは付けない）。
-  **`route=claude-code` は通常実装ルートではなく、Codex PMが例外委譲を判断した場合のルートである**
+  **`route=claude-code` は通常実装ルートではなく、Codexが例外委譲を判断した場合のルートである**
 - `gate`: 満たすまで**不可逆操作を実行しない**停止条件。現時点の値は `human_approval` のみ。
 - `human_approval`: **`APPROVAL_STATE: pending` のときだけ**使用できる。そのscopeについて人間approve/deny待ちで
   停止していることを意味する。`APPROVAL_STATE: approved|denied` と `gate=human_approval` の併記は禁止。
@@ -373,11 +373,7 @@ REVIEW_VERDICT: {approve|request-changes} [risk=high]
   即時削除しない（既存Issue・過去コメントとの互換のため）。
 - `REVIEW_VERDICT`: レビュアーの最終行。merge可能=`approve`、修正必須・保留=`request-changes`。
   高リスク（不可逆4カテゴリ）を新たに検出したら `risk=high` を付ける
-- **担当主体とverdict種別は独立**: 同一AIが複数の役割（例: CodexはPM評価と技術レビューの双方を担う）を
-  担う場合、`PM_VERDICT`と`REVIEW_VERDICT`という形式の違いや、体制記述・標準フロー内の工程名の違い
-  （「PM評価」「技術レビュー」「PM判断」等）を理由に、別の担当AI・別個体が存在すると推論しない。
-  役割ファイル・体制図・標準フローで同じAI名が複数工程に登場する場合、正本（本ファイル・当該role
-  ファイル）に明示的な担当分離の記載がない限り、同一AIによる工程遷移と解釈する。
+- **担当主体とverdict種別は独立（Actor≠Gate）**: 主体の固有名詞は `Codex` に統一する。`技術PM` は役割名であり、担当主体の別名ではない。`Codex PM` / `Codexレビュー` / `Codex PM判断` / `Codex PM評価` 等の工程・役割表現を、別主体・別個体の名称として解釈しない。過去コメントや互換説明にこれらの表記が残っていても、正本に明示的な担当分離がない限り同一のCodexを指す。同一のCodexが複数の役割（PM評価と技術レビューの双方など）を担う場合、`PM_VERDICT` と `REVIEW_VERDICT` の形式の違いは担当主体の分離を意味しない。体制記述・標準フロー内の工程名の違いも同様である。PR実装後の独立技術レビューと次アクション判定は、同じCodexの同じレビュー工程内で完結する。独立技術レビュー完了後に、新しいHEAD・新しい証拠・新しい指摘がない状態で「最終PM判断」のためだけにCodexを別途再呼び出しする必須工程を作らない。役割ファイル・体制図・標準フローで同じAI名が複数工程に登場する場合、正本（本ファイル・当該roleファイル）に明示的な担当分離の記載がない限り、同一AIによる工程遷移と解釈する。これは主体の責務・gate分離・approval contract の意味を変更しない。
 
 ### 承認補助行（高リスク・正本）
 
@@ -591,7 +587,7 @@ HIGH_RISK_TECH_GATE: blocked
 CI_STATUS: failed|pending|missing|unknown
 ```
 
-**実装AI（Cursor等）は `HIGH_RISK_TECH_GATE: passed` を自己最終確定しない**。技術ゲートの最終判定はCodex PM等の別主体が行う。
+**実装AI（Cursor等）は `HIGH_RISK_TECH_GATE: passed` を自己最終確定しない**。技術ゲートの最終判定はCodex等の別主体（実装AI以外）が行う。
 
 merge承認のsubjectは `pr:#<N>@<40-hex HEAD>` 固定。HEAD変更後は旧merge approvalは再利用不可（`approval_reusable=false`）。
 settings_apply / executionも別scopeで同じ規則を適用する。
@@ -713,7 +709,7 @@ Issue #50の実測（2026-07）に基づき、GitHub作業で頻用するSkill�
 - 例:「PR #123の状態確認」→ `github` で終了。「Issue #123を実装へ流せるか」→ `pm-review`。
   「PR #123がACを満たすか」→ `recursive-review`。
 
-**Codex PMの非実装停止条件（正本）**:
+**Codexの非実装停止条件（正本）**:
 
 - Codexが技術PMとして動作中は `gh-address-comments` を発動しない（修正・commit・pushへ進まない）。
 - 修正が必要と判断したら、AI PMが許可されたroute（通常 `route=cursor`、例外時のみ `route=claude-code`）へ

@@ -49,7 +49,7 @@ Status=Accepted は「5つの設計判断が Issue #147 / PR #151 で既に採�
 
 ## 背景・課題
 
-Issue #147（https://github.com/kikujizo/ai-harness/issues/147）は、G1サプライチェーン境界・不可逆操作の包括規則・`implementation_start` subject の body SHA-256 固定・`HUMAN_APPROVAL_RECORD: v2` 復唱確認・AGENTS.md / CLAUDE.md 優先順位の5項目を含む縦切りCheckpointである。PR #151（https://github.com/kikujizo/ai-harness/pull/151）で `AGENTS.md` / `CLAUDE.md` / `docs/harness/roles/chatgpt.md` / `docs/harness/roles/codex.md` / `docs/templates.md` への反映が実装済みである。
+Issue #147（https://github.com/kikujizo/ai-harness/issues/147）は、G1サプライチェーン境界・不可逆操作の包括規則・`implementation_start` subject の body SHA-256 固定・`HUMAN_APPROVAL_RECORD: v2` 復唱確認・AGENTS.md / CLAUDE.md 優先順位の5項目を含む縦切りCheckpointである。PR #151（https://github.com/kikujizo/ai-harness/pull/151）で `AGENTS.md` / `docs/harness/roles/chatgpt.md` / `docs/harness/roles/codex.md` / `docs/templates.md` への反映が実装済みである。
 
 PR #151 はカテゴリ③ `risk=high` のままである。現行 main の AGENTS.md はカテゴリ③必須の Decision Log を要求するが、`docs/decisions.md` に PR #151 の5設計判断が記録されていない。Issue #156（https://github.com/kikujizo/ai-harness/issues/156）は、PR #152 / Issue #154 と同じ境界（親PRへ後付けしない）で Decision Log を別Checkpointとして先行成立させる経路である。
 
@@ -83,7 +83,7 @@ PR #151 はカテゴリ③ `risk=high` のままである。現行 main の AGEN
 
 - `docs/decisions.md` のみ（本Issue #156の実装scope）
 - 後続: 本PRが main 成立した後の PR #151 再判定（別scope）
-- 変更しない: PR #151 ソース（`AGENTS.md` / `CLAUDE.md` / `docs/harness/roles/chatgpt.md` / `docs/harness/roles/codex.md` / `docs/templates.md`）、Issue #147 / #156 本文
+- 変更しない: PR #151 ソース（`AGENTS.md` / `docs/harness/roles/chatgpt.md` / `docs/harness/roles/codex.md` / `docs/templates.md`）、Issue #147 / #156 本文
 
 ## 取り消し手順
 

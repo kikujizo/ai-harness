@@ -39,7 +39,7 @@ Issue #147（https://github.com/kikujizo/ai-harness/issues/147）/ PR #151（htt
    - 常時: subject / scope / decision / proposal_url
    - 条件付き: proposed_route（noneでない場合） / executor（scope=execution|settings_apply）
    - 復唱値とrecord本体が完全一致しなければ無効。人間の再返信は必須にしない
-   - 復唱なし → `approval_record_no_confirmation` / 不一致 → `approval_record_confirmation_mismatch`
+   - 復唱なし → `approval_record_no_confirmation_shown` / 不一致 → `approval_record_confirmation_mismatch`
 
 5. **AGENTS.md / CLAUDE.md の優先順位明記とオフライン適用**
    - 指示の優先順位第2位: AGENTS.md と CLAUDE.md は同格の実効ルール。直接矛盾する場合は AGENTS.md を優先。CLAUDE.md は各AIツール固有の詳細であり AGENTS.md と整合させることが前提

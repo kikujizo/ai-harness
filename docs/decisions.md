@@ -4,6 +4,108 @@
 
 ---
 
+# Decision: PR #151 の5設計判断（G1サプライチェーン境界・不可逆包括規則・implementation_start subject SHA-256・HUMAN_APPROVAL_RECORD v2復唱・AGENTS/CLAUDE優先順位）
+
+Date: 2026-08-24
+Status: Accepted
+Related Issues: #156, #147
+Related PRs: #151
+
+## 決定事項
+
+Issue #147（https://github.com/kikujizo/ai-harness/issues/147）/ PR #151（https://github.com/kikujizo/ai-harness/pull/151）で採択された5つの設計判断を正本として記録する。
+
+1. **G1サプライチェーン境界**
+   - 「通常リスク」の「定常的な依存更新」を「既存依存のバージョン更新（lifecycle script・インストールフックに変更がないもの）」に限定する
+   - 新規依存追加、lifecycle script（postinstall等）、git hooks（`.husky/`等）変更は通常リスク自動レーン対象外
+   - 判定対象はリポジトリ管理下の `package.json`・lockfile・`.husky/` 等。依存パッケージ内部のlifecycle script精査はG1対象外
+   - 固定文意: 「判定対象はリポジトリ管理下のscript/hookに限定する。既存依存の更新において、lifecycle scriptの変更有無が確認できない場合（lockfile形式が対応外等）は、通常リスクへ通さず発効点の gate=human_approval へ倒す（fail-closed）。」
+
+2. **不可逆操作の包括規則**
+   - 高リスク定義を不可逆4カテゴリだけの閉じたリストから、「不可逆4カテゴリ、および包括規則」へ変更する
+   - 包括規則: 1〜4に明示該当しなくても「一度実行されたら副作用を完全には戻せない」操作（例: private→public、force push、外部への不可逆公開、後続AIが真実として参照する正本資産（Decision Log・Vault memory等）への書き込み）は risk=high。判定不能も high
+   - カテゴリ数は4のまま。包括規則はもう一つの軸
+   - 同期対象は AGENTS.md / docs/harness/roles/chatgpt.md / docs/harness/roles/codex.md / docs/templates.md の「high-riskを定義・判定・承認・merge・自己申告する文脈」。分類名「不可逆4カテゴリ」は残してよいが、high-risk全体を4カテゴリだけに限定して読める文面は残さない
+   - 本Checkpointではこれらのファイルを変更しない（記録のみ）
+
+3. **`implementation_start` subject の body SHA-256 固定**
+   - `implementation_start`: `subject=issue:#<N>@sha256:<hexdigest先頭12桁>`
+   - GitHub REST API の Issue `body` を UTF-8 バイト列としてそのまま（改行正規化・trimなし）SHA-256し、hexdigest先頭12桁
+   - body取得失敗またはhash不能は `approval_record_invalid`
+   - 承認後のIssue本文変更でhashが変われば旧recordは `approval_record_mismatch`。コメント追加ではbodyが変わらないためhashは不変
+
+4. **`HUMAN_APPROVAL_RECORD: v2` の復唱確認・全field一致**
+   - record投稿と同一GitHubコメント内、record本体の直前行に復唱確認を置く
+   - 常時: subject / scope / decision / proposal_url
+   - 条件付き: proposed_route（noneでない場合） / executor（scope=execution|settings_apply）
+   - 復唱値とrecord本体が完全一致しなければ無効。人間の再返信は必須にしない
+   - 復唱なし → `approval_record_no_confirmation_shown` / 不一致 → `approval_record_confirmation_mismatch`
+
+5. **AGENTS.md / CLAUDE.md の優先順位明記とオフライン適用**
+   - 指示の優先順位第2位: AGENTS.md と CLAUDE.md は同格の実効ルール。直接矛盾する場合は AGENTS.md を優先。CLAUDE.md は各AIツール固有の詳細であり AGENTS.md と整合させることが前提
+   - chatgpt.md 単体でもオフラインで包括規則を判定できるよう、高リスク定義へ要旨を持たせる（定義の正本はルート AGENTS.md「リスク分類」）
+
+Status=Accepted は「5つの設計判断が Issue #147 / PR #151 で既に採択されている」記録であり、PR #151 の merge 承認、settings_apply、execution を意味しない。
+
+## 背景・課題
+
+Issue #147（https://github.com/kikujizo/ai-harness/issues/147）は、G1サプライチェーン境界・不可逆操作の包括規則・`implementation_start` subject の body SHA-256 固定・`HUMAN_APPROVAL_RECORD: v2` 復唱確認・AGENTS.md / CLAUDE.md 優先順位の5項目を含む縦切りCheckpointである。PR #151（https://github.com/kikujizo/ai-harness/pull/151）で `AGENTS.md` / `docs/harness/roles/chatgpt.md` / `docs/harness/roles/codex.md` / `docs/templates.md` への反映が実装済みである。
+
+PR #151 はカテゴリ③ `risk=high` のままである。現行 main の AGENTS.md はカテゴリ③必須の Decision Log を要求するが、`docs/decisions.md` に PR #151 の5設計判断が記録されていない。Issue #156（https://github.com/kikujizo/ai-harness/issues/156）は、PR #152 / Issue #154 と同じ境界（親PRへ後付けしない）で Decision Log を別Checkpointとして先行成立させる経路である。
+
+## 採用する方針
+
+- 上記5点を `docs/decisions.md` の正本 Decision Log として記録する
+- 本エントリは PR #151 の merge 承認、settings_apply、execution を意味しない
+- PR #151 現行HEADで成立したレビュー・CI・技術ゲートを、本 Decision Log 成立後の新mainへ自動流用しない
+- 本Checkpointの差分は `docs/decisions.md` 追記のみ
+- PR #152 / Issue #154 と同じ境界（親PRへ後付けしない）を採用する
+
+## 採用しない方針 / 却下した代替案
+
+- **Decision Log を省略して PR #151 の merge 承認へ進む**: カテゴリ③の現行 AGENTS.md が Decision Log を別途必須としているため却下
+- **`docs/decisions.md` を PR #151 へ追加して5ファイルscopeへ拡張する**: Issue #147 の固定4ファイルscopeを変更し、現行HEADの manifest・CI・レビュー・技術ゲート証跡を失効させるため却下
+- **PR #152 用 Decision Log を PR #151 へ流用する**: 記録対象の Issue・PR・設計判断が異なるため却下
+
+## 判断理由
+
+- 親PR #151 はカテゴリ③ high。Decision Log が main に無いと現行 AGENTS.md の必須を満たせない
+- PR #152 / Issue #154 と同じ境界（親PRへ後付けしない）を採用する
+- merge承認と設計判断の記録を分離することで、Decision Log 追記を merge 承認と誤読する事故を防ぐ
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- 記録対象の PR #151 自体はカテゴリ③ `risk=high` のまま。本記録を親PRの merge 承認や親PRリスクの再分類に使わない
+- 本Checkpointの差分は `docs/decisions.md` 追記のみ。Issue #156 自己申告は現行mainの不可逆4カテゴリ基準で①②③④なし
+- 本エントリで `HIGH_RISK_TECH_GATE: passed` と書かない
+
+## 影響範囲
+
+- `docs/decisions.md` のみ（本Issue #156の実装scope）
+- 後続: 本PRが main 成立した後の PR #151 再判定（別scope）
+- 変更しない: PR #151 ソース（`AGENTS.md` / `docs/harness/roles/chatgpt.md` / `docs/harness/roles/codex.md` / `docs/templates.md`）、Issue #147 / #156 本文
+
+## 取り消し手順
+
+- 本Checkpointの実装PRを `git revert` し、本エントリ Status を `Superseded` にする
+- これは PR #151 の4ファイル実装の取り消しではない
+- 親PRの設計判断を撤回する場合は別scope（PR #151側）で行い、本エントリを Superseded にする
+
+## 見直す条件
+
+- Issue #147 の5項目のいずれかが再仕様化されたとき
+- PR #151 の HEAD / base / main が変わり、記録対象と実装が食い違ったとき
+- 本scopeが `docs/decisions.md` 以外へ広がりそうなとき（広げず Codex技術PMへ戻す）
+
+## 次アクション
+
+- [ ] 本PRが main へ入った後、PR #151 を新mainへ rebase/update する（本PRではやらない）
+- [ ] 新HEADで manifest・CI・ChatGPT要件レビュー・独立技術レビュー・`HIGH_RISK_TECH_GATE` を再成立させる
+- [ ] 旧固定HEAD証跡を流用しない
+- [ ] その後の merge / settings_apply / execution は別scopeの人間承認
+
+---
+
 # Decision: PR #152の4つの正本変更（executor軸・revert副作用範囲・G6独立verdict引用・Codex単一技術PM）
 
 Date: 2026-08-19

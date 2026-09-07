@@ -4,6 +4,91 @@
 
 ---
 
+# Decision: PR #161 の高リスク集合SSOT判断（各入口の独自定義禁止・ルート AGENTS.md「リスク分類」へ委譲）
+
+Date: 2026-08-25
+Status: Accepted
+Related Issues: #162, #158
+Related PRs: #161
+
+## 決定事項
+
+Issue #158（https://github.com/kikujizo/ai-harness/issues/158）/ PR #161（https://github.com/kikujizo/ai-harness/pull/161）で採択された「高リスク集合を各入口で独自定義せず、ルート AGENTS.md『リスク分類』へ委譲する」判断を正本として記録する。
+
+1. 高リスク集合の定義の正本はルート AGENTS.md「リスク分類」とする。
+2. `CLAUDE.md` / `.agents/skills/pm-review/SKILL.md` / `.agents/skills/design-check/SKILL.md` / `.agents/skills/recursive-review/SKILL.md` は高リスク集合を閉じて独自定義せず、正本の集合を参照する。
+3. 現行mainでは正本の結果として不可逆4カテゴリがhighであり、本判断単体では集合を増減しない。
+4. Issue #147（https://github.com/kikujizo/ai-harness/issues/147）/ PR #151（https://github.com/kikujizo/ai-harness/pull/151）の包括規則は本判断で先取りしない。
+5. `implementation_start` と発効点（merge / settings_apply / execution）の承認分離、承認record非流用、独立レビュー・CI・`HIGH_RISK_TECH_GATE`非代替は維持する。
+
+Status: Accepted は「設計判断が Issue #158 / PR #161 で既に採択されている」記録であり、PR #161 の merge 承認ではない。merge / settings_apply / execution の承認を意味しない。
+
+Issue #162（https://github.com/kikujizo/ai-harness/issues/162）成立後に main が更新されたら、PR #161 は新mainへ rebase/update する。PR #161 の旧HEAD `8d252a47147d0e9cfacd7328b5d38c82490aa749` のレビュー・CI・技術ゲートを新HEADへ流用しない。新HEADで manifest・CI・ChatGPT要件レビュー・Codex独立技術レビュー・`HIGH_RISK_TECH_GATE` を再成立させる。その後にのみ、固定HEAD `scope=merge` の人間 approve/deny へ進む。
+
+## 背景・課題
+
+PR #161 は `CLAUDE.md` と `.agents/skills/**` の実効AIルールを変更するカテゴリ③ `risk=high` 案件である。現行mainの `AGENTS.md` は、カテゴリ③について独立レビュー・`HIGH_RISK_TECH_GATE`・発効点承認・Decision Log記録を別途必須としている。
+
+PR #161 の固定HEADでは、必要な非人間ゲートが成立済みである一方、Decision Logは未成立である。既存の同型運用では、Issue #156（https://github.com/kikujizo/ai-harness/issues/156）が PR #151（https://github.com/kikujizo/ai-harness/pull/151）の Decision Log を親PRへ後付けせず別Checkpointで先行成立させた。本件も同じ境界を採用する。
+
+## 採用する方針
+
+- 高リスク集合はルート `AGENTS.md`「リスク分類」を唯一の正本として参照する。
+- 4入口は集合の内容を複製せず、正本参照だけを持つ。
+- 現行正本の判定結果と承認段階を変えない。
+- 将来正本が変更された場合、同じ4入口の集合列挙を再修正せず追従できる構造にする。
+- 本エントリは PR #161 の merge / settings_apply / execution 承認を意味しない。
+- PR #161 現行HEADで成立したレビュー・CI・技術ゲートを、本 Decision Log 成立後の新mainへ自動流用しない。
+- 本Checkpointの差分は `docs/decisions.md` 追記のみ。
+
+## 採用しない方針 / 却下した代替案
+
+- **4入口それぞれに「不可逆4カテゴリだけがhigh」と列挙し続ける**: 正本変更時にドリフトし、入口ごとに判定結果が分裂するため却下。
+- **PR #151（https://github.com/kikujizo/ai-harness/pull/151）の包括規則をPR #161で先取りする**: Issue #158（https://github.com/kikujizo/ai-harness/issues/158）の前提同期scopeを超え、現行mainの判定結果を変えるため却下。
+- **`docs/decisions.md` をPR #161へ追加して5ファイルscopeへ拡張する**: Issue #158 の固定4ファイルscopeを変更し、現行HEADのmanifest・CI・要件レビュー・技術レビュー・技術ゲート証跡を失効させるため却下。
+- **Decision LogをGitHubコメントだけで代替する**: 現行テンプレートの既定正本が `docs/decisions.md` であり、同型のIssue #156（https://github.com/kikujizo/ai-harness/issues/156）でもmain上のDecision Logを必須としているため却下。
+
+## 判断理由
+
+- 親PR #161 はカテゴリ③ high。Decision Log が main に無いと現行 AGENTS.md の必須を満たせない。
+- Issue #156 と同じ境界（親PRへ後付けしない）を採用する。
+- 4入口への集合列挙は正本変更時にドリフトし、入口ごとに判定結果が分裂する。
+- 包括規則の先取りは Issue #158 の前提同期scopeを超え、現行mainの判定結果を変える。
+- merge承認と設計判断の記録を分離することで、Decision Log 追記を merge 承認と誤読する事故を防ぐ。
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- 記録対象の PR #161 自体はカテゴリ③ `risk=high` のまま。本記録を親PRの merge 承認や親PRリスクの再分類に使わない。本Checkpointの `risk=normal` を親PR #161 へ流用しない。
+- 本Checkpointの差分は `docs/decisions.md` 追記のみ。Issue #162 自己申告は現行mainの不可逆4カテゴリ基準で①②③④なし。
+- 本エントリで `HIGH_RISK_TECH_GATE: passed` と書かない。
+- PR #151 の未発効な包括規則を本Checkpointへ先取り適用しない。
+
+## 影響範囲
+
+- `docs/decisions.md` のみ（本Issue #162 の実装scope）
+- 後続: 本PRが main 成立した後の PR #161 再判定（別scope）
+- 変更しない: PR #161 ソース（`CLAUDE.md` / `.agents/skills/pm-review/SKILL.md` / `.agents/skills/design-check/SKILL.md` / `.agents/skills/recursive-review/SKILL.md`）、`AGENTS.md`、Issue #158 / #162 本文、PR #161 の HEAD・PR本文
+
+## 取り消し手順
+
+- 本Checkpointの実装PRを `git revert` し、本Decision Logエントリを `Superseded` とする。
+- これはPR #161の4ファイル実装を自動的に取り消すものではない。
+- PR #161の設計判断自体を撤回する場合は別Checkpointとし、必要なゲートを新規に成立させる。PR #161が既にmerge済みの場合に設計判断そのものを撤回するなら、PR #161側の4ファイルを戻す別Checkpointを作成し、必要な高リスクゲートを新規に成立させる。
+
+## 見直す条件
+
+- Issue #158 の5点のいずれかが再仕様化されたとき
+- PR #161 の HEAD / base / main が変わり、記録対象と実装が食い違ったとき
+- 本scopeが `docs/decisions.md` 以外へ広がりそうなとき（広げず Codex技術PMへ戻す）
+
+## 次アクション
+
+- [ ] 本PRが main へ入った後、PR #161 を新mainへ rebase/update する（本PRではやらない）
+- [ ] 新HEADで manifest・CI・ChatGPT要件レビュー・Codex独立技術レビュー・`HIGH_RISK_TECH_GATE` を再成立させる
+- [ ] 旧固定HEAD `8d252a47147d0e9cfacd7328b5d38c82490aa749` のレビュー・CI・技術ゲート証跡を新HEADへ流用しない
+- [ ] その後にのみ、固定HEAD `scope=merge` の人間 approve/deny へ進む
+- [ ] merge / settings_apply / execution は別scopeの人間承認
+
 # Decision: PR #151 の5設計判断（G1サプライチェーン境界・不可逆包括規則・implementation_start subject SHA-256・HUMAN_APPROVAL_RECORD v2復唱・AGENTS/CLAUDE優先順位）
 
 Date: 2026-08-24

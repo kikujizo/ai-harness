@@ -1,6 +1,6 @@
 ---
 name: pm-review
-description: GitHub Issueや実装依頼を技術PMとして評価するSkill。Checkpoint検証、受け入れ条件の確認、リスク分類（不可逆4カテゴリ）、実装担当のルーティング判断を行い、PM_VERDICT 1行で締める。「このIssueを評価して」「実装に流していいか見て」で使う。
+description: GitHub Issueや実装依頼を技術PMとして評価するSkill。Checkpoint検証、受け入れ条件の確認、リスク分類（正本: ルートAGENTS.md「リスク分類」の高リスク集合）、実装担当のルーティング判断を行い、PM_VERDICT 1行で締める。「このIssueを評価して」「実装に流していいか見て」で使う。
 ---
 
 > このSkillの変更・修正は `.agents/skills/pm-review/SKILL.md`（正本）を編集する。リンク先を編集しない。
@@ -12,7 +12,8 @@ description: GitHub Issueや実装依頼を技術PMとして評価するSkill。
 1. **Checkpoint検証**: 「マージ後にどんな新しい状態に到達するか」を1文で言えるか。言えなければ needs-info で差し戻す
 2. **自己完結性**: Issue本文だけで実装判断できるか。受け入れ条件が観測可能な形で5項目以内か
 3. **粒度**: ルート`AGENTS.md`のIssue粒度基準を超えていないか。超えるなら分割案を出す
-4. **リスク分類**: ルート`AGENTS.md`の不可逆4カテゴリ（リスク分類の正本）への該当だけを high とする。
+4. **リスク分類**: ルート`AGENTS.md`「リスク分類」の高リスク集合への該当を high とする。
+   集合の内容・増減は同節のみが定義し、このSkillは参照するだけとする。
    **diffの大きさ・ファイル数はリスクではない**
 5. **ルーティング**:
    - **通常リスク**: 即route確定（`PM_VERDICT: approve risk=normal route=cursor`）。人間の実装開始approveは不要

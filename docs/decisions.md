@@ -3851,3 +3851,886 @@ Issue #134 で `AGENTS.md` / `pm-review` に正本化した高リスク承認v2�
 
 - [ ] #133 PR merge後、`approval_contract_sync_pending` 解除を記録
 - [ ] 通常の新規高リスク案件へv2契約を全面適用
+
+---
+
+# Decision: Cursor一時scratch配置とcleanup技術ゲート・発効点分離
+
+Date: 2026-08-07
+Status: Proposed
+Related Issues: #54
+Related PRs: #132
+
+## 決定事項
+
+Cursorの一時ファイルをOS identity由来のtrusted home配下のrun固有scratch
+（`CACHE_ROOT=<TRUSTED_HOME>/.cache`、`SCRATCH_BASE=<CACHE_ROOT>/ai-harness-scratch`、
+`RUN_ROOT=<SCRATCH_BASE>/<repo_slug>/<run_id>/`）に限定する。
+`LOCK_ROOT`（`<SCRATCH_BASE>/.locks/<repo_slug>/`）と `RUN_ROOT` は兄弟系統であり、
+`COMMON_PREFIX`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE`）、
+`LOCK_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→LOCK_BASE→LOCK_ROOT→RUN_LOCK`）と
+`RUN_CHAIN`（`TRUSTED_HOME→CACHE_ROOT→SCRATCH_BASE→RUN_BASE→RUN_ROOT`）を別々に検証する
+（単一 `PATH_CHAIN` ではない）。
+writerは lock 系 directory（`CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`）だけを限定 bootstrap し、
+`RUN_LOCK` 取得後に `RUN_BASE`/`RUN_ROOT` を作成する。既存 safe `RUN_ROOT` は
+`run_root_collision` で blocked（再利用・resume 禁止）。
+**新規 `RUN_ROOT` ごとに OS/runtime 標準 CSPRNG で fresh 256-bit `instance_nonce` を生成し、
+create-new の `RUN_INSTANCE_MARKER`（`scratch-instance/v1`）へ保存・read-back 検証後にのみ payload を書く。**
+**`repo_slug` / `run_id` は path/lock 識別子のみ。provenance 証明に単独では使わない。**
+**completion は `scratch-completion/v2`（`instance_commitment` のみ公開。`instance_nonce` は GitHub へ出さない）。
+`scratch-completion/v1` は cleanup provenance として受理しない。**
+writerとcleanupは同一 `RUN_LOCK` を OS標準の排他プリミティブで必ず取得する
+（repo内lock実装ファイル・daemon・DBは追加しない）。
+Linux/WSLのbind mount判定は device ID 照合だけに依存せず mount table/mountinfo を用い、
+評価不能は `path_safety_unknown` で blocked。
+cleanupは filesystem 上に新規 directory/file/lock を一切作成しない read-only 契約。
+cleanup inventory は `run-inventory/v1` canonical recursive snapshot（`RUN_INSTANCE_MARKER` を含む。
+pre/post で
+`inventory_version`/`inventory_digest`/`entry_count` を exact 比較。不一致は `inventory_changed`）。
+cleanup は `RUN_ROOT` と全 descendant へ recursive path safety を適用する（nested mount/bind mount/
+reparse 拒否）。
+Windows cleanup は既存 lock file のみ open し `OpenOrCreate` を使わない。
+
+identity-root resolverを次で固定する。
+
+- **Windows native**: current SID（`WindowsIdentity.GetCurrent().User.Value`）→
+  同一SIDの唯一の `Win32_UserProfile.LocalPath` を `TRUSTED_HOME`。
+  排他は `FileShare=None` 相当のexclusive FileStream。
+- **Linux / WSL**: `id -u` → `getent passwd <CURRENT_UID>` 第6フィールドを `TRUSTED_HOME`。
+  排他は non-blocking exclusive `flock`。
+
+`USERPROFILE` / `HOME` / `~` 等の環境由来homeは正本にせず、不一致・解決不能・unsupported OSでは
+scratch作成もcleanup候補化もしない（`scratch_created=false`、run側 mkdir/writeより前に停止）。
+scratch初回write前にOS別path safety（symlink/reparse/mountpoint/owner/mode/ACL/special/
+canonical境界）を検証する。Linux/WSLでは mount table/mountinfo で bind mount を判定し、
+device ID 照合だけを mount 不在の十分条件にしない。
+
+provenanceの権威入力はrun終了時の **exact GitHub `scratch-completion/v2` 1件** と
+local `scratch-instance/v1` marker から再計算した `instance_commitment` の exact 一致とする。
+`record_type=scratch-completion/v2`、`repo_full_name`、`repo_slug`、`run_id`、
+相対 `scratch_rel=.cache/ai-harness-scratch/<repo_slug>/<run_id>/`、
+`instance_commitment=sha256:<64 lowercase hex>`、`run_state=completed`、
+**`residue=present`**（`residue=none` は writer 正常フローでは禁止。A9到達時には `RUN_ROOT` と
+`RUN_INSTANCE_MARKER` が存在するため通常到達不能であり、`none` を成立させる別 writer フローは
+新設しない）を照合する。**`scratch-completion/v1` は受理しない。v1 から instance binding を
+推測・補完・昇格しない。** **`run_id` 単独は provenance 証拠にならない。**
+`instance_nonce` は GitHub へ書かない。旧仕様の canonical absolute scratch root を
+GitHubへ記録する方式は撤回し、absolute local home path・個人情報はGitHubへ書かない。
+
+**（再仕様化v3・safe create/lock identity binding）** writerが新規作成するdirectory（`CACHE_ROOT`/
+`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT`/`RUN_BASE`/`RUN_ROOT`）は、process umaskや既定ACLに安全性を
+委ねず、Linux/WSLはrequested/observed mode `0700` 固定、Windowsは作成時点からcurrent SID/SYSTEM/
+BUILTIN\Administrators以外へwrite/modify/delete相当を与えないowner/DACLを要求し、作成直後に同一OS検査で
+再検証する。`RUN_LOCK` の取得は曖昧な `OpenOrCreate` 一発ではなくcreate-new/open-existingを区別し
+（Linux/WSL新規lockは `0600` 固定）、**取得直後にopened handleのfile identity（Linux: device+inode／
+Windows: `FILE_ID_INFO`相当）と現在の `RUN_LOCK` path entryのfile identityをexact比較する**。
+writerはcompletion record作成直前にも同じ比較を行い、cleanupはpre-approval取得直後と
+post-approval再取得直後・**最初の削除mutation直前**の計4箇所で同じ比較を行う。不一致・判定不能は
+`path_safety_failed`/`path_safety_unknown` としてmutationへ進まない。同一opened lock handleは
+削除完了確認まで保持する。
+
+通常作業中はcleanupせず、cleanupはexact `RUN_ROOT` 1件に対しidentity・exact provenance・
+path safety・inventory・`RUN_LOCK` 取得を含むread-only技術ゲート全成立後にのみ
+closed questionへ進む。将来の実cleanupは別 `execution` scope の v2 人間approveが必要。
+approve後は既存 `RUN_LOCK` を non-blocking exclusive で再取得し、recursive path safety と
+inventory をゼロから再検証し、削除完了確認までlockを保持する。
+状態変化時は `approval_stale` / `inventory_changed` / `run_lock_conflict` 等で blocked
+（approval再利用禁止）。
+カテゴリ③（`.cursor/rules/ai-workflow.mdc` のmerge）とカテゴリ④（実cleanup）は別発効点・別scopeとする。
+
+## 背景・課題
+
+`.cursor/rules/ai-workflow.mdc` は `alwaysApply: true` だが、一時ファイル配置とcleanup境界が未定義。
+旧Issueは「別cleanup中でないことを確認」と要求しながらlock機構をスコープ外としており、
+cleanup排他が構造的に不成立だった。fail-closedのまま常時blockedに縮小するとCheckpointの
+「安全確認後にcleanupのclosed questionへ到達する」目的を失う。
+
+**再仕様化（instance binding / Codex P1/P2）**: Codex独立技術レビュー `#5263502982`（P1:
+`scratch-completion/v1` が local run instance へ束縛されず cross-host/profile 誤結合可能、
+P2: Decision Log/PR本文の HEAD・review disposition 未同期）と ChatGPT再判定 `#5263568325` により、
+local-only 256-bit `instance_nonce` + SHA-256 `instance_commitment`、`scratch-instance/v1` marker、
+`scratch-completion/v2`、v1 非受理・推測昇格禁止へ再同期した。旧 proposal `#5263051242` /
+旧 approval `#5263099857` は本再仕様化後の実装許可として流用しない。新 proposal `#5263694044`、
+新 `HUMAN_APPROVAL_RECORD: v2` `#5263876000`、Codex PM route `#5263894169`（route=cursor）が
+本再仕様化後の実装開始正本。
+
+**再仕様化v3（safe create / RUN_LOCK identity binding）**: fixed HEAD `1eccda8` に対する独立技術レビューで、
+非outdated・未解決として次の4件が確認された。(1) 新規 `RUN_LOCK` を取得直後にmode/path-safety再検証する、
+(2) A9では通常到達不能な `residue=none` を許可しない、(3) writer bootstrapで新規directoryをumask任せに
+せず安全なmode/ACLで作る、(4) cleanupで取得したlock handleを検証済み `RUN_LOCK` path entryとfile identity
+で束縛する。Codex PM `#5276235137` はこれらをIssue正本の不足/矛盾としてChatGPTへ再仕様化差し戻しした。
+前段 proposal `#5274678076` / `implementation_start` record `#5276117459` は限定scopeの使用済み記録であり、
+本再仕様化へ流用しない（実装は着手されず、fixed HEAD `1eccda8` は変更していない）。
+新 canonical proposal `#5276309603`（Codex PMは「今回依頼で明示された例外担当」としてClaude Codeを
+`PROPOSED_ROUTE` に提示）、新 `HUMAN_APPROVAL_RECORD: v2` `#5276357583`
+（`proposed_route=claude-code` で承認）が本ラウンドの実装開始正本。
+
+**PM補正（A0/A7/A8/B8是正）**: fixed HEAD `0840fbd` に対する追加レビューで新たに2件のcurrent threadが
+確認され、Codex PM補正判断 `#5277162613` が最新read-back時点の未解決4件（A0 identity command trusted
+execution、A7 marker safe mode、A8 payload安全属性、B8 child mutation binding）を同一Checkpoint内の
+実装修正と判定した。共通する失敗クラスは「安全性を検証した証拠と、後続処理が触る実体が最後まで
+束縛されていないこと」。A1 `GetFullPathNameW` threadは別途wontfix/resolved済みであり本ラウンドの対象外。
+既存canonical proposal `#5276309603` / `HUMAN_APPROVAL_RECORD: v2` `#5276357583`
+（subject=`issue:#54`、scope=`implementation_start`、route=`claude-code`）は変更なく継続利用。
+新proposal・新approvalは発行していない。
+
+**独立技術レビュー第2ラウンド（A9/B8(9)是正）**: fixed HEAD `6a11031` に対する独立技術レビュー
+`#5277468171` で新たに2件のcurrent threadが確認された。(1) A9: `RUN_LOCK` identity driftで
+completion作成前にblockedとなった場合、A8で作成済みのpayloadを「未作成」と誤報し残留を隠す
+契約になっていた、(2) B8(9): child単位のidentity/type/path safety再確認だけでは、同一inode上の
+regular fileへのin-place write（内容のみの書き換え）を検出できなかった。Codex PM判断 `#5277578620`
+はこの2件をIssue #54の既存Checkpoint内の実装修正と判定し、既存canonical proposal `#5276309603` /
+`HUMAN_APPROVAL_RECORD: v2` `#5276357583` を継続利用する形でroute=`claude-code`を維持した
+（新proposal・新approvalは発行していない）。
+
+**再仕様化v4（P1-2 delete target binding／Windows・Linux OS分岐）**: fixed HEAD `334b24f`
+（`0549e83`是正の同期コミット）に対する独立技術レビュー`#5277901998`は、AC3を非outdated・
+未解決のP1 2件で **fail** と判定した。(1) B8(9)が比較を要求する「(6)時点のchild identity」を
+`run-inventory/v1` は記録していない（v1のfile entryはpath/size/hash、directory entryはpathのみ
+であり、device+inode / `FILE_ID_INFO` と比較する基準値がない）。(2) Linux/WSLでchild descriptorを
+検証しても `unlink` はpathnameを解決してmutationするため、再取得後に同一UIDの別processが
+rename/replaceした場合、「同じdescriptorで即時unlink」という記述だけでは検証済み実体を削除対象へ
+原子的に束縛できない。同HEADのChatGPT要件レビューは`REVIEW_VERDICT: approve risk=high`（Issue #54
+本文および[#5278010167](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5278010167)
+でのChatGPT自身の記録）であり、要件面はpass・技術面（AC3）のみCodexがfailと判定した構図だった。
+Codex PM判断`#5278028614`はP1-1（既存AC3の実装詳細として閉じ得る）とP1-2（Issue正本の安全契約
+不足）を明確に区別し、限定文言修正での続行を「AGENTS.mdの同一タスク2敗後3回目リトライ禁止」に
+抵触すると判定して拒否、ChatGPTへ再仕様化を差し戻した。同時に既存canonical proposal
+`#5276309603` / `HUMAN_APPROVAL_RECORD: v2` `#5276357583` は、P1-2が削除mutationの安全契約・
+利用API・保証不能時挙動を新たに確定する仕様変更であるため、再仕様化後の実装開始へ**流用不可**と
+判定した。
+
+その後、「Cursorは現在利用可能トークンを持たず本Issueの実装を開始できない」という新しい一次入力
+（`AGENTS.md` Claude Code例外委譲条件に該当）に基づき、Codex PMは新canonical proposal
+`#5278352801`（`PROPOSED_ROUTE: claude-code`、scopeは更新後Issue #54の固定4ファイルと既存5AC
+のみ）を発行した。人間はこの対話で `HUMAN_APPROVAL_RECORD: v2` `#5278387881`
+（`proposed_route=claude-code`、`decision=approve`）としてapproveし、Codex PMはroute確定
+`#5278407512`で、proposal・承認recordのfield完全一致とactive一意性を照合したうえで
+`route=claude-code` の `implementation_start` を確定した。既存Cursor向けrecord `#5278202174`
+（`proposed_route=cursor`）は別tupleであり、今回のClaude Code routeへは流用していない。
+Issue #54本文はこの再仕様化により、B8(6)のprocess-local child identity baseline契約、B8(9)の
+Windows/Linux-WSL OS別delete target binding契約、Windows nativeでの技術前提（handle-bound
+`SetFileInformationByHandle`+`FileDispositionInfo`）とLinux/WSLでの技術前提
+（`unlinkat`のpathname解決契約はchild FDへの直接binding手段ではない）を明記する形へ更新済み。
+
+**再仕様化v5（6 finding是正／RUN_ROOT baseline・share条件・A8 rescan・directory accounting）**:
+fixed HEAD `af7c9cd`/`96f1d96`（v4是正後）に対する追加のCodex独立技術レビュー`#5289296528`は
+`REVIEW_VERDICT: request-changes risk=high`。Codex（PM）判断`#5289485250`は次の6件すべてを
+成立と判定し、finding 1・3・4・5は既存Issue契約の実装・文書同期不足として**今回修正**、
+finding 2・6はIssue本文の仕様不足として一度ChatGPTへ再仕様化を差し戻した（`route=mixed`）。
+
+1. **finding 1（Windows verified handle share条件不足）**: verified handleがwrite/delete
+   sharingを十分に排除する契約になっておらず、size/hash確認後からmutationまでの間に同一UID等の
+   別processが内容変更・renameできる余地があった。
+2. **finding 2（`RUN_ROOT`自身のidentity baseline不足）**: process-local child identity baseline
+   がdescendant中心で、`RUN_ROOT` directory自身のidentity取得時点・比較対象・drift時挙動が
+   未定義だった。`RUN_ROOT` rename→元pathへのreplacement作成等でdescendant検証を通過しながら
+   別rootを操作できる余地があった。
+3. **finding 3（A8 completion前再走査の安全性条件不足）**: A8のcompletion前再走査がB6のOS別
+   recursive safety predicateと同じ強度になっておらず、Linux/WSLのnested mount/bind mount・
+   mountinfo評価・ACL確認・評価不能時のfail-closedが明記されていなかった。
+4. **finding 4（directory child集合条件の矛盾）**: bottom-up削除では承認済みchildを正常に削除
+   すればchild集合は減少するが、現SSOTの「child集合の増減」を一律driftとして拒否する残存文言が、
+   正常な削除による縮小まで`inventory_changed`にしてしまう論理矛盾を残していた。
+5. **finding 5（AC4のWindows handle-based delete capability unavailable観測例不足）**:
+   `docs/harness/setup.md`に、read-only検査は通過したがverified handleへの安全なdelete
+   disposition capabilityを証明できないnegative scenarioが不足していた。
+6. **finding 6（A8 post-write失敗時のresidue記録不足）**: payload書き込み後にA8のdescendant
+   安全性再走査が失敗した場合、completion未作成だけでなく`payload_written=true`等の肯定記録が
+   契約として明記されていなかった。
+
+その後、正規PM proposal`#5289589235`（`PROPOSED_ROUTE: claude-code`、scopeは固定4ファイル）を
+Codex（PM）本人が発行し、人間は`HUMAN_APPROVAL_RECORD: v2` `#5289615101`
+（`proposed_route=claude-code`、`decision=approve`、`recorded_by=ChatGPT`）としてapproveした。
+ChatGPTのroute確定プリフライト`#5289663239`（`@codex`宛て）を経て、Codex（PM）本人が正式route
+確定`#5289667993`を投稿した。
+
+```text
+APPROVAL_SCOPE: implementation_start
+APPROVAL_RECORD: https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289615101
+APPROVAL_STATE: approved
+PM_VERDICT: approve risk=high route=claude-code
+```
+
+**（v5・監査履歴）** 上記 proposal `#5289589235` / approval `#5289615101` / route `#5289667993` は
+v5実装の監査履歴として本文に残すが、**superseded**——2026-08-17以降の`implementation_start`へは
+**非流用**（v6再仕様化およびv6是正ラウンドの正本proposal/approval/routeへ差し替え済み）。
+
+本ラウンド（v5）より前のproposal・approval（`#5276309603`/`#5276357583`、`#5278352801`/`#5278387881`
+を含む）は、v5再仕様化に伴う`implementation_start`としては流用しない。
+
+**再仕様化v6（pre-write target binding／A7 marker + A8 payload）**: fixed HEAD
+`4c3effe6f0f5809ec3848d5db069c5a517b67969`（PR #132 current HEAD）に対するCodex独立技術レビュー
+`#5291297447`は `REVIEW_VERDICT: request-changes risk=high`。current P1
+[`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568)
+は、A8がpayload pathnameへの最初のwrite前にfresh target bindingを要求しておらず、同一UIDの
+非協調processが外部fileへのhard linkを先置きするとpathname write/truncateが`RUN_ROOT`外の
+既存実体を書き換え得ると指摘した。同HEADのcurrent P1
+[`discussion_r3782373045`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782373045)
+は、`RUN_INSTANCE_MARKER`のcreate-new後にpathnameを再openしてschema writeし得る同型の欠陥を
+指摘した。Codex（PM）判断`#5291492454`はこれらをvalidと判定し、単なるSSOT同期漏れではなく
+**Issue #54のpre-write target binding契約不足**としてChatGPTへ再仕様化を差し戻した。wontfix /
+後回しは採用していない。本再仕様化では「writer-created regular artifactへの最初のwriteは
+create-newで得た実体へ束縛する」という共通契約にA7/A8を統合する。
+
+canonical proposal `#5289589235` / `HUMAN_APPROVAL_RECORD: v2` `#5289615101` / route確定
+`#5289667993` を含め、**本2026-08-17 v6再仕様化より前のproposal / implementation_start approvalは
+流用しない**（v5分は上記「（v5・監査履歴）」のとおり superseded・非流用）。旧v6 proposal
+[`#5311085139`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311085139)、
+旧 `HUMAN_APPROVAL_RECORD: v2`
+[`#5311256262`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311256262)、
+旧 Codex PM route確定
+[`#5311265605`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311265605) も、
+**v6是正ラウンド（下記）の`implementation_start`へは非流用**（監査履歴として残す）。
+新canonical proposal
+[`#5311558125`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311558125)、
+新 `HUMAN_APPROVAL_RECORD: v2`
+[`#5311600611`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311600611)
+（`proposed_route=cursor`、`decision=approve`）、Codex PM route確定
+[`#5311611273`](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311611273)
+（`route=cursor`）が本ラウンド（v6是正）の実装開始正本。review base HEAD:
+`56def48cfecff031d2d2c6a35a3971c320e7bdd7`。
+
+```text
+APPROVAL_SCOPE: implementation_start
+APPROVAL_RECORD: https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311600611
+APPROVAL_STATE: approved
+PM_VERDICT: approve risk=high route=cursor
+```
+
+**（v6）実装（pre-write binding・2026-08-17）**: 固定4ファイルへ A7 `RUN_INSTANCE_MARKER` / A8 payload regular file の
+pre-write create-new + same-handle binding 契約、setup.md 否定例3件、fail-closed 8の
+`verify-before-mutate` / `concurrency-interrupt-residue` 同期、cursor.md 最小同期を反映
+（実装tip `c9f2663915a0d263e08e6be45e79c11606df626a`。検証結果は下表。decisions同期tip `56def48`）。
+
+**（v6是正）実装**: 固定4ファイルへ A7 pre-write identity照合（content write前停止）・
+A7 post-write residue肯定記録、setup.md AC1/residue観測例、decisions.md v5 superseded明示・
+v6レビュー/read-back実状態同期を反映（実装tip cfe6154。検証結果は下表。本同期コミットで記録）。
+
+本ラウンド（v6是正）より前のproposal・approval（`#5289589235`/`#5289615101`/`#5289667993`、
+`#5311085139`/`#5311256262`/`#5311265605` を含む）は、v6是正の`implementation_start`としては
+**非流用**（v5は**superseded**監査履歴）。Cursorは実装担当としてこの委任を受け、
+Codex（PM）の役割・route判定・承認record検証を代理・自称しない（記録者は`Cursor`）。
+
+## 採用する方針
+
+- **最小run固有排他を仕様スコープへ戻す**: OS標準lockのみ。repo内script/daemon/DB/packageは追加しない
+- `.cursor/rules/ai-workflow.mdc` にidentity-root・`LOCK_CHAIN`/`RUN_CHAIN` 別検証・
+  lock bootstrap限定・`RUN_LOCK` 取得後run側作成・exact completion record・
+  cleanup read-only gate（A0–A9/B0–B8制御順序）を短く追記
+- `docs/harness/roles/cursor.md` は正本参照を維持し設計意図・chain分離・lock bootstrap順序のみ同期
+- `docs/harness/setup.md` にfresh bootstrap成功・bootstrap安全性不明・bind mount判定不能・
+  lock/run chain分岐・cleanup missing path・post-approve drift・否定例・fail-closed 8基準の実装後照合記録
+- provenanceはpath名推測禁止。exact GitHub record + local再検証の組み合わせ
+- Windowsはcurrent SIDと `Win32_UserProfile.LocalPath` の対応をルール契約として記述
+- **（v3）** 新規directory作成はLinux/WSL `0700`・Windows safe owner/DACLをrequested値として固定し、
+  作成直後に同一OS検査で再検証する（umask/既定ACL任せにしない）
+- **（v3）** `RUN_LOCK` はcreate-new/open-existingを区別して取得し、取得直後・completion直前
+  （writer）／取得直後・post-approval再取得直後・削除mutation直前（cleanup）の計4箇所で
+  opened handleと現在のpath entryのfile identityをexact比較する
+- **（v3）** completion v2のwriter正常フローは `residue=present` のみを許可する
+- **（PM補正）** Linux/WSL identity-root解決を`PATH`検索の`id`/`getent`から、syscall/NSS APIまたは
+  実体検証済み絶対パスcommandへ固定する（`PATH`差し替え・shadowing経路を正本にしない）
+- **（PM補正）** `RUN_INSTANCE_MARKER`をLinux/WSL `0600`固定・Windows safe owner/DACLで作成し、
+  作成直後に同一OS検査で再検証する（`RUN_LOCK`と同じ規則をmarkerへも適用）
+- **（PM補正）** payload descendantをcleanup（B6）互換の安全属性で作成し、completion record作成前に
+  全descendantを再走査する。unsafe/判定不能が1件でもあればcompletion recordを作らない
+- **（PM補正）** cleanup削除時、`RUN_LOCK`のhandle/path identity再確認に加え、approve後に取得した
+  inventoryの各child entryについてもno-follow実体identityをmutation直前に個別再確認する
+- **（A9/B8(9)是正）** A9でlock identity driftによりblockedとなった場合、A8で作成済みのpayloadを
+  `payload_written=false`等と誤報しない。payloadは残留し得る状態として保持し、completionのみ
+  未作成のまま自動delete/repair/resumeへ拡張しない
+- **（A9/B8(9)是正）** B8(9)のchild単位識別確認に、regular fileの`size_bytes`/`sha256_lower_hex`を
+  既存`run-inventory/v1`とexact再照合する手順と、directoryのmutation直前child集合再列挙を追加する。
+  内容/集合不一致は既存`inventory_changed`へ収束させ、新しいinventory versionは作らない
+- **（v4）** B8(6)で公開`run-inventory/v1`とは別に、process-local・非公開のchild identity
+  baseline（`child_identity_map[path_b64] = {entry_type, identity}`）を`RUN_INSTANCE_MARKER`を
+  含む全descendantについて取得し、B8(9)の child 単位比較元とする。GitHub・completion record・
+  公開inventory・ログへidentityは出さない
+- **（v4）** Windows nativeの削除mutationは、削除直前に取得したverified handle（identity/type/
+  owner/DACL/reparse/canonical boundaryとsize/hashを同一handle上で再確認済み）に対する
+  `SetFileInformationByHandle` + `FileDispositionInfo`相当のhandle-based dispositionでのみ許可し、
+  pathname-only `DeleteFile`/`RemoveDirectory`をbinding根拠にしない。B8(6)時点の対象が別実体へ
+  差し替わっていた場合はpathnameを追跡して削除しない
+- **（v4）** Linux/WSLは、現在のthreat modelで同一UIDの非協調processによるrename/replace/writeを
+  排除しないため、identity/content/provenance/lock等すべてのread-only checkがpassしても、現在
+  許可されたOS/runtime標準APIだけでは検証済みchild実体と実delete mutation対象を原子的に束縛
+  できないと判断し、削除mutationを行わずに`path_safety_unknown`で停止する契約へ固定する
+- **（v5・finding 2）** B8(6)でprocess-local baselineとして`RUN_ROOT`自身の`run_root_identity`を
+  child mapとは別に必須取得し、B8(9)の各mutation candidate処理直前にcurrent `RUN_ROOT`を
+  baselineとexact比較する。不一致（rename/replacement等）は`path_safety_failed`、証明不能は
+  `path_safety_unknown`とし、後段のOS別delete capability判定でこの前段失敗を上書きしない
+- **（v5・finding 1）** Windows nativeのverified handleは、write/delete sharingを許可しないか
+  OS/APIとして同等の安全性を証明できるshare条件で取得する。既存handleとのshare conflict等で
+  target bindingを証明できない場合は`path_safety_unknown`でmutation前に停止する
+- **（v5・finding 3）** A8のcompletion前descendant再走査を、B6と同一のOS別recursive safety
+  predicate（Linux/WSLのnested mount/bind mount・mountinfo評価・ACL確認・評価不能時fail-closedを
+  含む）へ明示的に揃える
+- **（v5・finding 4）** directory child集合の再確認で拒否する対象を、承認snapshot外の新規entry・
+  削除対象として検証済みのchildの残留・置換/type/content/identity/safety drift・列挙不能へ限定し、
+  bottom-up削除による正常なchild集合の減少はdriftとして扱わない
+- **（v5・finding 5）** `docs/harness/setup.md`にWindows handle-based delete capability
+  unavailableの否定例を追加し、`delete_attempted=false`/`approval_reusable=false`が観測できる
+  ようにする
+- **（v5・finding 6）** A8のpayload write後recursive safety失敗でも、`payload_written=true`
+  `completion_record_created=false` `result=blocked` `auto_cleanup=false` `auto_repair=false`
+  `auto_resume=false`を肯定記録し、completion未作成をresidue不存在の根拠にしない
+- **（v6）** `RUN_INSTANCE_MARKER` と payload regular file の最初のcontent writeは、atomic
+  create-new / no-overwrite で得た同一 handle/descriptor へ束縛する。create-new 後の pathname
+  再 open による初回 write / truncate は禁止。expected pathname への既存 entry（外部 file への
+  hard link 先置き含む）は open/truncate しない。pre-write binding を証明不能・不一致なら当該
+  write 前に `path_safety_failed` / `path_safety_unknown` で blocked。A7 失敗時は A8 未進入
+- **（v6）** payload へ1回でも write mutation 成功後の後続失敗は `payload_written=true`
+  `completion_record_created=false` `result=blocked` を肯定記録（残留を隠さない）
+- **（v6是正・AC1）** A7のcreate-new成功後、marker content writeの**前に**current path entry
+  identityと`WRITE_TARGET`（handle）identityを照合する。不一致→content writeしない・
+  `path_safety_failed`・A8未進入。一致証明不能→`path_safety_unknown`でwrite前停止・A8未進入。
+  pathname再openによる初回content writeを正常経路へ戻さない
+- **（v6是正・finding P2）** A7のmarker content write完了後にread-back/decode/schemaが失敗した場合、
+  `run_root_created=true` `instance_marker_created=true` `payload_written=false`
+  `completion_record_created=false` `result=blocked`を肯定記録する。
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false`。作成済みmarker/residueを
+  未作成扱い・省略で隠さない（既存`provenance_unknown`等へ収束可。新stop/schema禁止）
+- **（v10）** writer の fresh 成功経路（A7/A8 最初の content write 成功）は `platform=windows_native`、
+  または `leaf_containment_capability=demonstrated` を現行の同一 UID/SID 非協調 process 脅威モデルに
+  対し OS/API として実証できる環境に限定する（**v12 で superseded**。v12 では `demonstrated` のみ）
+- **（v10）** Linux/WSL の現行契約プリミティブ（open descriptor / `flock` / file mode /
+  ancestor・`RUN_ROOT` binding）だけでは `leaf_containment_capability=demonstrated` にならず、
+  A7/A8 最初の content write 前に既存 `path_safety_unknown` で blocked とする
+- **（v10）** `discussion_r3795298185` / `discussion_r3800278015` で指摘された fail-closed 契約と
+  Linux/WSL 無条件 writer 成功例の矛盾を `.cursor/rules/ai-workflow.mdc` と `docs/harness/setup.md`
+  の双方で解消する
+- **（v12）** A4/A6 の各 missing directory create は **PreDirCreateTrustedChainContainment**
+  （trusted anchor→immediate parent を create+ImmediatePostCreateVerify 完了まで保持。
+  `chain_containment_capability=demonstrated` のみ create 許可。即時親だけの PreDirCreateParentBind 単独は
+  不十分）。証明不能は create 前 `path_safety_unknown` `create_dir_attempted=false`
+- **（v12）** A7/A8 の content write は **`leaf_containment_capability=demonstrated` のみ**許可
+  （9条件一体の enforcing handle contract。`platform=windows_native` 単独 bypass 廃止）
+- **（v12）** v10 の「`platform=windows_native` または demonstrated」writer 成功経路は **superseded**
+  （削除せず履歴として残す）
+
+## 採用しない方針 / 却下した代替案
+
+- **単一 `PATH_CHAIN`（`LOCK_ROOT`→`RUN_ROOT` 直結）**: 兄弟系統を誤検証するため却下
+- **device ID 照合だけでの mount/bind mount 判定**: bind mount 迂回リスクのため却下
+- **cleanup への writer missing-component 作成規則の流用**: read-only 境界違反のため却下
+- **cleanup での `OpenOrCreate`**: missing lock を暗黙作成するため却下
+- **追加resolver script・package・daemon・repo内lock実装ファイル・provenance DB**: 4ファイル文書のみで表現するため却下
+- **環境変数homeを正本化**: 偽装リスクのため却下
+- **canonical absolute scratch rootのGitHub記録**: 個人情報・absolute path漏洩リスクのため撤回
+- **lock競合時のsteal・待機・lock file削除による突破**: 誤cleanupリスクのため却下
+- **本PRでの実cleanup**: カテゴリ④は別発効点のため却下
+- **固定manifest外ファイルの追加**: Issue境界を超えるため却下
+- **環境変数優先またはOS側無条件優先の不一致fallback**: 両方禁止
+- **fail-closedのままcleanupを常時blockedに縮小**: Checkpoint目的と矛盾するため却下
+- **（v3）曖昧な `OpenOrCreate` 一発での `RUN_LOCK` 取得**: create/existingが不分離のままだと
+  取得直後の対象file特定が曖昧になりTOCTOU（取得後のpath差し替え）を検出できないため却下
+- **（v3）writer正常フローでの `residue=none` 受理**: A9到達時は `RUN_ROOT`/marker が存在し
+  通常到達不能な状態を記録することになり、誤ったresidue無し記録を許すため却下
+- **（v3）新規directory作成時のumask/既定ACL依存**: 環境のumask設定次第でmodeが変動し
+  非決定的な安全性になるため却下し、requested modeを明示固定した
+- **（PM補正）identity-root解決を`PATH`検索の`id`/`getent`へ依存させること**: 差し替え・shadowing可能な
+  実行経路を正本にするとHOME偽装と同種のリスクが残るため却下
+- **（PM補正）marker/payloadの作成属性をumask/既定ACLへ委ねること**: `RUN_LOCK`/directoryと同じ理由で
+  非決定的になるため却下し、markerは`0600`固定・payloadはcleanup互換属性へ固定した
+- **（PM補正）削除mutation直前を`RUN_LOCK`のhandle/path identity再確認だけで済ませること**: lockの
+  identityとdescendant個々の実体は別物であり、inventory取得後に子要素が差し替えられる経路を
+  閉じられないため却下し、child単位のno-follow実体identity再確認を追加した
+- **（A9/B8(9)是正）A9のlock drift時に「payload/completionとも未作成」と一律報告すること**: A8が
+  既に成功していればpayloadは実在するため、実在する残留を偽って否定するfabricationになるため却下した
+- **（A9/B8(9)是正）B8(9)をidentity/type/path safetyの再確認のみで完結させること**: 同一inode上の
+  in-place writeやdirectory child集合の増減はidentity不変のまま発生しうるため検出できず、
+  size/SHA-256再照合とchild集合再列挙を追加した
+- **（A9/B8(9)是正）payload/inventory不一致検出に新しいstop_reasonを追加すること**: 既存
+  `inventory_changed`で意味的に閉じられるため、新規stop_reasonの追加は不要と判断し却下した
+- **（v4）検証済みdescriptorを保持して直後にunlinkする方式を安全根拠にすること**: Codex独立技術
+  レビュー`#5277901998`のP1-2で、rename/replace競合下では時間・協調性の仮定に過ぎず原子的
+  bindingにならないと指摘されたため却下した
+- **（v4）`openat2`のRESOLVE_*によるinspectionを後続pathname deleteのidentity binding保証として
+  扱うこと**: path解決時の安全性は高めるが、後続のpathname deleteを同一inodeへ束縛する代替には
+  ならないため却下した
+- **（v4）Linux/WSLの削除mutationを人間approvalだけで許可すること**: 人間approvalは技術的束縛
+  保証の代替にならないため却下した
+- **（v4）Linux/WSLの実cleanupを成立させるための新helper/runtime/isolationを本Checkpointへ
+  追加実装すること**: 固定4ファイル・文書契約のみというIssue #54のscope外であるため却下し、
+  必要になった場合は別Checkpointへ分離する
+- **（v4）P1-2再仕様化前の既存canonical proposal `#5276309603` / approval `#5276357583`を
+  そのまま実装開始承認として流用すること**: 削除mutationの安全契約・利用API・保証不能時挙動を
+  新たに確定する仕様変更であり、承認対象proposalの内容自体が変わるため却下し、新proposal
+  `#5278352801` / 新承認 `#5278387881` を取得した
+- **（v5・finding 4）「child集合の増減」を一律driftとして拒否する契約**: 上記「（A9/B8(9)是正）」
+  時点ではin-place write検出とchild集合変化検出を同列に導入する目的で採用したが、bottom-up削除
+  では承認済みchildの正常な削除自体がchild集合を減少させるため、この一律拒否は現在の規範契約では
+  **superseded**（優先度が上位の会計条件（承認snapshot外の新規entry・検証済みchildの未削除残留・
+  置換/drift/列挙不能の個別検出）へ置き換え済み）。「（A9/B8(9)是正）」の却下理由テキスト自体は
+  当時の判断記録として残すが、現在の規範は`.cursor/rules/ai-workflow.mdc` B8(9)の会計条件であり、
+  「child集合の増減」という文言で一律拒否する契約はこのIssueでは採用しない
+- **（v5・finding 1）read sharingのみでwrite/delete競合を防げるとみなすこと**: read shareを
+  許可しても他processのwrite/delete/renameを排除できなければtarget bindingが証明できないため
+  却下し、write/delete sharingを排除するか同等の安全性を証明できる条件を要求する
+- **（v5）`renameat2`等を用いたquarantine/交換方式を、本Issue内で検証なしに新しい安全根拠として
+  採用すること**: 未検証の新方式をfail-closedの代替根拠にはできないため却下し、Linux/WSLの実
+  cleanup有効化は別Checkpointでの設計・Codex PM評価を要求する
+- **（v5・finding 6）A8 post-write failureを契機とした自動cleanup/repair/resume**: 残留状態を
+  肯定記録することと、そこから自動的に後続処理を進めることは別問題であり、後者は誤った自動復旧の
+  リスクを生むため却下し、`auto_cleanup=false` `auto_repair=false` `auto_resume=false`を明示する
+- **（v10）platform 名・Linux/WSL で lock 取得成功だけを根拠に fresh writer 成功経路（marker/payload
+  content write・completion 作成）へ進むこと**: `leaf_containment_capability=demonstrated` を
+  OS/API 実証できない環境での content write は fail-closed 違反のため却下
+- **（v10）Linux/WSL で leaf containment を成立させる helper / isolation / runtime / daemon を
+  本 Checkpoint へ追加すること**: 固定4ファイル scope 外のため却下し、別 Checkpoint へ分離
+- **（v10）v9 以前の `implementation_start` / merge approval / route record を本ラウンドへ流用すること**:
+  非流用（v10 は新 proposal / approval / route に基づく）
+
+## 判断理由
+
+- writerとcleanup間の排他は明示的な共有lockなしでは証明できないが、OS標準プリミティブだけで足りる
+- identity-rootをOS由来で固定し、環境変数偽装への否定例を文書化することで、誤cleanupの主要経路を閉じる
+- exact GitHub completion record（相対path）とlocal再検証を組み合わせ、path単独推測を禁止する
+- 技術ゲートと人間approveを分離し、approveがゲートを代替しない契約を明示する
+- 文書正本化のみで実装・テスト・PRを先行し、merge（カテゴリ③）と実cleanup（カテゴリ④）を分離する
+
+## リスク（不可逆4カテゴリの該当有無）
+
+- カテゴリ① 非該当（absolute homeのGitHub記録を撤回し個人情報リスクを低減）
+- カテゴリ② 非該当
+- カテゴリ③ **該当**（`.cursor/rules/ai-workflow.mdc` 正本変更）
+- カテゴリ④ 本PR実装は非該当。将来の実cleanupは**別発効点で該当**
+
+`risk=high`。実装は v2 `implementation_start` 承認後に実施。merge は独立レビュー・
+`HIGH_RISK_TECH_GATE: passed` 後の merge scope 人間approveが必要。
+本PRのmerge承認はカテゴリ④の実cleanupへ流用しない。`implementation_start` / merge record を
+cleanup execution に流用しない。
+
+## このPRの最悪の失敗は何か・それは戻せるか
+
+1. **lock / provenance / path safetyの契約が誤り、同時writerまたは別cleanupを見逃し、
+   利用中・別run・別filesystemのデータをcleanup対象にする**:
+   ルール変更は `git revert` で戻せるが、誤cleanupの外部影響は完全復旧不能の可能性がある。
+2. **lockを過剰に厳しく定義しscratch/cleanupが常時fail-closedで停止する**:
+   可逆。誤削除より優先する設計判断。
+
+## 影響範囲
+
+- `.cursor/rules/ai-workflow.mdc`
+- `docs/harness/roles/cursor.md`
+- `docs/harness/setup.md`
+- `docs/decisions.md`（本エントリ）
+
+## 例外条件
+
+原則なし。`id` / `getent` / `Win32_UserProfile` / `flock` / exclusive FileStream が
+利用不能な環境はfail-closedで停止し、新resolver実装はIssue外設計変更としてCodex PMへ戻す。
+
+## 取り消し手順
+
+1. 実装PRをrevertする
+2. 上記4ファイルの本Issue由来変更を戻す
+3. 本 Decision Log の Status を `Superseded` へ更新する
+4. runtime `RUN_LOCK` fileは活動証明ではないため、revertだけを理由に自動削除しない
+5. 外部影響が既にある場合はrevertだけで復旧済みとみなさず、別Issueで影響調査する
+
+## 見直す条件
+
+- Windows / Linux・WSL以外のOSで同等resolverが必要になった場合
+- 追加script・lock daemon・provenance DBが必要と判明した場合（別Checkpoint）
+- 文書契約だけでは活動中run・inventory変化を観測できないと実測で判明した場合
+
+## レビュー記録
+
+| 項目 | 結果 | 証跡 |
+|---|---|---|
+| Draft PR | 作成済み | PR #132 |
+| canonical proposal（再仕様化後） | 固定 | #5263694044 |
+| HUMAN_APPROVAL_RECORD: v2 | implementation_start approved | #5263876000 |
+| Codex PM route（再仕様化後） | route=cursor | #5263894169 |
+| 旧 canonical proposal | **非流用**（再仕様化前監査記録） | #5263051242 |
+| 旧 `implementation_start` approval | **非流用**（再仕様化前監査記録） | #5263099857 |
+| 旧 Codex PM route | inactive（旧proposal用） | #5263113733 |
+| Codex独立技術レビュー（P1/P2指摘時） | request-changes risk=high | #5263502982 |
+| ChatGPT再判定（P1 supersede） | request-changes risk=high | #5263568325 |
+| ChatGPT要件レビュー（本実装 fixed HEAD） | **未実施** | implementation tip `a3aeac8` 待ち（AC5未充足） |
+| Codex独立技術レビュー（本実装 fixed HEAD） | **未実施** | 同上 |
+| `HIGH_RISK_TECH_GATE` | blocked / pending | 両レビュー完了前に進まない |
+| merge scope | 未承認 | `HIGH_RISK_TECH_GATE: passed` 後 |
+| `settings_apply` | 未承認 | — |
+| `execution` / 実cleanup | 未承認・未実行 | カテゴリ④別 scope |
+| implementation tip | `a3aeac84725cd7be0313c2049dabb48651b41c94` | instance binding 実装（中間 `e8658f0` は権威化しない） |
+| Fail-closed success propagation @ `a3aeac8` | **success** | run `31577773018` |
+| Issue manifest diff @ `a3aeac8` | **FAIL** `manifest_missing` | run `31577792954`。Issue #54 本文に `issue-change-manifest:v1` 欠落。復旧は Issue 本文更新（固定4ファイル外）→ Codex PM |
+| Issue #54 本文 `issue-change-manifest:v1` 復旧 | 完了 | 固定4ファイルmanifestとして復旧済み（Codex PM route再評価 #5264655488 で照合済み） |
+| PR #132 本文構造復旧 | 完了 | 本文が単一行化・文字化けしていた構造破損を、ChatGPTがmetadataのみで復旧（HEAD変更なし） |
+| **現 fixed tip（PR #132 HEAD）** | `1bd64cb19b5187a1ba104f8fd3dd09c1c6f3d577` | tip `a3aeac8` と CI disposition を同期したdocsコミット。以後 manifest復旧・本文復旧を経てもHEAD不変 |
+| Fail-closed success propagation @ `1bd64cb` | **success** | run [31578332485](https://github.com/kikujizo/ai-harness/actions/runs/31578332485) |
+| Issue manifest diff @ `1bd64cb` | **success** | run [31580948676](https://github.com/kikujizo/ai-harness/actions/runs/31580948676)（manifest復旧・PR本文復旧後の再実行） |
+| ChatGPT要件レビュー（fixed HEAD `1bd64cb`） | **request-changes** risk=high | [#5264631720](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5264631720)。AC1/AC2/AC3/AC5 ○、**AC4 ×**（本Decision Logの最終HEAD・CI・review disposition未同期） |
+| Claude Code 例外委譲（CI復旧確認・記録限定） | 完了 | [#5264479320](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264479320) 委譲 → [#5264545733](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264545733) 記録 |
+| Codex PM route再評価（AC4修正のactor候補） | `PM_VERDICT: approve risk=high gate=human_approval` / `PROPOSED_ROUTE: claude-code` | [#5264655488](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264655488) / proposal本文 [#5264648223](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5264648223)。既存承認 `#5263876000`（`proposed_route=cursor`）はactor変更へ流用不可のため新規承認が必要と判定 |
+| HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=docs/decisions.md最小同期） | **approve** | [#5264680032](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5264680032)。`docs/decisions.md`のみが対象。他3ファイル・merge・settings_apply・execution・実cleanupへは流用しない |
+| fixed HEAD `1bd64cb`以降の再要件レビュー・独立技術レビュー | **superseded** | 上記4件は完了前にv3再仕様化（下記）へ差し替わり、fixed HEADが `1eccda8` へ進んだため対象外。旧HEAD `1bd64cb`向けの指摘はv3実装で個別に再確認する |
+| **（v3再仕様化）** Codex独立技術レビュー（新規4指摘の確認） | 未解決4件を特定 | #5276235137（新規`RUN_LOCK`再検証・A9 `residue=none`拒否・writer safe mode/ACL・cleanup handle/path binding） |
+| 旧 canonical proposal（v3前段） | **非流用**（実装未着手のまま差し替え） | #5274678076 |
+| 旧 `implementation_start` approval（v3前段） | **非流用**（実装未着手のまま差し替え） | #5276117459 |
+| 新 canonical proposal（v3） | 固定 | #5276309603 |
+| HUMAN_APPROVAL_RECORD: v2（v3, route=claude-code, scope=implementation_start） | **approve** | #5276357583 |
+| **v3実装開始時HEAD** | `1eccda8558a57138a9382811301c40d18341fad4` | 独立技術レビュー時点のblocked HEAD。本ラウンドの実装起点 |
+| **v3実装tip** | `7a24e94a42b9cdd69d615122864023adca7558b0` | safe create・RUN_LOCK identity binding・cleanup pre/post binding・`residue=present` only を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `7a24e94` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head 7a24e94a42b9cdd69d615122864023adca7558b0`）。GitHub Actions run IDはCI実行後にPR側で別途確認する |
+| Fail-closed success propagation @ `7a24e94` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（対象拡張子`.sh/.js/.cjs/.mjs/.yml/.yaml`が今回diffに含まれないため）。GitHub Actions run IDはCI実行後にPR側で別途確認する |
+| `git diff --check origin/main...HEAD` @ `7a24e94` | **success**（exit 0） | ローカル実行確認 |
+| Codex独立技術レビュー（fixed HEAD `238ae78`） | **request-changes** risk=high | [#5276711835](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5276711835)。AC2/AC3/AC5 ○、**AC1 ×**（`docs/harness/setup.md`のWindows writer成功例が`OpenOrCreate`陽性記述のままA5契約と矛盾） |
+| Claude Code による `docs/harness/setup.md` 修正 | 完了 | Windows writer成功例をA5のcreate-new/open-existing+handle/path identity binding契約へ同期。他3ファイル無変更 |
+| **fixed tip** | `0840fbdf0d6e60b6c5bd2aae76ce327440c57ddb` | `OpenOrCreate`陽性記述の同期修正コミット |
+| Issue manifest diff @ `0840fbd` | **success** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `0840fbd` | **success** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `0840fbd` | **success**（exit 0） | ローカル実行確認 |
+| PR #132 コメント（fixed HEAD `0840fbd`のレビュー依頼） | 記録済み | [#5276786924](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5276786924) |
+| Codex PM補正判断（追加current thread 2件検出、A0/A7/A8/B8を今回修正と判定） | `PM_VERDICT: approve risk=high route=claude-code` | [#5277162613](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277162613)。A1は別途wontfix/resolved済み。既存proposal `#5276309603`/approval `#5276357583`を継続利用、新規発行なし |
+| **（PM補正）fixed tip** | `f8c80302b2b874e4e2d75602c84f144b458c86a5` | A0/A7/A8/B8補強コミット |
+| Issue manifest diff @ `f8c8030` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `f8c8030` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `f8c8030` | **success**（exit 0） | ローカル実行確認 |
+| PR #132 コメント（PM補正 fixed HEAD `6a11031`のレビュー依頼） | 記録済み | [#5277328523](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277328523) |
+| Codex独立技術レビュー第2ラウンド（fixed HEAD `6a11031`） | **request-changes** risk=high | [#5277468171](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277468171)。A9（payload保全）/B8(9)（content binding）の2件 |
+| Codex PM判断（A9/B8(9)是正） | `PM_VERDICT: approve risk=high route=claude-code` | [#5277578620](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277578620)。既存Checkpoint内の実装修正と判定、既存proposal `#5276309603`/approval `#5276357583`継続利用 |
+| **（A9/B8(9)是正）fixed tip** | `85eb4b3cae7e2d3c588af4201b49a49fcbeb58e7` | A9 payload保全・B8(9) content/child集合binding補強コミット |
+| Issue manifest diff @ `85eb4b3` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `85eb4b3` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `85eb4b3` | **success**（exit 0） | ローカル実行確認 |
+| advisor指摘（B8(9) directory再検証の論理矛盾） | 是正 | 削除はbottom-upのため削除直前の子は空であり、(6)時点inventoryとの「exact一致」要求は非空directoryで恒久的に不成立になる論理矛盾があった。PM原文「空であることを確認してから削除する」（#5277578620）に合わせ、(a) 残余child集合が空であること (b) inventory外entry混入がないこと、という会計条件へ書き換えた |
+| **（advisor是正）fixed tip** | `0549e836def844a8a1328b0bce7fe6a3c9406d16` | B8(9) directory再検証の論理矛盾是正、A9の`payload_written=true`肯定記録、size/hash再取得〜unlink間の残留window明記 |
+| Issue manifest diff @ `0549e83` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `0549e83` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --check origin/main...HEAD` @ `0549e83` | **success**（exit 0） | ローカル実行確認 |
+| **（v4）** Codex独立技術レビュー（fixed HEAD `334b24f`、AC3 P1-1/P1-2） | **request-changes** risk=high（AC3 fail） | [#5277901998](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5277901998)。B8(6) child identity baseline未定義（P1-1）、Linux/WSL pathname `unlink`のrename/replace競合下での実体束縛不能（P1-2） |
+| **（v4）** ChatGPT要件レビュー（fixed HEAD `334b24f`） | `REVIEW_VERDICT: approve risk=high`（要件面はpass） | Issue #54本文の記載、および[#5278010167](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5278010167)でのChatGPT自身の確認記録による。GitHub上に単体の`REVIEW_VERDICT`コメントは特定できなかったが、両記録が一致して同HEADでのapproveを示す |
+| **（v4）** Codex PM判断（P1-2再仕様化差し戻し・既存proposal/approval非流用） | 再仕様化へ差し戻し、限定修正拒否 | [#5278028614](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278028614)。AGENTS.md「同一タスク2敗後3回目リトライ禁止」を適用、`#5276309603`/`#5276357583`を非流用と判定 |
+| **（v4）** Issue #54本文のP1-1/P1-2再仕様化 | 完了 | ChatGPTによる本文更新。B8(6) child identity baseline・B8(9) Windows/Linux-WSL OS別delete target binding契約を追加 |
+| **（v4）** 新 canonical proposal（route=claude-code） | 固定 | [#5278352801](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278352801)。Cursorトークン不足によるClaude Code例外委譲、scopeは固定4ファイル・既存5AC |
+| **（v4）** HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=implementation_start） | **approve** | [#5278387881](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278387881) |
+| **（v4）** Codex PM route確定 | `PM_VERDICT: approve risk=high route=claude-code` | [#5278407512](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5278407512)。既存Cursor向けrecord `#5278202174`（proposed_route=cursor）は別tupleとして非流用 |
+| **（v4）実装tip** | `3d7d4e98b2b2e0186304ea9b260e602fc099da51` | B8(6) child identity baseline・B8(9) Windows handle-bound disposition／Linux-WSL fail-closed分岐を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `3d7d4e9` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head 3d7d4e98b2b2e0186304ea9b260e602fc099da51`） |
+| Fail-closed success propagation @ `3d7d4e9` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head 3d7d4e98b2b2e0186304ea9b260e602fc099da51`） |
+| `git diff --name-only origin/main...HEAD` @ `3d7d4e9` | 固定4ファイルのみ | ローカル実行確認（`.cursor/rules/ai-workflow.mdc` / `docs/decisions.md` / `docs/harness/roles/cursor.md` / `docs/harness/setup.md`） |
+| `git diff --check origin/main...HEAD` @ `3d7d4e9` | **success**（exit 0） | ローカル実行確認 |
+| **（v4是正）** advisor指摘によるsetup.md table pipe escape・ChatGPT要件レビュー記録訂正・cursor.md SSOT整合 | 完了 | Codex技術レビュー観点で読める`docs/harness/setup.md`のfail-closed 8表・否定テストテーブルが`os=linux|wsl`の未エスケープpipeでセル崩壊していた点、および決定記録が実際には存在した`REVIEW_VERDICT: approve risk=high`（ChatGPT、Issue #54本文・[#5278010167](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5278010167)）を「未実施」と誤記していた点を是正 |
+| **（v4是正）実装tip** | `6e71c2a795c873dc2a919e767cc8a5bcf9c60361` | 上記3点の是正コミット |
+| Issue manifest diff @ `6e71c2a` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `6e71c2a` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --name-only origin/main...HEAD` @ `6e71c2a` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `6e71c2a` | **success**（exit 0） | ローカル実行確認 |
+| **（v5）** Codex独立技術レビュー（fixed HEAD `af7c9cd`/`96f1d96`、6 finding） | **request-changes** risk=high | [#5289296528](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289296528) |
+| **（v5）** Codex（PM）6 finding判定 | route=mixed（finding 1・3・4・5は今回修正、finding 2・6はChatGPT再仕様化） | [#5289485250](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289485250) |
+| **（v5）** Issue #54本文の6 finding再仕様化 | 完了 | ChatGPTによる本文更新（root identity baseline・post-write residue契約を追加） |
+| **（v5）** 正規PM proposal（route=claude-code） | 固定 | [#5289589235](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289589235)（Codex本人が発行） |
+| **（v5）** HUMAN_APPROVAL_RECORD: v2（route=claude-code, scope=implementation_start） | **approve** | [#5289615101](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289615101) |
+| **（v5）** route確定プリフライト | `@codex`宛て | [#5289663239](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289663239)（ChatGPT） |
+| **（v5）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=claude-code` | [#5289667993](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5289667993)（Codex本人が投稿） |
+| **（v5）実装tip** | `e7b993e67696af831c8a47a77a80c22b10460809` | 6 finding（RUN_ROOT identity baseline・Windows share条件・A8 B6同等rescan・directory bottom-up accounting・capability unavailable観測例・A8 post-write residue肯定記録）を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `e7b993e` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head e7b993e67696af831c8a47a77a80c22b10460809`） |
+| Fail-closed success propagation @ `e7b993e` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head e7b993e67696af831c8a47a77a80c22b10460809`） |
+| `git diff --name-only origin/main...HEAD` @ `e7b993e` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `e7b993e` | **success**（exit 0） | ローカル実行確認 |
+| **（v5是正）** advisor指摘によるdecisions.md却下代替案の補完（renameat2/read-sharing/自動復旧/child増減supersede） | 完了 | 採用しない方針にv5分の4項目が欠けていた点を補完 |
+| **（v5是正）実装tip** | `bb3772df72b953b3d3b42b69e682bfffe8d435c6` | 上記補完コミット |
+| Issue manifest diff @ `bb3772d` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `bb3772d` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --name-only origin/main...HEAD` @ `bb3772d` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `bb3772d` | **success**（exit 0） | ローカル実行確認 |
+| **（v6）** Codex独立技術レビュー（fixed HEAD `4c3effe`、pre-write binding P1） | **request-changes** risk=high | [#5291297447](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5291297447)。[`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568)（A8 hard-link先置き）、[`discussion_r3782373045`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782373045)（A7 marker pathname再open） |
+| **（v6）** Codex（PM）P1判定・再仕様化差し戻し | valid、ChatGPTへ再仕様化 | [#5291492454](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5291492454) |
+| **（v6）** Issue #54本文のpre-write binding再仕様化 | 完了 | ChatGPTによる本文更新（2026-08-17） |
+| **（v6）** 新canonical proposal（route=cursor） | 固定 | [#5311085139](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311085139) |
+| **（v6）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5311256262](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311256262) |
+| **（v6）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5311265605](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311265605) |
+| **（v6）実装tip** | `c9f2663915a0d263e08e6be45e79c11606df626a` | A7/A8 pre-write create-new + same-handle binding、setup否定例3件、fail-closed 8同期、cursor.md最小同期を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `c9f2663` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4`（`node harness/checks/issue-manifest-diff.cjs --repo kikujizo/ai-harness --issue 54 --head c9f2663915a0d263e08e6be45e79c11606df626a`） |
+| Fail-closed success propagation @ `c9f2663` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0`（`node harness/checks/fail-closed-success-propagation.cjs --base c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188 --head c9f2663915a0d263e08e6be45e79c11606df626a`） |
+| `git diff --name-only origin/main...HEAD` @ `c9f2663` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `c9f2663` | **success**（exit 0） | ローカル実行確認 |
+| **（v6是正）** Codex PM再評価（fixed HEAD `56def48`、current thread read-back） | 完了 | [#5311506954](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311506954)。[`discussion_r3793407704`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793407704)（v5 approval/route表示・**今回修正**）、[`discussion_r3793661805`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661805)（A7 post-write residue・**今回修正**）、[`discussion_r3793661803`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661803)（ancestor directory binding・**本ラウンド非実装**・open保持） |
+| **（v6是正）** 新canonical proposal（route=cursor） | 固定 | [#5311558125](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311558125) |
+| **（v6是正）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5311600611](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311600611) |
+| **（v6是正）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5311611273](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5311611273) |
+| **（v6是正）実装tip** | `cfe6154dce98ae8c441c778405cabe9dd3579193` | A7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue観測例・decisions v5 superseded/v6実状態同期を固定4ファイルへ反映したコミット |
+| Issue manifest diff @ `cfe6154` | **pass** | ローカル実行: `manifest_change_count=4` `actual_change_count=4` |
+| Fail-closed success propagation @ `cfe6154` | **pass** | ローカル実行: `applicable=false` `checked_file_count=0` |
+| `git diff --name-only origin/main...HEAD` @ `cfe6154` | 固定4ファイルのみ | ローカル実行確認 |
+| `git diff --check origin/main...HEAD` @ `cfe6154` | **success**（exit 0） | ローカル実行確認 |
+| ChatGPT 要件レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`） | 初回 **approve** → 訂正後 **request-changes** risk=high | 初回 [#pullrequestreview-4948186086](https://github.com/kikujizo/ai-harness/pull/132#pullrequestreview-4948186086)。訂正 [#5311465262](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311465262) |
+| Codex 独立技術レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`） | **request-changes** risk=high | [#5311448260](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311448260) |
+| current finding read-back（v6是正着手前・HEAD `56def48`） | **完了** | PM再評価 [#5311506954](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5311506954) で当時のnon-outdated thread dispositionを固定。本行は過去確定状態 |
+| current finding read-back（v6是正後・HEAD `a1df393` 以降の再検証） | **未実施** | 過去の#5311506954と混同しない。独立技術レビュー／ゲート前にGitHub一次資料から再read-backする |
+| ChatGPT 要件レビュー（v6是正 fixed HEAD `a1df393`） | **request-changes** risk=high | [#pullrequestreview-4948418881](https://github.com/kikujizo/ai-harness/pull/132#pullrequestreview-4948418881)。blockingはAC4 Decision Log同期のみ（本同期コミットの対象） |
+| **（v7）** canonical proposal（route=cursor） | 固定 | [#5312145952](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312145952) |
+| **（v7）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5312239369](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312239369) |
+| **（v7）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5312291132](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312291132) |
+| **（v7）実装開始時HEAD** | `c0536a5a7bcff562a935e57b53cc2c93bce2135e` | 本ラウンドの実装起点 |
+| **（v7）** 今回修正 finding | [`discussion_r3793661803`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661803)（ancestor directory / `RUN_ROOT` **create-new 前** pre-write binding）、[`discussion_r3793893860`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793893860)（payload mutation 後 write/flush/close 失敗の fail-closed 伝播） | 固定4ファイル文書契約のみ |
+| **（v7）** 非再実装 finding | [`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568)（A8 payload leaf pre-write binding） | 前HEADで addressed。今回再実装・弱体化しない |
+| **（v7）** 旧 proposal / approval / route | **非流用** | v6/v6是正の `#5311558125` / `#5311600611` / `#5311611273` 等は本ラウンドへ流用しない |
+| **（v7）実装 tip** | `70eeab88aa17fee8c602eb5f2901a4dc8ea2a516` | 固定4ファイルへ **create-new 前** ancestor bind・payload IO fail-closed を反映 |
+| **（v7）ローカル検証（tip `70eeab8`）** | **pass** | `git diff --check` / `git diff --name-only`（`c7f2b4c...HEAD` および `c0536a5...HEAD`）いずれも固定4ファイルのみ |
+| **（v7）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v7）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v7）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v8）** canonical proposal（route=cursor） | 固定 | [#5312568119](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312568119) |
+| **（v8）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5312744438](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312744438) |
+| **（v8）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5312754424](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5312754424) |
+| **（v8）実装開始時HEAD** | `c95b82840600e030fa30d5f12184b4f28901bff9` | 本ラウンドの実装起点 |
+| **（v8）** 今回修正 finding | [`discussion_r3794153887`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153887)（A8 payload directory **create 前** `PreDirCreateAncestorBind` + bound-parent one-level create-new）、[`discussion_r3794153890`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153890)（A7 marker / A8 payload regular file の create-new 成功〜初回 content write 完了までの **LeafContainmentCapabilityGate**） | 固定4ファイル文書契約のみ |
+| **（v8）** 非再実装 finding | [`discussion_r3793893860`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793893860)、[`discussion_r3793661803`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661803)、[`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568) | 前HEADで addressed。今回再実装・弱体化しない |
+| **（v8）** 旧 proposal / approval / route | **非流用** | v7の `#5312145952` / `#5312239369` / `#5312291132` 等は本ラウンドへ流用しない |
+| **（v8）実装 tip** | `e0d7609c99288c91fb371a914d169daa3e9c2e2a` | 固定4ファイルへ payload dir create 前 bind・leaf containment gate を反映 |
+| **（v8）ローカル検証（tip `e0d7609`）** | **pass** | `git diff --check` / `git diff --name-only`（`c7f2b4c...HEAD` および `c95b828...HEAD`）いずれも固定4ファイルのみ |
+| **（v8）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v8）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v8）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v9）** canonical proposal（route=cursor） | 固定 | [#5313111564](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5313111564) |
+| **（v9）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5313331045](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5313331045) |
+| **（v9）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5313362865](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5313362865) |
+| **（v9）実装開始時HEAD** | `432dad5ea163c84a59bdcf52f5478d4f7d7058b9` | 本ラウンドの実装起点 |
+| **（v9）** 今回修正 finding | [`discussion_r3794446604`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446604)（B8(9) Windows cleanup: verified `RUN_ROOT` directory handle 保持契約・保証不能時 pre-mutation `path_safety_unknown`）、[`discussion_r3794446609`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446609)（A7 marker: create-new 成功後の write/flush/close/durability 失敗の residue 肯定伝播） | 固定4ファイル文書契約のみ |
+| **（v9）** 非再実装 finding | [`discussion_r3794153887`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153887)、[`discussion_r3794153890`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153890)、[`discussion_r3793893860`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793893860)、[`discussion_r3793661803`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3793661803)、[`discussion_r3782248568`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3782248568) | 前HEADで addressed。今回再実装・弱体化しない |
+| **（v9）** 旧 proposal / approval / route | **非流用** | v8の `#5312568119` / `#5312744438` / `#5312754424` 等は本ラウンドへ流用しない |
+| **（v9）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v9）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v9）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v9）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v9）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v9）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v10）** canonical proposal（route=cursor） | 固定 | [#5322502680](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5322502680) |
+| **（v10）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5322556820](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5322556820) |
+| **（v10）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5322580929](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5322580929) |
+| **（v10）実装開始時HEAD** | `db1685d986a7d35098631bf570ca32a5f46d93be` | 本ラウンドの実装起点 |
+| **（v10）** 今回修正 finding | [`discussion_r3795298185`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3795298185)（fail-closed 契約と Linux/WSL 無条件 writer 成功例の矛盾）、[`discussion_r3800278015`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3800278015)（同上・`LeafContainmentCapabilityGate` 成立条件の platform 名 / lock 取得だけでは不十分） | 固定4ファイル文書契約のみ |
+| **（v10）** 非再実装 finding | [`discussion_r3794446604`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446604)、[`discussion_r3794446609`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794446609)、[`discussion_r3794153887`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153887)、[`discussion_r3794153890`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3794153890) | 前HEADで addressed。今回再実装・弱体化しない |
+| **（v10）** 旧 proposal / approval / route | **非流用** | v9 の `#5313111564` / `#5313331045` / `#5313362865` 等は本ラウンドへ流用しない |
+| **（v10）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v10）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v10）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v10）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v10）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v10）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v10是正）** ChatGPT要件レビュー | **request-changes blocking** | [review 4956733864](https://github.com/kikujizo/ai-harness/pull/132#pullrequestreview-4956733864)（A7/A8 `LeafContainmentCapabilityGate` の canonical OR と実分岐 AND の不一致） |
+| **（v10是正）** 今回修正 finding | OR 一致への文書修正 | 仕様変更ではない（Windows native への `demonstrated` 追加要求はしない） |
+| **（v10是正）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー完了まで |
+| **（v10是正）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v11）** canonical proposal（route=cursor） | 固定 | [#5323410162](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323410162) |
+| **（v11）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5323510935](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323510935) |
+| **（v11）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5323522123](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323522123) |
+| **（v11）実装開始時HEAD** | `eac0f6cd5fe54574d3f5820c5a647c7c8af2dce5` | 本ラウンドの実装起点 |
+| **（v11）** 今回修正 finding | A4/A6 bootstrap verified-parent **PreDirCreateParentBind** P1（PR #132 [#5323372170](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5323372170)） | 固定4ファイル文書契約のみ |
+| **（v11）** 旧 proposal / approval / route | **非流用** | v10 の `#5322502680` / `#5322556820` / `#5322580929` 等は本ラウンドへ流用しない |
+| **（v11）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v11）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v11）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v11）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v11）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v11）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v12）** canonical proposal（route=cursor） | 固定 | [#5323954222](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5323954222) |
+| **（v12）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5324063330](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324063330) |
+| **（v12）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5324089492](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324089492) |
+| **（v12）実装開始時HEAD** | `bac3f058b5f5b2cc3cb883157f2bc0faa6aee998` | 本ラウンドの実装起点 |
+| **（v12）** 今回修正 finding | [`discussion_r3801196643`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3801196643)（A4/A6 trusted chain containment。即時親だけの PreDirCreateParentBind 単独は不十分）、[`discussion_r3801196648`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3801196648)（A7/A8 `platform=windows_native` OR bypass 廃止。`leaf_containment_capability=demonstrated` のみ） | 固定4ファイル文書契約のみ |
+| **（v12）** 旧 proposal / approval / route | **非流用** | v10/v11 の `#5322502680` / `#5322556820` / `#5322580929` / `#5323410162` / `#5323510935` / `#5323522123` 等は本ラウンドへ流用しない |
+| **（v12）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | 新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v12）** 採用方針 | A4/A6: **PreDirCreateTrustedChainContainment**（trusted anchor→parent を create+ImmediatePostCreateVerify 完了まで保持。`chain_containment_capability=demonstrated` のみ create 許可）。A7/A8: **`leaf_containment_capability=demonstrated` のみ** content write 許可（9条件一体契約。`platform=windows_native` 単独 bypass 廃止） | v10 の「`platform=windows_native` または demonstrated」採用方針は **superseded**（履歴は残す） |
+| **（v12）** 保証不能時 | directory create 前 / content write 前に既存 `path_safety_unknown` で fail-closed（`create_dir_attempted=false` / `content_write_attempted=false`） | 新 stop reason なし |
+| **（v12）** カテゴリ③と④の分離 | 本ラウンドはカテゴリ③（文書正本変更）のみ。実cleanup（カテゴリ④）は別発効点 | merge / execution / 実cleanup は未承認・未実施 |
+| **（v12）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v12）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v12）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v12）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v12）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v12）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v10/v11 記録と同型 |
+| **（v13）** current P1 finding | [`discussion_r3801575707`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3801575707)（A8 payload nested directory 各段へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** 参照適用。identity bind 単独・前段流用は不十分） | 固定4ファイル文書契約のみ |
+| **（v13）** feasibility | [#5324693749](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5324693749) | — |
+| **（v13）** canonical proposal（route=cursor） | 固定 | [#5324709516](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324709516) |
+| **（v13）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5324824239](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324824239) |
+| **（v13）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5324841376](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5324841376) |
+| **（v13）** 旧 proposal / approval / route | **非流用** | v12 の `#5323954222` / `#5324063330` / `#5324089492` は本ラウンドへ流用しない |
+| **（v13）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | SPEC_IMPACT:none。新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v13）** 採用方針 | A8 payload directory 各 one-level 段へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** を参照適用（各段独立に再取得・再検証。段1の containment を後続段へ無条件流用しない）。`chain_containment_capability=demonstrated` のみ directory create 許可。identity bind 単独・pathname precheck・`RUN_LOCK`・短時間窓・create 後 scan・platform 名だけの宣言は代替にしない | v12 の A4/A6 chain containment 方針を A8 payload directory 段へ拡張（A4/A6 本文・A7/A8 leaf 9条件一体契約は非退行） |
+| **（v13）** 保証不能時 | payload directory 各段の directory create 前に既存 `path_safety_unknown` で fail-closed（`create_dir_attempted=false` / mkdir 呼出0） | 新 stop reason なし |
+| **（v13）** カテゴリ③と④の分離 | 本ラウンドはカテゴリ③（文書正本変更）のみ。実cleanup（カテゴリ④）は別発効点 | merge / execution / 実cleanup は未承認・未実施 |
+| **（v13）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v13）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v13）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v13）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v13）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v13）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v12 記録と同型 |
+| **（v14）** current finding | [`discussion_r3802203073`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3802203073)（A4/A6/A8 directory create 成功後 ImmediatePostCreateVerify 失敗時の肯定記録＋fail-closed。create 前 `create_dir_attempted=false` との区別） | 固定4ファイル文書契約のみ |
+| **（v14）** canonical proposal（route=cursor） | 固定 | [#5325742959](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5325742959) |
+| **（v14）** HUMAN_APPROVAL_RECORD: v2（route=cursor, scope=implementation_start） | **approve** | [#5326049149](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5326049149) |
+| **（v14）** Codex（PM）正式route確定 | `PM_VERDICT: approve risk=high route=cursor` | [#5326063070](https://github.com/kikujizo/ai-harness/issues/54#issuecomment-5326063070) |
+| **（v14）実装開始時HEAD** | `0de1148461991e274f377c39c957bf98ac79d209` | 本ラウンドの実装起点 |
+| **（v14）** 旧 proposal / approval / route | **非流用** | v13 の `#5324709516` / `#5324824239` / `#5324841376` を含む。本 scope へ流用しない |
+| **（v14）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | SPEC_IMPACT:none。新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v14）** 採用方針 | A4/A6/A8 directory create 成功後 ImmediatePostCreateVerify `unsafe`/`unknown` は `create_dir_attempted=true` で residue 肯定記録。completion 未作成。既存 stop reason のみ。`auto_*`=false | v13 の create 前 fail-closed（`create_dir_attempted=false`）は非退行。A7 marker 肯定記録パターンを directory 用に文章模倣（新フィールド名は発明しない） |
+| **（v14）** 保証不能時 | 上記 fail-closed。新 stop reason なし | create 前経路の `create_dir_attempted=false` は維持 |
+| **（v14）** カテゴリ③と④の分離 | 本ラウンドはカテゴリ③（文書正本変更）のみ。実cleanup（カテゴリ④）は別発効点 | merge / execution / 実cleanup は未承認・未実施 |
+| **（v14）実装 tip** | **未確定（push後に一次確認）** | 本行更新時点では tip SHA を先書きしない |
+| **（v14）ローカル検証** | **未確定（push後に一次確認）** | `git diff --check` / `git diff --name-only` は実装担当が working tree で確認 |
+| **（v14）** 新HEAD / same-head CI | **push後に一次確認** | 本行更新時点では CI 結果を先書きしない |
+| **（v14）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v14）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+| **（v14）取り消し手順** | 本ラウンドの proposal / approval / route を無効化する場合は、新 proposal → 新 HUMAN_APPROVAL_RECORD → Codex PM route 再確定の順で行い、旧記録は非流用として残す | v13 記録と同型 |
+| **（v15）** Codex review | [`#5336292566`](https://github.com/kikujizo/ai-harness/pull/132#issuecomment-5336292566) | finding: [`discussion_r3809298167`](https://github.com/kikujizo/ai-harness/pull/132#discussion_r3809298167) |
+| **（v15）** `REVIEW_VERDICT` | **request-changes risk=high** | Codex review 所見 |
+| **（v15）** `HIGH_RISK_TECH_GATE` | **blocked** | 修正・要件レビュー・Codex技術レビュー・same-head CI 完了まで |
+| **（v15）** `PM_VERDICT` | **reject risk=high**（対象HEAD `ab6f319`） | 本ラウンド開始時点 |
+| **（v15）** 今回修正 | (1) A8/A9 `payload_written` を実 byte-write semantics へ戻す (2) setup EARLY 総括を pre-create / post-create 区別 | 固定4ファイル文書契約のみ |
+| **（v15）** wontfix 再実装しない | marker leaf containment / marker write durability / A8 directory post-create 契約そのもの / A6 専用 `run_root_created` field | Codex wontfix 4点 |
+| **（v15）** 固定4ファイル境界 | `.cursor/rules/ai-workflow.mdc` `docs/harness/roles/cursor.md` `docs/harness/setup.md` `docs/decisions.md` | SPEC_IMPACT:none。新 helper/runtime/isolation/schema/stop reason/fixed4外が必要になった場合は別Checkpointへ分離 |
+| **（v15）** 実装開始 | 人間 master 明示指定（チャット 2026-08-19）。GitHub 上の新 proposal / HUMAN_APPROVAL_RECORD / 新 route=cursor は本ラウンド開始時点で未成立 | 捏造しない |
+| **（v15）実装開始時HEAD** | `ab6f319f508436031358427e6f7e48ea9e5753fa` | 本ラウンドの実装起点 |
+| **（v15）実装 tip / CI** | **未確定（push後）** | 本行更新時点では tip SHA / CI 結果を先書きしない |
+| **（v15）** merge / settings_apply / execution / 実cleanup | 未承認・未実施 | — |
+
+**（v13）採用方針（段落）**: A8 の payload nested directory は、one-level 各段 D について trusted anchor
+`TRUSTED_HOME`→`parent(D)` へ A4-4〜A4-7 **PreDirCreateTrustedChainContainment** を参照適用する。
+各段は独立に chain を再取得・再検証し、段1の containment 結果を後続段へ無条件流用しない。
+`chain_containment_capability=demonstrated` の場合のみ chain handle 保持中に bound parent から D を
+1 段 create-new し ImmediatePostCreateVerify(D) 完了まで保持する。保証不能 platform/段は create 前
+`path_safety_unknown` `create_dir_attempted=false` で fail-closed とする（A4/A6 本文・A7/A8 leaf
+9条件一体契約・public schema は非退行）。
+
+**（v14）採用方針（段落）**: A4/A6 bootstrap と A8 payload directory 各 one-level 段について、
+directory create-new 成功後の ImmediatePostCreateVerify(D) が `unsafe` または `unknown` のときは
+`create_dir_attempted=true` で作成済み directory/residue を肯定記録し、`result=blocked` と既存
+`path_safety_failed`/`path_safety_unknown` のみで停止する。`completion_record_created=false`
+`auto_cleanup=false` `auto_repair=false` `auto_resume=false` とし、create 前の
+`create_dir_attempted=false` と混同しない。A7 marker の肯定記録文を directory 用に文章模倣するが、
+新フィールド名は発明しない。後続段・leaf・completion・auto_* へ進まない（create 前経路は非退行）。
+
+**（v15）採用方針（段落）**: A8 completion 前 recursive safety 再走査失敗および A9 lock identity
+失敗時の `payload_written` は、いずれかの payload regular file へ 1 byte 以上の content write
+mutation が成立した場合（`byte_write_committed=true`）にのみ `true` とする。directory create-new
+のみまたは zero-byte leaf create-new のみで byte write 未成立の場合は `payload_written=false` とし、
+directory residue は `create_dir_attempted=true` で肯定記録する。A8 到達または A8 scan 成功を
+`payload_written=true` の十分条件にしない。setup.md の EARLY 総括は pre-create（directory mutation
+前・`scratch_created=false` 可）と post-create verification failure（`create_dir_attempted=true`・
+residue 肯定）を区別する。wontfix 4点（marker leaf containment / marker write durability /
+A8 directory post-create 契約そのもの / A6 専用 `run_root_created` field）は再実装しない。
+
+## 次アクション
+
+- [x] Codex PM 新proposal（#5263694044）
+- [x] 人間 `implementation_start` approve（#5263876000 / HUMAN_APPROVAL_RECORD: v2）
+- [x] Codex PM route 確定（#5263894169 / route=cursor）
+- [x] Cursor による instance binding 再仕様化実装（固定4ファイル）
+- [x] Codex PM: Issue #54 本文へ `issue-change-manifest:v1` を復旧（4ファイル外・`manifest_missing` 解消）
+- [x] fixed HEAD `1bd64cb` で expected workflow 2本 success（manifest diff run `31580948676` / success propagation run `31578332485`）
+- [x] ChatGPT 要件レビュー（fixed HEAD `1bd64cb`、#5264631720）→ **request-changes risk=high**（AC4のみ未充足）
+- [x] Codex PM route再評価・新HUMAN_APPROVAL_RECORD: v2（route=claude-code、#5264680032）→ `docs/decisions.md` 最小同期をClaude Codeへ委譲確定
+- [x] Claude Code による `docs/decisions.md` 最小同期（AC4解消コミット。他3ファイルは変更しない）
+- [x] **（v3）** Codex独立技術レビューで新規4指摘を特定（#5276235137）→ ChatGPT再仕様化差し戻し
+- [x] **（v3）** Codex PM 新canonical proposal（#5276309603）
+- [x] **（v3）** 人間 `implementation_start` approve（#5276357583 / HUMAN_APPROVAL_RECORD: v2, route=claude-code）
+- [x] **（v3）** Claude Code による safe create・RUN_LOCK identity binding・cleanup pre/post binding・
+  `residue=present` only の固定4ファイル実装（本コミット）
+- [x] v3実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（`238ae78`。自己参照回避のため）
+- [x] fixed HEAD `238ae78` で `git diff --name-only`/`--check`・Issue manifest diff・Fail-closed
+  success propagationすべてsuccessを確認（PR #132コメント #5276545718）
+- [x] Codex独立技術レビュー（fixed HEAD `238ae78`、#5276711835）→ **request-changes risk=high**
+  （AC1のみ×。`docs/harness/setup.md`のWindows writer成功例が`OpenOrCreate`陽性記述のままA5と矛盾）
+- [x] Claude Code による `docs/harness/setup.md` 最小修正（`OpenOrCreate`陽性記述をA5契約へ同期、fixed HEAD `0840fbd`）
+- [x] fixed HEAD `0840fbd` で `git diff --name-only`/`--check`・Issue manifest diff・Fail-closed
+  success propagationすべてsuccessを確認（PR #132コメント #5276786924）
+- [x] **（PM補正）** Codex追加レビューで新規current thread 2件を検出、PM補正判断 `#5277162613` が
+  未解決4件（A0/A7/A8/B8）を同一Checkpoint内の実装修正と判定。A1は別途wontfix/resolved済み
+- [x] **（PM補正）** Claude Code による A0 trusted identity command・A7 marker safe mode・
+  A8 payload安全属性・B8 child mutation binding の固定4ファイル実装（本ラウンド）
+- [x] fixed HEAD `f8c8030`（decisions.md同期HEAD `6a11031`）で `git diff --name-only`/`--check`・
+  Issue manifest diff・Fail-closed success propagationすべてsuccessを確認（PR #132コメント #5277328523）
+- [x] **（A9/B8(9)是正）** Codex独立技術レビュー第2ラウンド（fixed HEAD `6a11031`、#5277468171）→
+  **request-changes risk=high**（A9 payload保全・B8(9) content binding の2件）
+- [x] **（A9/B8(9)是正）** Codex PM判断（#5277578620）が既存Checkpoint内の実装修正と判定、
+  既存proposal `#5276309603`/approval `#5276357583`継続利用を確認
+- [x] **（A9/B8(9)是正）** Claude Code による A9 payload保全契約・B8(9) content/child集合binding の
+  固定4ファイル実装（本ラウンド）
+- [x] **（advisor是正）** advisor指摘によるB8(9) directory再検証の論理矛盾是正（exact一致要求を
+  空であること＋会計チェックへ書き換え）、A9の`payload_written=true`肯定記録、残留window明記
+- [x] 新HEAD `0549e83` で `git diff --name-only origin/main...HEAD` が固定4ファイルのみであることを確認
+- [x] 新HEAD `0549e83` で `git diff --check` success を確認
+- [x] 新HEAD `0549e83` で Issue manifest diff success を確認
+- [x] 新HEAD `0549e83` で Fail-closed success propagation success を確認
+- [x] ChatGPT 要件レビュー（fixed HEAD `0549e83`/`334b24f`）→ `REVIEW_VERDICT: approve risk=high`
+  （要件面はpass。Issue #54本文と#5278010167のChatGPT自身の記録による）
+- [x] Codex 独立技術レビュー（fixed HEAD `334b24f`）→ **request-changes risk=high**（AC3 fail、
+  P1-1/P1-2の2件。#5277901998）
+- [x] **（v4）** Codex PM判断: P1-2をIssue正本不足としてChatGPTへ再仕様化差し戻し、既存proposal
+  `#5276309603`/approval `#5276357583`は非流用（#5278028614）
+- [x] **（v4）** ChatGPTによるIssue #54本文のP1-1/P1-2再仕様化（B8(6) child identity baseline・
+  B8(9) OS別delete target binding）
+- [x] **（v4）** Codex PM 新canonical proposal（#5278352801、Cursorトークン不足によるClaude Code
+  例外委譲）
+- [x] **（v4）** 人間 `implementation_start` approve（#5278387881 / HUMAN_APPROVAL_RECORD: v2,
+  route=claude-code）
+- [x] **（v4）** Codex PM route確定（#5278407512 / route=claude-code）
+- [x] **（v4）** Claude Code によるB8(6) process-local child identity baseline・B8(9) Windows
+  handle-bound disposition／Linux-WSL fail-closed の固定4ファイル実装（本コミット）
+- [x] **（v4）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（`3d7d4e9`。自己参照回避のため）
+- [x] **（v4是正）** advisor指摘（setup.md table pipe escape / ChatGPT要件レビュー記録訂正 / cursor.md
+  SSOT整合）を是正し、新tip `6e71c2a` のSHAと検証結果を別コミットで同期（同期コミット自体のHEADは
+  `96f1d96`）
+- [x] Codex 独立技術レビュー（v4是正後 fixed HEAD `96f1d96`）→ **request-changes risk=high**
+  （6 finding。#5289296528）
+- [x] **（v5・superseded・非流用）** Codex（PM）6 finding判定: finding 1・3・4・5は今回修正、finding 2・6はChatGPT
+  再仕様化差し戻し（`route=mixed`。#5289485250）——v5監査履歴。`implementation_start`へ非流用
+- [x] **（v5・superseded・非流用）** ChatGPTによるIssue #54本文の6 finding再仕様化（`RUN_ROOT`自身のidentity baseline・
+  A8 post-write residue契約を追加）——v5監査履歴
+- [x] **（v5・superseded・非流用）** Codex（PM）本人による正規proposal（#5289589235、scope=固定4ファイル）
+- [x] **（v5・superseded・非流用）** 人間 `implementation_start` approve（#5289615101 / HUMAN_APPROVAL_RECORD: v2,
+  route=claude-code, recorded_by=ChatGPT）
+- [x] **（v5・superseded・非流用）** Codex（PM）本人による正式route確定（#5289667993 / route=claude-code。route確定
+  プリフライト#5289663239を経てCodex本人が投稿）
+- [x] **（v5・superseded・非流用）** Claude Codeによる6 finding（Windows share条件・`RUN_ROOT` identity baseline・
+  A8 B6同等rescan・directory bottom-up accounting・Windows capability unavailable観測例・
+  A8 post-write residue肯定記録）の固定4ファイル実装（tip `e7b993e`/`bb3772d`。v5監査履歴）
+- [x] **（v5・superseded・非流用）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（自己参照回避のため）
+- [x] **（v6・旧ラウンド・非流用）** Codex独立技術レビュー（fixed HEAD `4c3effe`、#5291297447）→ pre-write binding P1
+- [x] **（v6・旧ラウンド・非流用）** Codex（PM）P1 valid判定・ChatGPT再仕様化差し戻し（#5291492454）
+- [x] **（v6・旧ラウンド・非流用）** ChatGPTによるIssue #54本文のpre-write binding再仕様化（2026-08-17）
+- [x] **（v6・旧ラウンド・非流用）** 旧canonical proposal（#5311085139、route=cursor）
+- [x] **（v6・旧ラウンド・非流用）** 旧人間 `implementation_start` approve（#5311256262 / HUMAN_APPROVAL_RECORD: v2,
+  route=cursor）
+- [x] **（v6・旧ラウンド・非流用）** 旧Codex（PM）正式route確定（#5311265605 / route=cursor）
+- [x] **（v6）** CursorによるA7/A8 pre-write binding・setup否定例・fail-closed 8同期の固定4ファイル実装（tip `c9f2663`）
+- [x] **（v6）** 実装tip `c9f2663` のSHAと検証結果を `docs/decisions.md` へ別コミットで同期（tip `56def48`。自己参照回避のため）
+- [x] **（v6是正）** Codex PM再評価・current thread read-back（#5311506954）
+- [x] **（v6是正）** 新canonical proposal（#5311558125、route=cursor）
+- [x] **（v6是正）** 人間 `implementation_start` approve（#5311600611 / HUMAN_APPROVAL_RECORD: v2, route=cursor）
+- [x] **（v6是正）** Codex（PM）正式route確定（#5311611273 / route=cursor）
+- [x] **（v6是正）** CursorによるA7 pre-write identity照合・A7 post-write residue肯定記録・setup AC1/residue・
+  decisions v5 superseded/v6実状態同期の固定4ファイル実装（本コミット）
+- [x] **（v6是正）** 実装tipのSHAと検証結果を docs/decisions.md へ別コミットで同期（自己参照回避のため）
+- [x] ChatGPT 要件レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`）——初回approve後、訂正でrequest-changes（#4948186086 / #5311465262）
+- [x] Codex 独立技術レビュー（v6実装tip `c9f2663` / sync HEAD `56def48`）——request-changes（#5311448260）
+- [x] current finding read-back（v6是正着手前・HEAD `56def48`）——完了（#5311506954）。過去確定状態
+- [ ] current finding read-back（v6是正後・HEAD `a1df393` 以降の再検証）——未実施（#5311506954と混同しない）
+- [x] ChatGPT 要件レビュー（v6是正 fixed HEAD `a1df393`）——request-changes（#4948418881、AC4のみblocking）
+- [x] **（v8）** CursorによるA8 payload directory PreDirCreateAncestorBind・A7/A8 LeafContainmentCapabilityGate・setup Case A/B・cursor.md最小同期の固定4ファイル実装（tip `e0d7609`）
+- [x] **（v8）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（本コミット）
+- [ ] **（v9）** CursorによるB8(9) verified `RUN_ROOT` handle保持・A7 marker write/flush/close/durability失敗伝播・setup Case A/B・cursor.md最小同期の固定4ファイル実装（tip 未確定）
+- [ ] **（v9）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v10）** Cursorによる fresh-writer `LeafContainmentCapability` 同期・setup 矛盾解消・cursor.md 最小同期・decisions v10 追記の固定4ファイル実装（tip 未確定）
+- [ ] **（v10）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v10是正）** CursorによるA7/A8 `LeafContainmentCapabilityGate` OR分岐・評価順序要約同期・decisions v10是正追記の固定2ファイル実装（`ai-workflow.mdc` + `docs/decisions.md`。tip 未確定）
+- [ ] **（v10是正）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [x] **（v11）** CursorによるA4/A6 verified-parent PreDirCreateParentBind・setup否定例・cursor.md最小同期・decisions v11追記の固定4ファイル実装（本コミットで文書契約を入れた）
+- [ ] **（v11）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v12）** CursorによるA4/A6 PreDirCreateTrustedChainContainment・A7/A8 `windows_native` OR 廃止・setup/cursor.md最小同期・decisions v12追記の固定4ファイル実装（tip 未確定）
+- [ ] **（v12）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] **（v13）** CursorによるA8 payload directory PreDirCreateTrustedChainContainment参照適用・setup否定例・cursor.md最小同期・decisions v13追記の固定4ファイル実装（tip 未確定）
+- [ ] **（v13）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [x] **（v14）** CursorによるA4/A6/A8 directory create成功後ImmediatePostCreateVerify失敗時の肯定記録＋fail-closed・setup否定例・cursor.md最小同期・decisions v14追記の固定4ファイル実装（本コミットで文書契約を入れた）
+- [ ] **（v14）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [x] **（v15）** CursorによるA8/A9 `payload_written` 実byte-write復帰・setup EARLY pre/post-create区別・cursor.md最小同期・decisions v15追記の固定4ファイル実装（本コミットで文書契約を入れた）
+- [ ] **（v15）** 実装tipのSHAと検証結果を `docs/decisions.md` へ別コミットで同期（未実施）
+- [ ] Codex 独立技術レビュー（v6是正 fixed HEAD `a1df393` または本AC4同期後の新HEAD）——未実施
+- [ ] `HIGH_RISK_TECH_GATE` 判定（両レビュー完了後、Codex PMが別工程として判断）
+- [ ] merge scope 人間approve（`HIGH_RISK_TECH_GATE: passed` 後）
+- [ ] `HIGH_RISK_TECH_GATE: passed` 後、人間による merge 判断（merge scope）

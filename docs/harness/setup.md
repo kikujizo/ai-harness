@@ -272,6 +272,445 @@ branch `issue-121-ambiguous-comprehensive-instruction-scope`。
 | 実出力（先頭） | `G1〜G6は全て充足済みのため、新しい人間承認は要求しない。本規定は通常リスクPRの既存merge条件（G1〜G6充足→AI merge可）を変更しないため、このPRは既存条件どおりAIがmergeを実行する。本規定のclosed question条件はこのPRには適用しない。適用対象は高リスクの発効点承認、または技術判断が不明で人間の許可を求めたくなる場面であり、本PRはG1〜G6が成立済みで残件も発効点も存在しないため、そもそも人間に問い合わせる局面ではない。` |
 | 合否 | **合格** — 曖昧指示への確認義務を理由に通常リスクへ新しい承認ゲートを追加していない |
 
+#### 一時scratch / cleanup境界（Issue #54 Checkpoint・観測例）
+
+制御フロー正本: `.cursor/rules/ai-workflow.mdc`（A0–A9: role=writer / B0–B8: role=cleanup。
+A8=payload、A9=completion provenance）。
+`LOCK_CHAIN` と `RUN_CHAIN` は兄弟系統として別 branch 定義。単一 `PATH_CHAIN` は使わない。
+**pre-create fail-closed（EARLY）**: directory mutation 前に停止する経路では
+`create_dir_attempted=false`・directory residue なし。この部分集合では
+`scratch_created=false`・`cleanup=false`・run側 mkdir/write/cleanup delete より前に停止することを
+各否定例で観測する（`ai-workflow.mdc` の EARLY呼禁止節を構造grepで確認可能）。
+**post-create verification failure**: directory create-new 成立済みで
+ImmediatePostCreateVerify または A8 completion 前 recursive safety 再走査が失敗した経路では
+`create_dir_attempted=true`・作成済み directory/residue を肯定記録・`completion_record_created=false`
+・`auto_cleanup=false` `auto_repair=false` `auto_resume=false`・`result=blocked`。
+EARLY ラベル付き否定例でも、常に mkdir 前・residue なしを意味する一般化は禁止する。
+
+- **fresh `.cache` missing — writer成功（LeafContainmentCapability 実証環境）**:
+  **前提**: `leaf_containment_capability=demonstrated` を現行の同一 UID/SID 非協調 process 脅威モデルに
+  対し OS/API として実証できる環境に限定（`platform=windows_native` 単独では不十分）。Linux/WSL で現行契約
+  プリミティブ（open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）のみの場合は
+  本成功例には到達しない（下記「Linux/WSL … content write 前停止」否定例を参照）。
+  **さらに A4/A6 の各 missing directory について trusted anchor→parent へ
+  **PreDirCreateTrustedChainContainment**（`chain_containment_capability=demonstrated`）を
+  証明できる場合に限定**（pathname 事前 check + create + post-check だけでは不足。即時親だけの
+  PreDirCreateParentBind 単独は不十分）。
+  `CACHE_ROOT`/`SCRATCH_BASE`/`LOCK_BASE`/`LOCK_ROOT` が missing でも、writer が
+  各 component について verified 親へ create 前 binding→bound parent から 1 段作成→直後再検証後、
+  `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` も同様（create 前 binding→
+  1 段作成→直後再検証）→
+  **fresh 256-bit `instance_nonce` 生成→`RUN_INSTANCE_MARKER` create-new/read-back→commitment 算出**→
+  payload write→`scratch-completion/v2`（`instance_commitment` のみ）作成を確認する
+  （`RUN_LOCK` 前に run 側を作成しない。marker 検証前に payload を書かない）。
+- **fresh writer bootstrap成功（LeafContainmentCapability 実証環境）**: 上記と同一
+  前提（`chain_containment_capability=demonstrated` かつ `leaf_containment_capability=demonstrated`）。
+  `LOCK_ROOT` missing かつ `RUN_ROOT` missing で、lock bootstrap（各 missing component について trusted
+  chain containment→bound parent から 1 段作成→ImmediatePostCreateVerify 完了まで保持）後に
+  `RUN_LOCK` non-blocking exclusive 取得→lock保持中に `RUN_BASE`/`RUN_ROOT` も同様→
+  marker 作成・検証→payload write→`scratch-completion/v2` 作成を確認する。
+- **bootstrap安全性不明（否定例・EARLY）**: `LOCK_ROOT` 親の path safety を証明できない状況を渡し、
+  `result=blocked` `stop_reason=path_safety_unknown` `run_lock_created=false`
+  `run_root_created=false` とし、`RUN_LOCK`/`RUN_BASE`/`RUN_ROOT`/payload 作成が行われないことを確認する。
+- **A4/A6 chain containment 不能（否定例・EARLY）**: ancestor containment を create+verify 完了まで
+  保証できない環境（Linux/WSL の `openat`/`mkdirat` を含む。即時親だけの PreDirCreateParentBind 単独を
+  含む）で、A4 または A6 の missing directory create を試みる。`result=blocked`
+  `stop_reason=path_safety_unknown` `create_dir_attempted=false`（A4 なら `run_lock_created=false` も
+  既存どおり）。directory create / mkdir を実行せず成功扱いしない。
+- **A4/A6 parent bind 不能（否定例・EARLY）**: 親 directory を pathname で read-only 検証したあと、
+  同一 UID/SID の非協調 process が親を rename/replace し得る状況、または trusted chain containment /
+  同等 OS/API 保証を証明できない環境で、A4 または A6 の missing directory create を試みる。
+  `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`
+  （A4 なら `run_lock_created=false` も既存どおり）。directory create / mkdir を実行せず成功扱いしない。
+  pathname 事前 check + create + post-check だけを成功経路にしない。
+- **binding 証明不能環境（否定例・EARLY）**: helper/runtime が無く trusted chain containment を
+  技術的に証明できない環境を渡し、`result=blocked` `stop_reason=path_safety_unknown`
+  `create_dir_attempted=false` とし、当該 missing component の directory create が行われないことを確認する
+  （Linux/WSL だから mkdir 成功、等の成功例を捏造しない）。
+- **A4/A6/A8 directory create成功後 ImmediatePostCreateVerify unsafe/unknown（否定例）**:
+  A4/A6 または A8 payload directory 各段で directory create-new 成功後、ImmediatePostCreateVerify が
+  `unsafe` または `unknown` となる状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（unsafe）または `path_safety_unknown`（unknown）
+  `create_dir_attempted=true`、作成済み directory/residue を肯定記録、
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  となることを確認する（create 前の `create_dir_attempted=false` と混同しない。自動
+  cleanup/repair/resume へ進まない。後続段・leaf 未進入）。
+- **existing `RUN_ROOT` collision（否定例・EARLY）**: `RUN_LOCK` exclusive 取得後、
+  `RUN_ROOT` が既に safe directory として存在する状況を渡し、`result=blocked`
+  `stop_reason=run_root_collision` `instance_marker_created=false` `payload_written=false`
+  `completion_record_created=false` `existing_run_root_modified=false` とし、payload write・
+  marker 作成・completion record・既存 root 変更が行われないことを確認する。
+- **cross-host/profile 同 `repo_slug/run_id` — provenance mismatch（否定例）**:
+  GitHub `scratch-completion/v2` の `instance_commitment` と local marker nonce から再計算した
+  commitment が不一致の状況を渡し、`result=blocked` `stop_reason=provenance_mismatch`
+  `cleanup=false` `approval_reusable=false` となることを確認する（`run_id` 単独では受理しない）。
+- **marker missing / unreadable / invalid（否定例）**: exact completion v2 が存在し `RUN_ROOT` 存在、
+  `RUN_INSTANCE_MARKER` missing/unreadable/invalid を渡し、`result=blocked`
+  `stop_reason=provenance_unknown` `cleanup=false` となることを確認する。
+- **nested mount / bind mount / reparse（否定例・cleanup）**: `RUN_ROOT` 自体は safe だが subtree に
+  Linux bind mount または Windows reparse point が存在する状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed` `inventory_accepted=false` `cleanup=false` となることを確認する。
+- **post-approve lock競合（否定例）**: pre-approval gate 通過・human execution approval 存在後、
+  approve 待ち中に writer が同じ `RUN_LOCK` を exclusive 保持する状況を渡し、既存 `RUN_LOCK` を
+  新規作成せず open した non-blocking exclusive 再取得が失敗し、`result=blocked`
+  `stop_reason=run_lock_conflict` `cleanup=false` `approval_reusable=false` となることを確認する。
+- **bind mount判定不能（否定例・EARLY）**: Linux/WSL で mount table/mountinfo を取得・評価できない状況を渡し、
+  `result=blocked` `stop_reason=path_safety_unknown` `scratch_created=false` `cleanup=false` とし、
+  device ID 照合だけで pass しないことを確認する。
+- **lock/run chain分岐**: `COMMON_PREFIX`（`TRUSTED_HOME`→`CACHE_ROOT`→`SCRATCH_BASE`）、
+  `LOCK_CHAIN`（`LOCK_BASE`→`LOCK_ROOT`→`RUN_LOCK`）と
+  `RUN_CHAIN`（`RUN_BASE`→`RUN_ROOT`）が別定義・別検証であり、
+  `LOCK_ROOT` と `RUN_ROOT` を単一祖先chainとして扱わないことを確認する。
+- **Windows identity-root・lock取得成功**: current SID→`Win32_UserProfile.LocalPath` で
+  `TRUSTED_HOME` が一意に得られ、lock bootstrap後、`RUN_LOCK` missingならreparse非followの
+  create-new、existingならreparse非followのopen-existingで区別して取得し、`FileShare=None`相当で
+  non-blocking exclusive取得する。取得直後にopened handleと現在の `RUN_LOCK` path entryの
+  stable file identity（`FILE_ID_INFO`相当）をexact照合し、一致した場合のみlock保持中に
+  `RUN_ROOT` へ書込できることを確認する（`OpenOrCreate`一発の陽性経路は使わない）。
+- **Linux/WSL identity-root・lock取得成功（lock まで。content write 前停止）**: `id -u`→`getent passwd`第6フィールドで
+  `TRUSTED_HOME` が得られ、mountinfo 評価・symlink/owner/mode/ACL/special/canonical検証後、
+  `flock` non-blocking exclusive 取得まで成功することを確認する。**現行契約プリミティブ
+  （open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding）だけでは
+  `leaf_containment_capability=demonstrated` にならないため、A7/A8 の最初の content write 前に
+  `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false`
+  `completion_record_created=false` となり、`RUN_ROOT` への marker/payload content write・
+  completion record 作成へ進まない**（`discussion_r3795298185` / `discussion_r3800278015` の
+  fail-closed 契約と Linux/WSL 無条件 writer 成功例の矛盾を解消）。
+- **Windows leaf containment 未実証（否定例・EARLY）**: `platform=windows_native` かつ
+  `leaf_containment_capability=not_demonstrated` の状況を渡し、A7/A8 の最初の content write 前に
+  `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false`
+  `completion_record_created=false` となり、marker/payload content write・completion record 作成へ
+  進まないことを確認する（platform 名だけの `windows_native` を write 許可根拠にしない）。
+- **Windows / Linux 不一致停止（否定例・EARLY）**: `TRUSTED_HOME=C:\Users\alice` かつ
+  `USERPROFILE=C:\Temp\fake`、または getent home=`/home/alice` かつ `HOME=/tmp/fake` を渡し、
+  `result=blocked`、`stop_reason=identity_root_mismatch`、`scratch_created=false`、`cleanup=false`
+  とし、mkdir/write・completion record・cleanupが呼ばれないことを確認する。
+- **invalid segment（否定例・EARLY）**: `repo_slug=.` または `repo_slug=..`、または
+  `run_id=.` / `run_id=..` を渡し、`result=blocked` `stop_reason=invalid_run_segment`
+  `scratch_created=false` `run_root_created=false` `path_created=false` `cleanup=false` とし、
+  A1/B1 失敗後に A4–A6 / B3–B5 へ進まないことを確認する（`"."`/`".."` は regex より先に exact 拒否）。
+- **Windows canonicalization alias（否定例・EARLY）**: Windows native で `run_id=foo.`（末尾ドット）のように、
+  regex検証は通過するが OS/runtime 標準の path 正規化で別 segment（`foo`）へ alias する値を渡し、
+  validated segment と canonical leaf が exact 一致しないため `result=blocked`
+  `stop_reason=invalid_run_segment` `run_lock_created=false` `run_root_created=false`
+  `instance_marker_created=false` `payload_written=false` `completion_record_created=false`
+  `cleanup=false` となることを確認する。A1/B1 失敗後に path 作成・lock 作成・payload・
+  completion record・cleanup へ進まない（alias を正規化して受理せず、入力自体を拒否する。
+  canonicalization 評価不能も同様に blocked）。
+- **run lock競合（否定例・EARLY）**: 同一 `repo_slug/run_id` で `run_lock=conflict` を渡し、
+  `result=blocked`、`stop_reason=run_lock_conflict`、`cleanup=false` とし、待機・steal・
+  lock file削除による突破がないことを確認する。
+- **cleanup missing path（否定例）**: exact provenance が `RUN_ROOT` を指すが `RUN_ROOT` missing を渡し、
+  `result=blocked` `stop_reason=path_safety_unknown|provenance_mismatch` `cleanup=false`
+  `path_created=false` とし、cleanup で directory/file/lock を新規作成しないことを確認する。
+- **cleanup OpenOrCreate禁止（否定例）**: Windows cleanup で `RUN_LOCK` missing を渡し、
+  `OpenOrCreate` を使わず blocked となること。writer bootstrap 規則を cleanup へ流用しないことを確認する。
+- **provenance不足（否定例）**: completion v2 不在/v1のみ/unreadable または marker 不在を渡し、
+  `result=blocked`、`stop_reason=provenance_unknown`、`cleanup=false` となることを確認する
+  （`scratch-completion/v1` を v2 へ推測昇格しない）。
+- **cleanup技術ゲート未成立停止**: `identity_root=unknown`、`provenance=unknown`、
+  `run_state=active_or_unknown`、`path_safety=unknown`、または `inventory_changed=true` を渡し、
+  人間approveがあっても `result=blocked`、`cleanup=false` となることを確認する。
+- **exact target closed question移行**: identity・exact provenance・`run_state=completed`・
+  path安全性・inventory不変・`RUN_LOCK` 取得が全成立した場合のみ
+  `next_action=closed_question_for_exact_target` へ進むことを確認する。
+- **approve後 inventory drift（否定例）**: `human_approval=approve` かつ
+  `inventory_changed=true` を渡し、`result=blocked`、`stop_reason=inventory_changed`、
+  `approval_reusable=false`、`cleanup=false` となることを確認する。
+- **post-approve drift（否定例）**: approve 後に provenance `updated_at` または path safety が
+  pre-approval と不一致の状況を渡し、`result=blocked` `stop_reason=approval_stale` `cleanup=false`
+  `path_created=false` となることを確認する。
+- **approve後 lock再取得・削除完了まで保持（正例は Windows native + demonstrated handle binding のみ）**: 人間approvalは技術ゲートを代替しない。approve後でも古いlock結果を流用せず `RUN_LOCK` を再取得し、canonical/path safety/run_state/inventoryを全再検証する。**実deleteへ進む正例は `platform=windows_native` かつ demonstrated handle binding が成立する場合に限定する**（検証済みchildを実delete targetへ束縛できる場合のみ。本PRでは実delete未実行。pathname-only delete禁止）。lock再取得やread-only再検証だけでは Linux/WSL を含む任意環境で安全にdeleteできる根拠にしない。**Linux/WSLで検証済みchildと実delete targetを安全にbindingできない場合は、最初のdelete mutationより前にfail-closed停止する**: `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false`（既存B8(9)どおり `approval_reusable=false` も維持。新しいstop reasonは作らない）。削除完了確認まで、Windows正例では再取得した同じ opened lock handle を保持することを確認する。
+- **中断・部分失敗・確認不能**: cleanup中断・部分失敗・結果確認不能を成功扱いせず、
+  `stop_reason=cleanup_interrupted` または `cleanup_result_unknown` で `blocked` とし、
+  残留再検出と前回approve再利用禁止を確認する。
+- **Linux umask=0002でもsafe create成功**: **`chain_containment_capability=demonstrated` かつ verified
+  親へ create 前 **PreDirCreateTrustedChainContainment** を証明できる場合に限定**（Linux/WSL で missing
+  directory create が未実証なら本成功例に到達しない）。`umask=0002` 環境で `CACHE_ROOT`/`SCRATCH_BASE`/
+  `LOCK_BASE`/`LOCK_ROOT`/`RUN_BASE`/`RUN_ROOT` が missing の状況を渡し、各 directory の
+  requested/observed mode が process umask に関わらず `0700` exact で作成され、新規 `RUN_LOCK` の
+  requested/observed mode が `0600` exact で作成されることを確認する（chain containment 未証明の無条件
+  create 成功にはしない）。
+- **safe attribute観測不能（否定例・EARLY）**: directory/lock作成直後に mode・owner・DACL等のsafe属性を
+  取得・評価できない状況を渡し、`result=blocked` `stop_reason=path_safety_unknown` とし、
+  作成済みentryの自動削除・chmod/ACL自動repairをせず既存entryをそのまま残すことを確認する。
+- **unsafe lock attributes（否定例）**: 新規作成した `RUN_LOCK` の観測modeが `0600` exactでない、
+  または既存 `RUN_LOCK` に group/world write bit（`0022`相当）が立っている状況を渡し、
+  `result=blocked` `stop_reason=path_safety_failed` `run_root_created=false`
+  `instance_marker_created=false` `payload_written=false` `completion_record_created=false` とし、
+  `RUN_ROOT`/marker/payload/completionへ進まないことを確認する。
+- **RUN_LOCK path swap（否定例・pre-approval）**: writerまたはcleanupがnon-blocking exclusive取得した
+  直後、opened handleのfile identity（Linux: device+inode／Windows: `FILE_ID_INFO`相当）と現在の
+  `RUN_LOCK` path entryのfile identityが不一致の状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed` とし、以降のrun作成・payload・completion・cleanup技術ゲートへ
+  進まないことを確認する。
+- **post-approval再取得でも同一identity再確認（否定例）**: pre-approval時に観測したhandle/path identityを
+  再利用せず、post-approvalで `RUN_LOCK` をゼロから再取得したうえで再度exact比較する状況を渡し、
+  再取得直後の比較で不一致が検出された場合 `result=blocked` `cleanup=false` `approval_reusable=false`
+  となることを確認する。
+- **削除mutation直前のidentity再確認（否定例）**: post-approval再取得直後の比較・recursive path safety・
+  marker binding・inventory再検証はすべて成立したが、最初の削除mutation直前に行う2回目のhandle/path
+  identity比較でのみ不一致が検出される状況を渡し、`result=blocked` `stop_reason=path_safety_failed`
+  `cleanup=false` とし、直前までの全項目成立が最終確認省略の理由にならないことを確認する。
+- **residue=none拒否（否定例・A9到達後）**: `RUN_ROOT` と有効な `RUN_INSTANCE_MARKER` が既に存在する状態で
+  writerが `residue=none` のcompletion recordを作成しようとする状況を渡し、
+  `completion_record_created=false` `result=blocked` `stop_reason=provenance_unknown` となり、
+  `residue=none` を成立させる別writerフローが存在しないことを確認する。
+- **PATH偽装identityコマンド拒否（否定例・A0）**: Linux/WSLで攻撃者またはラッパーが `PATH` 上の
+  `id`/`getent` を差し替え可能な状況を渡し、trusted execution path（syscall/NSS APIまたは実体検証済みの
+  絶対パスcommand）で解決できない場合は `result=blocked` `stop_reason=identity_root_unresolved` となり、
+  差し替え可能な `PATH` 上のcommand結果を `CURRENT_UID`/`TRUSTED_HOME` の正本として採用しないことを
+  確認する。
+- **umask=0002下でのmarker safe mode成功（payload/completion進行は `leaf_containment_capability=demonstrated` 必須）**: `umask 0002` 環境で `RUN_INSTANCE_MARKER` を作成する状況を渡し、requested/observed modeがumaskに関わらず `0600` exactで作成され、owner/path-safety確認に合格することを確認する。**marker mode `0600` と owner/path-safety確認だけでは payload/content write へ進めない。** payload/completionへ進む正例には **`leaf_containment_capability=demonstrated` を明示前提**として追加する。`leaf_containment_capability` が未実証の場合は、marker属性確認が成功していても最初のcontent write前にfail-closed停止する（既存A7: `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `completion_record_created=false`。create-new実施済みなら `instance_marker_created=true` と肯定記録しresidueを隠さない。A8未進入。新しいstate field/schemaは追加しない）。未実証時にpayload/completion成功を期待するtest caseにしない。
+- **marker unsafe mode拒否（否定例・A7）**: `RUN_INSTANCE_MARKER` の作成直後のobserved modeが `0600`
+  exactでない（例: umask由来の `0664`）状況を渡し、`result=blocked` `stop_reason=path_safety_failed`
+  `payload_written=false` `completion_record_created=false` となり、unsafe markerを正常completionへ
+  昇格させないことを確認する。
+- **unsafe payload descendant拒否（否定例・A8）**: `umask 0002` 環境でpayload descendantが安全属性
+  指定なしで作成され `0664`/`0775` 相当になる状況を渡し、completion record作成前の全descendant
+  再走査で group/world write bitを検出し、`result=blocked` `stop_reason=path_safety_failed`
+  `completion_record_created=false` となることを確認する（`residue=present` が成立した後にcleanupが
+  恒久的に失敗する経路を残さない）。
+- **Windows handle-bound delete成功例（正例・B8(9)）**: Windows nativeで、B8(6)のprocess-local
+  child identity baselineと(6)の`run-inventory/v1`が全descendantで一致し、削除直前に取得した
+  verified handle上でidentity/type/owner/DACL/reparse/canonical boundaryとsize/hashがすべて
+  一致した状況を渡し、regular fileは同一handleへの`SetFileInformationByHandle`+
+  `FileDispositionInfo`相当のhandle-based disposition、directoryはbottom-upで同一directory
+  handleへのdispositionにより削除契約上到達可能となる（本PRでは実delete未実行）ことを確認し、
+  pathname-only `DeleteFile`/`RemoveDirectory`を経由しないことを確認する。
+- **Linux/WSL fail-closed停止（否定例・B8(9)）**: Linux/WSLで、identity・content・provenance・
+  lockのread-only再確認がすべてpassした状況、および検証直後に同一UIDの別processがrename/replace
+  した状況のいずれを渡しても、`os=linux|wsl` `result=blocked`
+  `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false`
+  `approval_reusable=false` となり、`unlink`/`unlinkat`/`rmdir`/shell `rm` 等のpathname delete
+  APIが一切呼ばれないことを確認する（read-only check全passやrename/replaceの有無に関わらず、
+  現行API境界では最初のmutation前に停止する）。
+- **B8(6)後の識別対象差し替え拒否（否定例・B8(9)・Windows・child handle identity mismatch）**:
+  Windows nativeで、B8(6)時点で
+  identity baselineを記録した対象Xが、削除mutation前に別実体Yへ差し替わった（同一pathnameで
+  異なる`FILE_ID_INFO`を持つ）状況を渡し、削除直前に取得したverified handleのidentityが
+  baselineと不一致となり `result=blocked` `stop_reason=path_safety_failed` `cleanup=false`
+  `delete_attempted=false` となり、pathnameを追跡してYを削除しないことを確認する。
+- **`RUN_ROOT` rename/replacement拒否（否定例・B8(9)・Windows）**: Windows nativeで、B8(6)時点の
+  `run_root_identity`を記録した後、いずれかのmutation candidateを処理する直前に`RUN_ROOT`自身が
+  rename/replacementされ、current `RUN_ROOT`のdirectory handle identityがbaselineと不一致になる
+  状況を渡し、`result=blocked` `stop_reason=path_safety_failed` `cleanup=false`
+  `delete_attempted=false` `approval_reusable=false` となり、差し替え後のroot配下を追跡して
+  削除しないことを確認する（後段のOS別delete capability判定でこの前段失敗を上書きしない）。
+- **target identity baseline取得不能（否定例・B8(6)/B8(9)）**: B8(6)でprocess-local
+  `run_root_identity`または`child_identity_map`のいずれかを取得できない、一意比較不能、または
+  取得経路の信頼性を証明できない状況を渡し、`result=blocked`
+  `stop_reason=path_safety_unknown` `cleanup=false` `approval_reusable=false` となり、
+  baseline欠落のままB8(9)のroot/child比較・削除へ進まないことを確認する。
+- **Windows handle-based delete capability unavailable（否定例・B8(9)・finding 1）**: Windows
+  nativeで、identity/content等のread-only検査はすべてpassしたが、write/delete sharingを排除する
+  handleを取得できない、または既存handleとのshare conflict等により対象実体へのdelete target
+  bindingを技術的に証明できない状況を渡し、`result=blocked` `stop_reason=path_safety_unknown`
+  `cleanup=false` `delete_attempted=false` `approval_reusable=false` となり、read sharingのみで
+  write/delete競合を防げない場合や、pathname再解決をverified target bindingの代用にした場合に
+  成立しないことを確認する（最初のdelete mutationが実行されていないことを含む）。
+- **inventory後のchild差し替え拒否（否定例・B8(9)・Windows）**: post-approvalの(6)でinventoryと
+  child identity baselineを取得した後、最初の削除mutationまでの間に同一UIDの別processが
+  descendantを追加または置換した状況を渡し、`RUN_LOCK` のhandle/path identity再確認だけでは
+  検出されないことを前提としたうえで、child単位のno-follow実体identity再確認で不一致を検出し、
+  `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` となり、承認された
+  snapshotにない対象を削除しないことを確認する（Linux/WSLは同種の競合を待たずB8(9)開始時点で
+  既にblockedであり、本例はWindows nativeの削除直前binding経路を対象とする）。
+- **同一inodeのin-place write拒否（否定例・B8(9)・Windows）**: inventory記録後、同一UIDの別processが
+  既存のregular fileを同一`FILE_ID_INFO`のまま内容だけ書き換えた状況を渡し、identity/type/
+  path safetyの再確認だけでは検出されないことを前提としたうえで、Windows nativeのverified handle
+  disposition直前に再取得した `size_bytes`/`sha256_lower_hex` がinventory記録値と不一致となり、
+  `result=blocked` `stop_reason=inventory_changed` `cleanup=false` となることを確認する
+  （identity一致をcontent一致の代替にしない）。
+- **directory child集合drift拒否（否定例・B8(9)・Windows・finding 4）**: 配下descendantを検証・削除した後、
+  当該directory自体の削除直前に、同一directory handle上で残余child集合を再列挙した結果、
+  (a) 削除対象として検証済みのchildが1件未削除で残っている、または (b) (6)時点のinventoryに
+  記録のないentryが1件出現している状況を渡し、`result=blocked` `stop_reason=inventory_changed`
+  `cleanup=false` となり、directory自体の削除に進まないことを確認する（残余集合とinventory
+  記録集合のexact一致は削除がbottom-upであるため要求しない。空であることと承認snapshot外混入の
+  不在という会計条件で判定する）。
+- **bottom-up縮小のみでは拒否しない（正例・B8(9)・finding 4）**: 配下descendantを承認どおり検証・
+  削除した結果、残余child集合が(6)時点のinventoryより単純に少ない（かつinventory外entryの混入も
+  未削除の検証済みchildもない）状況を渡し、`stop_reason=inventory_changed`とならず
+  directory自体の削除契約上のmutation candidateへ進めることを確認する（child集合の減少自体は
+  正常でありdriftとして扱わない）。
+- **A9到達後のlock drift時のpayload保全（否定例・A9）**: A8で 1 byte 以上の payload content write が
+  成立した後、completion
+  作成直前の `RUN_LOCK` handle/path identity再確認でdriftを検出した状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `payload_written=true`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  となり、既に作成済みのpayloadを `payload_written=false` として誤報せず、残留し得る状態として
+  保持したまま自動delete/repair/resumeへ進まないことを確認する。
+- **A8 directory-only（または zero-byte leaf・byte write 未成立）で recursive safety scan 失敗
+  （否定例・A8）**: payload directory のみ作成（byte write 0）または zero-byte leaf create-new のみで
+  content write 未成立の状態で、completion record 作成前の B6 同等 recursive safety 再走査が
+  unsafe または判定不能となる状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は `path_safety_unknown`）
+  `create_dir_attempted=true` `payload_written=false` `completion_record_created=false`
+  `auto_cleanup=false` `auto_repair=false` `auto_resume=false` となり、directory residue を
+  肯定記録しつつ byte write 未成立では `payload_written=true` にしないこと、および自動
+  cleanup/repair/resume へ進まないことを確認する。
+- **A8 post-write safety failure（否定例・A8・finding 6）**: payloadへ1回以上write mutation済みの
+  状態で、completion record作成前のB6同等recursive safety再走査（Linux/WSLはnested mount/bind
+  mount・mountinfo評価を含む）がunsafeまたは判定不能となる状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は`path_safety_unknown`） `payload_written=true`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  となり、completion未作成を「payloadなし」の意味に読み替えず、残留を隠さずに肯定記録すること、
+  および自動cleanup/repair/resumeへ進まないことを確認する。
+- **payload expected pathへの外部file hard-link先置き（否定例・A8・pre-write binding）**:
+  fresh safe `RUN_ROOT` 下の expected payload pathname に、同一UIDの別processが外部file Xへの
+  hard linkを先置きした状態でA8を開始する状況を渡し、`result=blocked`
+  `stop_reason=path_safety_failed` `payload_written=false` `completion_record_created=false`
+  `external_target_written=false` となり、既存entryをopen/truncateせず外部file Xの内容を
+  変更しないことを確認する。
+- **marker create-new後のpath差し替え（否定例・A7・pre-write binding・AC1）**:
+  `RUN_INSTANCE_MARKER` の create-new 成功で handle H1 を得た後、**marker content write の前に**
+  同一pathnameが外部file Yへの hard linkへ差し替えられ、current path entry identity と H1 identity が
+  不一致となる状況を渡し、`content_write_attempted=false` `pathname_reopen_used=false`
+  `external_target_written=false` `result=blocked` `stop_reason=path_safety_failed`
+  `payload_written=false` `completion_record_created=false` となり、canonical marker content write を
+  行わずA8へ進まないことを確認する。
+- **A7 post-write read-back失敗時のmarker residue肯定記録（否定例）**: marker content write 完了後に
+  read-back / decode / schema 検証が失敗する状況を渡し、`result=blocked`
+  `stop_reason=provenance_unknown` `run_root_created=true` `instance_marker_created=true`
+  `payload_written=false` `completion_record_created=false` `auto_cleanup=false`
+  `auto_repair=false` `auto_resume=false` となり、作成済みmarkerを `instance_marker_created=false`
+  と誤報したり residue を省略で隠さず、A8へ進まないことを確認する。
+- **pre-write binding capability不明（否定例・A7/A8）**: create-new / no-overwrite 保証、
+  同一handle継続write保証、path/handle identity束縛のいずれかをOS/runtimeが証明できない状況を渡し、
+  `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false`
+  `completion_record_created=false` となり、推測fallbackでpathname writeへ進まないことを確認する。
+- **ancestor directory / `RUN_ROOT` pre-write binding 不能（否定例・A7/A8・discussion_r3793661803）**:
+  A6 後に親 directory が symlink/reparse へ置換され得る状況、または ancestor entity 束縛を証明できない
+  状況を渡し（leaf create-new 成功・`RUN_LOCK` 保持だけでは ancestor-bound とみなさない）、
+  `create_new_attempted=false` `content_write_attempted=false`
+  `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false`
+  `completion_record_created=false` `external_target_written=false` となり、marker/payload の当該
+  create-new も content write も行わず外部 target 未変更のまま A8 未進入で停止することを
+  確認する（write-then-detect 禁止。create-new 後のみの ancestor チェックでは不足）。
+- **payload directory parent 差し替え（否定例・A8・Case A・discussion_r3794153887）**: A8 で payload
+  directory を作成する直前に、当該 directory の親が symlink/reparse へ置換された状況を渡し、
+  `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`
+  `external_target_written=false` となり、directory create mutation 前に停止し外部 target 未変更のまま
+  であることを確認する（write-then-detect / create-then-detect 禁止）。identity bind 単独では不足で、
+  trusted anchor→`parent(D)` の **PreDirCreateTrustedChainContainment**（A4-4〜A4-7 参照）が
+  各段で成立していることが前提。
+- **A8 payload nested directory chain containment 不能（否定例・EARLY・discussion_r3801575707）**:
+  A8 で payload nested directory を作成する直前に、identity/descriptor bind 後〜create 前に
+  同一 UID/SID の非協調 process が `RUN_ROOT` または bound parent を rename/relocation し得る状況、
+  または Linux/WSL/other で trusted anchor→`parent(D)` の chain containment を create 前に
+  実証できない状況を渡す。`result=blocked` `stop_reason=path_safety_unknown`
+  `create_dir_attempted=false` `external_target_written=false` となり、directory create mutation 前に
+  停止し外部 target 未変更のまま後続 nested 段・leaf regular file へ進まないことを確認する
+  （mkdir/mkdirat/CreateDirectory 呼出0。外部 directory を一度作ってから検出する経路を成功・安全扱いしない。
+  identity bind 単独・前段 containment 流用・pathname precheck だけを成功経路にしない）。
+- **leaf containment capability 不成立（否定例・A7/A8・Case B・discussion_r3794153890 /
+  discussion_r3795298185 / discussion_r3800278015）**:
+  marker または payload regular file の create-new 成功後、初回 content write 前に `RUN_ROOT` 外
+  rename escape または external hard-link 追加を OS/API で排除できることを証明不能な状況を渡す
+  （**Linux/WSL で open descriptor / `flock` / file mode / ancestor・`RUN_ROOT` binding のみが
+  利用可能な場合を含む**）。`result=blocked` `stop_reason=path_safety_unknown`
+  `content_write_attempted=false` `external_target_written=false` となる。create-new 済みの場合は
+  `create_new_attempted=true` を実順序どおり肯定し residue を隠さない（marker:
+  `instance_marker_created=true`；payload 未write: `payload_written=false`）。
+  payload write・completion record 作成へ進まないことを確認する。
+- **payload mutation 後の flush/close 失敗（否定例・A8・discussion_r3793893860）**: payload entry へ
+  1回以上 write mutation 済みの後に short write・後続 write 失敗・`flush` 失敗・`close` 失敗、または
+  content が完全 committed/durable でない equivalent 状態を渡し、`result=blocked`
+  `stop_reason=path_safety_failed`（判定不能時は `path_safety_unknown`） `payload_written=true`
+  `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false`
+  となり、不完全 payload を残留 residue として肯定記録し completion 未作成・自動 delete/repair/resume へ
+  進まないことを確認する（`payload_written=false` への成功丸め禁止）。
+- **cleanup 中の `RUN_ROOT` rename/replacement（否定例・B8(9)・Case A・discussion_r3794446604）**:
+  B8(6) baseline 確認後、child candidate を open する前または child 処理中に、同一 SID の非協調
+  process が `RUN_ROOT` の rename/replacement を試みる状況を渡す。verified `RUN_ROOT` directory
+  handle 保持契約（B8(6) baseline 一致・rename/delete sharing 排除または同等保証）を維持できない
+  場合は最初の該当 delete mutation 前に `result=blocked` `stop_reason=path_safety_unknown`
+  `cleanup=false` `delete_attempted=false` `approval_reusable=false` となり、**external /
+  replacement target への delete mutation が発生していない**ことを観測可能にする（pathname 単発比較・
+  `RUN_LOCK` 保持のみ・child handle のみ・時間幅仮定・post-operation scan を安全根拠にしない）。
+- **marker create-new 後の write/flush/close/durability 失敗（否定例・A7・Case B・discussion_r3794446609）**:
+  `RUN_INSTANCE_MARKER` の create-new 成功後に content write・short write・後続 write・`flush`・
+  `close`・durability 結果確認のいずれかが失敗し、write mutation が成立した、または成立可能性を
+  否定できない状況を渡し、`result=blocked` `run_root_created=true` `instance_marker_created=true`
+  `payload_written=false` `completion_record_created=false` `auto_cleanup=false`
+  `auto_repair=false` `auto_resume=false` となり、A8 / completion / auto cleanup / auto repair /
+  auto resume へ進まないことを確認する（cached read-back 成功だけで flush / close / durability
+  失敗を無視して success へ進まない）。
+
+**試験実施記録（Issue #54・実装後照合・実施: Cursor）**
+
+共通環境: current base SHA `c7f2b4c32a4f34f5715fb3279c217bcc7d0ba188`、branch
+`cursor/issue-54-scratch-cleanup-boundary`、4ファイル文書のみ（実cleanup・追加script・
+repo内lock実装ファイルなし）。`RUN_LOCK` はruntime空ファイルでありGit diffに含めない。
+merge / settings_apply / execution / cleanup は未実行。`instance_nonce` は GitHub へ記録しない。
+
+##### fail-closed 8基準（実装後照合・actual diff根拠）
+
+| criterion | result | basis | next_action |
+|---|---|---|---|
+| `success-propagation` | pass | `ai-workflow.mdc` が中断・部分失敗・`cleanup_result_unknown`・approve後 drift・marker/commitment mismatch・handle/path identity不一致を `result=blocked` 固定。`approval_stale`/`inventory_changed` で再利用禁止。`residue=present` only化により、`RUN_ROOT`/marker存在時に`residue=none`を成功として取りこぼす経路が塞がれた | continue |
+| `identity-root` | pass | Win SID→`Win32_UserProfile.LocalPath`、Linux/WSL `id -u`→`getent`第6フィールドを**`PATH`検索に依存しないtrusted execution path（syscall/NSS APIまたは実体検証済みcommand）で解決**し、差し替え可能な`PATH`上の`id`/`getent`を正本にしない（A0）。`USERPROFILE`/`HOME` 不一致否定例を `setup.md` に記載 | continue |
+| `path-chain-safety` | pass | `CACHE_ROOT` を含む `COMMON_PREFIX`/`LOCK_CHAIN`/`RUN_CHAIN` 別系統。A1/B1 Windows native canonical leaf exact一致検証（regex通過後の末尾dot/space alias等を`invalid_run_segment`でlock/root作成前に拒否）。A4/A6 新規directoryはverified親へcreate前**PreDirCreateTrustedChainContainment**（`chain_containment_capability=demonstrated`。証明不能はcreate前`path_safety_unknown` `create_dir_attempted=false`。即時親だけのPreDirCreateParentBind単独は不十分）→chain handle保持中bound parentから1段create→ImmediatePostCreateVerify完了まで保持（Linux/WSL `0700`固定・Windows safe owner/DACL）。A5/B5/B8 `RUN_LOCK`のcreate-new/open-existing区別＋取得直後・completion直前・post-approval再取得直後・削除mutation直前のhandle/path identity exact binding。**A7 `RUN_INSTANCE_MARKER`もLinux/WSL `0600`固定・Windows safe owner/DACLでcreate-new + pre-write handle binding（pathname 再 open 初回 write 禁止）。A8 payload regular file も entry ごとに create-new + pre-write handle binding（既存 entry/hard link 先置きは open/truncate 禁止）**。A6 `run_root_collision`。B6 `RUN_ROOT`+全descendant recursive path safety（nested mount/bind mount/reparse拒否） | continue |
+| `persistent-claim-bypass` | pass | local marker は create-new/no-overwrite・collision・payload による marker 変更禁止・completion v2 exact binding・pre/post 再取得で bypass 不可（Issue #54 §fail-closed 8） | continue |
+| `verify-before-mutate` | pass | A4/A6 verified親へcreate前**PreDirCreateTrustedChainContainment**（`chain_containment_capability=demonstrated`。証明不能はcreate前`path_safety_unknown` `create_dir_attempted=false`）→chain handle保持中bound parentから1段create→ImmediatePostCreateVerify完了まで保持。A5 lock取得→handle/path identity binding→A6 run 作成→**A7 `RUN_INSTANCE_MARKER` create-new + pre-write handle binding + LeafContainmentCapabilityGate（`leaf_containment_capability=demonstrated` のみ content write へ。`platform=windows_native` 単独では不十分。canonical content は create-new で得た同一 handle へ write。pathname 再 open 初回 write 禁止）+ verify→A8 payload regular file ごとの create-new + pre-write handle binding + LeafContainmentCapabilityGate（A7 と同一 gate。既存 entry/hard link 先置きは open/truncate 禁止。binding 証明不能は write 前 fail-closed）+ cleanup互換属性作成＋completion前にB6と同一のOS別recursive safety predicate（nested mount/bind mount/mountinfo評価を含む）で全descendant再走査、unsafeなら`scratch-completion/v2`未作成・payload write済みなら`payload_written=true`/`completion_record_created=false`/`result=blocked`を肯定記録）**→A9 completion直前のhandle/path identity再確認（**drift時はpayload残留を`payload_written=false`と誤報せず保持、completionのみ未作成**）。cleanup B5取得直後・B8 post-approval再取得直後の2回のhandle/path identity binding、marker binding・inventory exact 比較、**B8(8) 削除mutation直前のRUN_LOCK再確認**に加え、**B8(9)は各mutation candidate処理直前にcurrent `RUN_ROOT`を(6)の`run_root_identity`とexact比較するroot binding確認を先に行い（不一致・判定不能はそのmutation前に停止）、その後(6)のchild identity baselineとのchild単位no-follow実体identity再確認（読み取り専用、regular fileはsize/SHA-256もexact再照合、directoryはchild集合を削除直前に再列挙・照合。bottom-up縮小自体はdriftとしない）をOS共通で行った上で、実際のmutationはOS別契約でのみ許可する: Windows nativeは再確認と同一のverified handleに対する`SetFileInformationByHandle`+`FileDispositionInfo`相当のhandle-based dispositionでのみ削除し、handleはwrite/delete sharingを許可しないか同等の安全性を証明できる条件で取得し、pathname-onlyの`DeleteFile`/`RemoveDirectory`をbinding根拠にしない。Linux/WSLは同一UIDの非協調processによるrename/replaceを現在許可されたAPI（`unlink`/`unlinkat`/`rmdir`等のpathname delete）では原子的に排除できないため、read-only再確認が全てpassしても最初のmutation前に`path_safety_unknown`で停止し、`delete_attempted=false`のまま削除を実行しない**（Codex独立技術レビュー#5277901998のP1-2指摘、および#5289296528の6 finding指摘、**#5291297447 / discussion_r3782248568 / discussion_r3782373045 のpre-write binding P1**に対する是正） | continue |
+| `provenance-no-fabrication` | pass | `scratch-completion/v2`（`run_state=completed`/`residue=present` only）+ local `scratch-instance/v1` marker からの commitment 再計算 exact 一致のみ。`run_id` 単独・v1・`residue=none`・path/repo-wide 推測禁止を `ai-workflow.mdc` A7/A9/B2/B6 に明記 | continue |
+| `concurrency-interrupt-residue` | pass | writer/cleanup 同一 `RUN_LOCK`。steal/待機/lock file 削除禁止。existing `RUN_ROOT` collision。**取得直後・completion直前・post-approve再取得直後・削除mutation直前の計4箇所でhandle/path file identity exact比較**し、並行processによるlock path差し替え(TOCTOU)を検出。**A7/A8 pre-write binding: create-new 後の pathname 再 open 初回 write 禁止、expected pathname への hard link 先置きは open/truncate せず `path_safety_failed`、path/handle identity 不一致・binding capability 不明は write 前 fail-closed。A7 失敗時は A8 未進入**。**B8(9)は各mutation candidate直前に`RUN_ROOT`自身のroot bindingも再確認し、rename/replacementを検出。inventory記録後から削除までの間に同一UIDの別processが追加・置換したdescendantもchild単位no-follow identity再確認で検出し、同一inodeへのin-place writeはsize/SHA-256再照合、directory child集合はbottom-up削除による正常な減少をdriftとせず、inventory外entry追加・削除対象として検証済みのchild残留のみを削除直前の再列挙で検出する**。Windows nativeのverified handleはwrite/delete sharingを排除するか同等の安全性を証明できる条件で取得し、並行processによるhandle取得後のcontent変更を防ぐ。**OS別残留保証: Windows nativeは検出後にverified handleへのdisposition前でblockedとなり削除自体が発生しない。Linux/WSLはそもそも現行API境界で削除mutationへ到達しないため、非協調processによる並行rename/replaceが誤削除・残留誤認へつながる経路自体が存在しない（`os=linux\|wsl` `delete_attempted=false`）**。**A8 post-write recursive safety失敗・A9でcompletion直前にlock identity driftが起きた場合もpayload残留を偽って否定せず`payload_written=true`を肯定記録する**。marker/commitment mismatch・inventory drift 検出 | continue |
+| `override-test-hook-isolation` | not_applicable | Issue #54 は override/test hook を導入しない（4ファイル文書のみ） | continue |
+
+##### 否定テスト観測例（文書契約・EARLY非実行の証明）
+
+| 入力 | 期待出力 | EARLY証明 |
+|---|---|---|
+| fresh `.cache` missing（writer・LeafContainmentCapability 実証環境） | `scratch_created=true`（bootstrap 後 lock→run 作成→marker→payload） | 成功例は `leaf_containment_capability=demonstrated` に限定（`platform=windows_native` 単独では不十分）。**かつ** A4/A6 各 missing directory で `chain_containment_capability=demonstrated`。**payload nested directory まで進める場合も各段で `chain_containment_capability=demonstrated` が前提**。`RUN_LOCK` 前に `RUN_BASE`/`RUN_ROOT`/payload 未作成。marker 検証前 payload 未作成 |
+| Linux/WSL 現行プリミティブのみ（open descriptor / `flock` / mode / ancestor binding） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `completion_record_created=false` | A7/A8 最初の content write 前停止。payload write・completion 未作成（`discussion_r3795298185` / `r3800278015`） |
+| existing safe `RUN_ROOT`（writer） | `result=blocked` `stop_reason=run_root_collision` `instance_marker_created=false` `payload_written=false` | A6 collision。marker/payload 前に停止 |
+| cross-host/profile 同 `repo_slug/run_id` | `result=blocked` `stop_reason=provenance_mismatch` `cleanup=false` `approval_reusable=false` | B6 marker commitment と v2 不一致で inventory/cleanup 未宣言 |
+| marker missing/invalid | `result=blocked` `stop_reason=provenance_unknown` `cleanup=false` | B4/B6 で marker 必須。v1 受理・推測昇格なし |
+| nested mount / bind mount / reparse（cleanup） | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B6 recursive safety 完了前に inventory/cleanup 未宣言 |
+| post-approve `RUN_LOCK` conflict | `result=blocked` `stop_reason=run_lock_conflict` `cleanup=false` `approval_reusable=false` | B8 既存 lock のみ open・新規作成なし |
+| `repo_slug=..` または `run_id=..` | `result=blocked` `stop_reason=invalid_run_segment` `scratch_created=false` | A1/B1 失敗後 lock bootstrap・marker・payload 未作成 |
+| `run_id=foo.`（Windows canonical leaf alias） | `result=blocked` `stop_reason=invalid_run_segment` `run_lock_created=false` `run_root_created=false` `instance_marker_created=false` `payload_written=false` `completion_record_created=false` `cleanup=false` | A1/B1 失敗後 lock/root/marker/payload/completion/cleanup 未作成（canonicalization alias を正規化受理しない） |
+| `LOCK_ROOT` 親 safety 不明 | `result=blocked` `stop_reason=path_safety_unknown` `run_root_created=false` | bootstrap 失敗後 marker/payload 未作成 |
+| A4/A6 chain containment 不能（Linux/WSL openat/mkdirat 含む） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` | directory create 前停止。mkdir/CreateDirectory 呼出0。pathname check→create→post-check だけを成功経路にしない |
+| A4/A6 parent bind 不能（親 rename/replace 可能・binding 未証明） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false`（A4 なら `run_lock_created=false`） | directory create 前停止。即時親だけの PreDirCreateParentBind 単独を成功経路にしない |
+| A4/A6/A8 create-new 成功後 ImmediatePostCreateVerify unsafe/unknown | `result=blocked` `stop_reason=path_safety_failed`\|`path_safety_unknown` `create_dir_attempted=true` `completion_record_created=false` `auto_cleanup=false` `auto_repair=false` `auto_resume=false` | 作成済み directory/residue を肯定。`create_dir_attempted=false` と区別。後続段/leaf/completion/auto_* 未進入 |
+| binding 証明不能環境（helper/runtime なし） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` | 当該 missing component の mkdir/create 未実行。成功例捏造なし |
+| mountinfo 評価不能 | `result=blocked` `stop_reason=path_safety_unknown` `scratch_created=false` | device ID 照合だけで pass しない |
+| `USERPROFILE`/`HOME` が `TRUSTED_HOME` と不一致 | `result=blocked` `stop_reason=identity_root_mismatch` | mkdir/marker/payload/cleanup より前に停止 |
+| cleanup で `RUN_ROOT` または marker missing | `result=blocked` `cleanup=false` `path_created=false` | cleanup で path/lock/marker 新規作成なし |
+| `scratch-completion/v1` のみ | `result=blocked` `stop_reason=provenance_unknown` `cleanup=false` | v1 受理・v2 推測昇格禁止（B2） |
+| approve後 `inventory_changed=true` | `result=blocked` `stop_reason=inventory_changed` `approval_reusable=false` | 古い approve で削除継続なし |
+| approve後 provenance drift | `result=blocked` `stop_reason=approval_stale` `cleanup=false` | post-approve 再検証で drift 検出 |
+| umask=0002下でのdirectory/lock作成 | `directory observed_mode=0700` `lock observed_mode=0600`（いずれもexact） | **`chain_containment_capability=demonstrated` かつ verified 親へ create 前 binding 証明済みの場合に限定**。A4/A6/A5 requested modeがumaskに依存しない固定値 |
+| safe attribute観測不能（作成直後） | `result=blocked` `stop_reason=path_safety_unknown` | 作成済みentryの自動削除・chmod/ACL自動repairなし |
+| unsafe lock attributes（`0600`/`0022`逸脱） | `result=blocked` `stop_reason=path_safety_failed` `run_root_created=false` `instance_marker_created=false` `payload_written=false` `completion_record_created=false` | A5でRUN_ROOT/marker/payload/completion未到達 |
+| `RUN_LOCK` path swap（取得直後） | `result=blocked` `stop_reason=path_safety_failed` | A5/B5でhandle/path identity不一致を検出、以降のmutationへ進まない |
+| post-approval再取得後のidentity不一致 | `result=blocked` `cleanup=false` `approval_reusable=false` | B8(3)でpre-approval時の観測を再利用せずゼロから再比較 |
+| 削除mutation直前のみidentity不一致 | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` | B8(8)で直前までの全項目成立が最終確認省略の理由にならない |
+| `RUN_ROOT`/marker存在下での`residue=none`試行 | `result=blocked` `stop_reason=provenance_unknown` `completion_record_created=false` | A9でresidue=presentのみ受理、noneを成立させる別フローなし |
+| `PATH`上の偽装`id`/`getent` | `result=blocked` `stop_reason=identity_root_unresolved` | A0でtrusted execution pathを証明できない結果を正本にしない |
+| `RUN_INSTANCE_MARKER`のobserved modeが`0600`でない | `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` `completion_record_created=false` | A7で作成直後再検証に失敗、unsafe markerをcompletionへ昇格しない |
+| payload descendantのunsafe属性（completion前再走査） | `result=blocked` `stop_reason=path_safety_failed` `completion_record_created=false` | A8で全descendant再走査、1件でもunsafeなら`scratch-completion/v2`未作成 |
+| child identity baseline取得不能 | `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `approval_reusable=false` `delete_attempted=false` | B8(6)でprocess-local child identity map取得不能・信頼性証明不能のため、B8(9)の比較・削除へ進まない |
+| Linux/WSL: read-only再確認全pass後の削除fail-closed | `os=linux\|wsl` `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false` `approval_reusable=false` | B8(9)で現行API境界では検証済み実体と削除対象を原子的に束縛できないため、read-only check全passでも最初のmutation前に停止 |
+| Windows: B8(6)後の識別対象差し替え（X→Y） | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` `delete_attempted=false` | 削除直前に取得したverified handleのidentityがB8(6) baselineと不一致、pathnameを追跡してYを削除しない |
+| inventory記録後のchild追加・置換（Windows） | `result=blocked` `stop_reason=path_safety_failed` `cleanup=false` `delete_attempted=false` | B8(9)でchild単位no-follow実体identity再確認により検出、承認snapshot外の対象を削除しない |
+| 同一inode上のregular file in-place write（Windows） | `result=blocked` `stop_reason=inventory_changed` `cleanup=false` `delete_attempted=false` | B8(9)でverified handle disposition直前のsize/SHA-256再照合により検出、identity一致をcontent一致の代替にしない |
+| directory child集合の削除直前drift（Windows） | `result=blocked` `stop_reason=inventory_changed` `cleanup=false` `delete_attempted=false` | B8(9)でdirectory自身の削除直前に同一directory handle上でchild集合を再列挙しinventoryと照合 |
+| A8 directory-only（byte write 0）で recursive safety scan 失敗 | `result=blocked` `stop_reason=path_safety_failed`\|`path_safety_unknown` `create_dir_attempted=true` `payload_written=false` `completion_record_created=false` `auto_cleanup=false` | directory residue 肯定。byte write 未成立では `payload_written=true` にしない。completion/auto_* 未進入 |
+| A8後・completion直前のRUN_LOCK identity drift（byte write 成立済み） | `result=blocked` `stop_reason=path_safety_failed` `payload_written=true` `completion_record_created=false` | A9でbyte write成立済みpayload残留を`payload_written=false`と誤報せず保持、自動delete/repair/resumeへ進まない |
+| payload expected pathへの外部file hard-link先置き | `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` `external_target_written=false` | A8 create-new 衝突または既存 entry 検知。open/truncate なし。外部実体未変更 |
+| marker create-new後のpath差し替え | `pathname_reopen_used=false` `result=blocked` `stop_reason=path_safety_failed` `payload_written=false` | A7 canonical content は create-new handle へ。path 再 open 初回 write なし。A8 未進入 |
+| pre-write binding capability不明 | `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` | create-new/handle/path binding 証明不能。pathname write へ進まない |
+| ancestor directory / `RUN_ROOT` bind 不能（A6後symlink/reparse置換） | `create_new_attempted=false` `content_write_attempted=false` `result=blocked` `stop_reason=path_safety_unknown` `payload_written=false` `external_target_written=false` | A7/A8 create-new 前停止。create-new 後のみの ancestor チェックでは不足 |
+| payload directory parent 差し替え（Case A） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | A8 PreDirCreateTrustedChainContainment 失敗（identity bind 単独では不足）。directory create 前停止 |
+| A8 payload nested directory chain containment 不能（identity bind後〜create前の RUN_ROOT/parent rename 含む） | `result=blocked` `stop_reason=path_safety_unknown` `create_dir_attempted=false` `external_target_written=false` | directory create 前停止。mkdir/CreateDirectory 呼出0。後続 nested 段・leaf 未進入。外部 dir 作ってから検出する経路を成功扱いしない |
+| leaf containment capability 不成立（Case B・`platform=windows_native` 単独・Linux/WSL 現行プリミティブのみを含む） | `result=blocked` `stop_reason=path_safety_unknown` `content_write_attempted=false` `external_target_written=false` | create-new 済みなら `create_new_attempted=true` を肯定。content write 前停止 |
+| payload mutation 後 flush/close 失敗 | `result=blocked` `payload_written=true` `completion_record_created=false` `auto_cleanup=false` | 不完全 payload 残留を肯定。成功丸め禁止 |
+| cleanup 中 `RUN_ROOT` rename/replacement（Case A・discussion_r3794446604） | `result=blocked` `stop_reason=path_safety_unknown` `cleanup=false` `delete_attempted=false` | verified root handle 保持不能。external/replacement target への delete mutation なし |
+| marker create-new 後 write/flush/close/durability 失敗（Case B・discussion_r3794446609） | `result=blocked` `instance_marker_created=true` `payload_written=false` `completion_record_created=false` `auto_cleanup=false` | A8/completion/auto cleanup/repair/resume 未進入。cached read-back のみで success 化しない |
+
 ## 既存リポジトリへの導入（差分マージ方式）
 
 テンプレート丸コピーは新規リポジトリ専用。既にAI運用（`AGENTS.md`・`CLAUDE.md`・`.claude/settings.json`・独自の機械契約）があるリポジトリでは:

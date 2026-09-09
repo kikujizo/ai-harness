@@ -3851,3 +3851,94 @@ Issue #134 で `AGENTS.md` / `pm-review` に正本化した高リスク承認v2�
 
 - [ ] #133 PR merge後、`approval_contract_sync_pending` 解除を記録
 - [ ] 通常の新規高リスク案件へv2契約を全面適用
+
+---
+
+# Decision: ループ設計・plan-gate・orchestrationの高リスク集合SSOTと承認境界（Issue #166）
+
+Date: 2026-09-09
+Status: Accepted
+Related Issues: #166, #159, #160
+Related PRs: #165
+
+## 決定事項
+
+PR #165（merge commit `ecf08d93c13091bcefbfc7f922b5369dcedae43e`）で採択・mergeされた判断を、会話履歴なしで説明できるよう本Decisionへ自己完結して記録する。本Decisionが新たに決めた運用変更ではない。記録する判断は次の5点である。
+
+1. ループ設計・plan-gate・orchestrationの高リスク集合は、各所で閉じた列挙を持たず、ルート `AGENTS.md`「リスク分類」を正本として参照する。
+2. このDecision単体では現行mainの高リスク集合を増減させない。Issue #147 / PR #151 の包括規則は先取りしない。
+3. 通常リスクでは、可逆な準備・実装・テスト・レビュー・PR作成に人間承認を要求しない。
+4. 高リスクでは `implementation_start` の人間approve後に実装開始し、merge / settings_apply / execution の発効点承認は別scopeとする。`implementation_start` 承認を発効点へ流用しない。
+5. 発効点approve後の実操作はAIが担当する。独立レビュー・CI・`HIGH_RISK_TECH_GATE`は人間承認で代替しない。
+
+## 背景・課題
+
+PR #165 は、ループ入口ごとに「不可逆4カテゴリ」等を閉じて列挙していた高リスク集合を、ルート `AGENTS.md`「リスク分類」へ委譲した。Codex技術PMは、この判断のDecision LogをPR #165のmerge前ゲートではなく、merge後に直ちに成立させる後続Checkpoint（`DECISION_LOG_STATE: required_post_merge_checkpoint`）と判定した。
+
+Issue #159 の固定4ファイルscopeに Decision Log を混在させるとscopeが壊れるため、記録は本Checkpoint（Issue #166）で `docs/decisions.md` のみに行う。Issue #159 を会話履歴なしで close 判定できるようにする。
+
+## 採用する方針
+
+- 高リスク集合を各ループ入口にコピーせず、`AGENTS.md`「リスク分類」へ委譲する。
+- 高リスクでは `implementation_start` と発効点承認（merge / settings_apply / execution）を別scopeとして扱う。
+- 発効点approve後の実操作はAI担当とする。
+- 独立レビュー・固定HEAD CI・`HIGH_RISK_TECH_GATE`を、人間承認とは独立したゲートとして維持する。
+- 本記録は Accepted とする（PR #165 は人間merge承認後に merge 済みのため）。
+
+## 採用しない方針 / 却下した代替案
+
+- **各入口に「不可逆4カテゴリ」等の高リスク集合を閉じて列挙し続ける案**: 正本変更時にドリフトするため却下。
+- **高リスクでも `implementation_start` 承認不要とする案**: root `AGENTS.md` と矛盾し、実装開始ゲートが空くため却下。
+- **`implementation_start` 承認を merge / settings_apply / execution へ流用する案**: scope分離契約に反するため却下。
+- **Decision LogをPR #165へ5ファイル目として混在させる案**: Issue #159 の固定4ファイルscopeを壊すため却下。
+- **Issue #147 / PR #151 の包括規則を先取りする案**: Issue #159 の前提同期scopeを超えるため却下。
+
+## 判断理由
+
+- 高リスク集合の正本を1箇所にすることで、入口ごとのコピードリフトを止める。
+- `implementation_start` と発効点を分けることで、「誰に実装を任せるか」と「merge等を発効するか」の承認流用を防ぐ。
+- 人間承認はゲートを代替しない。独立レビュー・CI・技術ゲートを空にしない。
+- Decision Logを親PRから分離することで、Issue #159 の固定scopeを守りつつ、判断理由を後から参照できる。
+
+## 承認との境界
+
+- この Accepted Decision は、新たな merge / settings_apply / execution 承認を意味しない。
+- PR #165 の merge 承認を、本Checkpointや別scopeへ流用しない。
+- `implementation_start` と発効点承認は別scopeである。一方の承認をもう一方へ流用しない。
+- 親PR #165 の高リスク承認・レビュー・`HIGH_RISK_TECH_GATE` を本Checkpointへ流用しない。本Checkpoint自体は通常リスクの記録追記である。
+
+## リスク（不可逆4カテゴリの該当有無）
+
+本Checkpoint（`docs/decisions.md` への記録追記）について:
+
+- ① 秘匿・個人情報: 非該当
+- ② 課金: 非該当
+- ③ 権限・パイプライン自己変更: 非該当（記録のみ。`AGENTS.md` 等の契約本文は変更しない）
+- ④ 不可逆データ操作: 非該当
+
+`risk=normal`。親PR #165 の `risk=high` を本記録へ継承しない。
+
+## 影響範囲
+
+- `docs/decisions.md`（本エントリの追記のみ）
+- 変更しない: PR #165 の merge 済み4ファイル（`.agents/skills/loop-design/SKILL.md` / `.agents/skills/plan-gate/SKILL.md` / `docs/harness/loops/principles.md` / `docs/harness/ops/orchestration.md`）、`AGENTS.md`、`CLAUDE.md`、`.agents/**`、`.github/**`、`docs/templates.md`
+
+## 取り消し手順
+
+1. この Decision Log 追記を含む実装PRを `git revert` し、本Decisionの Status を `Superseded` とする。
+2. それだけでは PR #165 の merge 済み4ファイル変更は取り消されない。
+3. PR #165 の判断自体を撤回する場合は、4ファイルを戻す別Checkpointを作成し、その時点の risk 分類・独立レビュー・CI・必要な技術ゲート・人間承認を新規に成立させる。親PR #165 の旧承認・旧レビュー・旧技術ゲートは流用しない。
+
+## 見直す条件
+
+- ルート `AGENTS.md`「リスク分類」が改定され、本記録の5点と意味がずれた場合
+- Issue #147 / PR #151 の包括規則が別Checkpointとして成立した場合（その成立をもって本Decisionが包括規則を発効したことにはならない）
+- `implementation_start` と発効点の分離契約が正本側で改定された場合
+
+## 次アクション
+
+本Decision Logが実装PRの人間mergeにより成立したあと:
+
+- [ ] Issue #159 を close する
+- [ ] Issue #160 を、その時点の現行 main を基準に独立再評価する
+- [ ] Issue #160 の過去の route 記録を自動流用しない

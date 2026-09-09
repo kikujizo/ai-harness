@@ -36,7 +36,7 @@ Claude Codeが対話レーンで起動したときは**指揮者（オーケス�
   （独立なら並列）。ループ非発生の読み取り/即答/真の1行修正だけ指揮者が直接。多段実装ループは委譲必須
   （正本: `docs/harness/ops/orchestration.md` §2）
 - サブエージェントの報告は、採用前に指揮者が一次資料で検証する（重要度の高い指摘は必須）
-- **高リスク（不可逆4カテゴリ該当）**は、`PROPOSED_ROUTE` → `APPROVAL_SCOPE: implementation_start` の
+- **高リスク（ルート`AGENTS.md`「リスク分類」の高リスク集合該当）**は、`PROPOSED_ROUTE` → `APPROVAL_SCOPE: implementation_start` の
   `pending` + `gate=human_approval` → 人間approve/deny → 有効な `HUMAN_APPROVAL_RECORD: v2` 検証後に
   `APPROVAL_STATE: approved` と `PM_VERDICT: approve risk=high route=...`（`gate` なし）で正式routeを確定して実装開始する。
   `implementation_start` の承認は merge / settings_apply / execution へ流用しない（各発効点は別scope・別record）。
@@ -76,7 +76,7 @@ Codex PMへ返す。Issue内の実装詳細は通常どおり継続し、逐次�
 fail-closed 機構の新設・安全契約変更時は、実装前とレビュー時に
 [`docs/criteria/fail-closed.md`](docs/criteria/fail-closed.md) を照合する（根拠不足は `fail`、推測 `pass` 禁止。
 `AGENTS.md`「実装ルール」節参照）。
-カテゴリ③（権限・パイプライン・正本・AI設定）に触れる変更は高リスク（不可逆4カテゴリ③）。
+ルート`AGENTS.md`「リスク分類」のカテゴリ③（権限・パイプライン・正本・AI設定）に触れる変更は高リスク（同節の高リスク集合に該当）。
 `implementation_start` の人間approve後にだけ正式routeを確定して実装を開始する。
 発効点（merge・設定反映・実行）は独立レビュー＋`HIGH_RISK_TECH_GATE` 後、別scopeで人間approve/deny
 （推奨表記: `gate=human_approval`）。実装AIと独立したレビュー＋Decision Log記録＋approve後のAIによるmerge実行。

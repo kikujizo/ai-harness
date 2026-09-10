@@ -129,7 +129,10 @@ PIIを含まないログ変更、ドキュメント・テスト・通常実装�
 - **高リスク・deny後**: `PM_VERDICT: needs-info risk=high`（`gate` なし・`route` なし）。同一proposalを再承認待ちに戻さず、
   継続するなら新proposal URLから新しい `pending + gate=human_approval` サイクルを開始する
 - **高リスク・発効点**: 実装・独立レビュー・`HIGH_RISK_TECH_GATE: passed` 完了後、発効点ごとに別scopeで再度
-  `APPROVAL_STATE: pending` + `gate=human_approval` で停止する（`implementation_start` の承認は流用不可）
+  `APPROVAL_STATE: pending` + `gate=human_approval` で停止する（`implementation_start` の承認は流用不可）。
+  `scope=merge` では、人間の直接 approve 観測だけでは merge 実行条件を満たさない。canonical proposal に紐づく
+  active `HUMAN_APPROVAL_RECORD: v2` を merge 前に GitHub から readback し、必須field＋復唱確認の完全一致を
+  検証した場合だけ merge を許可する（詳細は下記「高リスク scope=merge の発効条件と readback 必須」）
 
 #### Issue #133 同期Checkpointとbootstrap例外
 
@@ -147,10 +150,14 @@ Issue #133 は #134 の全面運用適用に**必須の同期Checkpoint**（任�
 どちらの源泉でも、次はAIに許可しない:
 
 - mainへの直接push
-- **発効点の人間approveなし**の高リスク（不可逆4カテゴリ、および包括規則）PRのmerge、および「自動マージ条件」を
-  満たさない通常リスクPRのmerge（技術ゲート不成立はAI PMが再ルーティングまたは `blocked` を記録。不可逆案件の発効点のみ人間approve/deny。approve後のmerge実行はAIが行う）
-- **発効点の人間approveなし**の不可逆操作の実行（カテゴリ③を含む。高リスク案件は
-  `implementation_start` の人間approve後にroute確定し実装を開始し、独立レビュー＋発効点の人間approve＋Decision Log記録を必須とする）
+- **発効点の人間approveなし**、または **`scope=merge` で active v2 record の GitHub readback・完全一致検証なし**の
+  高リスク（不可逆4カテゴリ、および包括規則）PRのmerge、および「自動マージ条件」を満たさない通常リスクPRのmerge
+  （技術ゲート不成立はAI PMが再ルーティングまたは `blocked` を記録。不可逆案件の発効点のみ人間approve/deny。
+  高リスク `scope=merge` では人間approve観測後に v2 record 記録→GitHub readback→一致検証→merge の順序を省略しない。
+  通常リスクは従来どおり自動マージ条件成立時にAIがmerge可能）
+- **発効点の人間approveなし**、または **`scope=merge` で v2 readback 未実施・取得不能・不一致**の不可逆操作の実行
+  （カテゴリ③を含む。高リスク案件は `implementation_start` の人間approve後にroute確定し実装を開始し、
+  独立レビュー＋発効点の人間approve＋（`scope=merge` では v2 write/readback/validate）＋Decision Log記録を必須とする）
 
 通常リスクのmergeは、人間、または次の「自動マージ条件」を全て満たした場合にAIが実行できる。
 
@@ -205,8 +212,8 @@ G2等の技術ゲート不成立は人間をレビュアー代替にせず、AI 
 - 人間へclosed questionを返すのは、非人間ゲートが成立し、残件が特定済みの発効点に対する
   approve/denyだけの場合に限る。route・独立レビュー・CI・技術判断が不明な場合は、
   人間へ許可を求めずAI PMへ再ルートし、候補がなければ `blocked` を記録する
-- 本規定は、通常リスクPRのG1〜G6、高リスクの発効点承認、approve後にAIがmergeする
-  既存条件を変更せず、通常リスクPRへ新しい人間承認ゲートを追加しない
+- 本規定は、通常リスクPRのG1〜G6、高リスクの発効点承認、高リスク `scope=merge` の v2 write/readback/validate 後に
+  AIがmergeする条件を明確化するものであり、通常リスクPRへ新しい人間承認ゲートを追加しない
 - 是正行動（revert・rollback・修正push）もコード変更であり、同一の割り当てを要する。
   誤りに気づいたら勝手に直さず、問題を整理して選択肢と推奨をAI PMに提示する
 - AIが作成した設計書・提案資料は**意見**であり、その存在は実装許可ではない
@@ -555,8 +562,40 @@ PR #135の既存implementation_startに使った次のv1 recordだけは、既�
 - 承認源泉/`recorded_by`を検証不能、または `recorded_by=codex|cursor` → `approval_record_provenance_unverifiable`
 - 復唱確認が同一コメント内の直前行に存在しない → `approval_record_no_confirmation_shown`
 - 復唱確認の値とrecord本体の該当fieldが不一致 → `approval_record_confirmation_mismatch`
+- record投稿APIの success を readback 完了とみなし merge へ進む → `approval_record_unverified_before_effect`
+- merge 前に GitHub から record を readback できない、または取得不能 → `approval_record_unverified_before_effect`
 
 いずれもroute確定・merge・設定反映・executionへ進まない。訂正・撤回は新規record + 正当な `supersedes` で残す。
+
+#### 高リスク scope=merge の発効条件と readback 必須
+
+高リスク `scope=merge` の merge 実行は、次の順序を**すべて**満たす場合に限り `merge_allowed=true` とする。
+同一AIが record 作成と merge を連続して行う場合も、write → readback → validate → merge を省略しない。
+
+1. canonical merge proposal が存在し、`APPROVAL_SCOPE: merge` / `APPROVAL_STATE: pending` /
+   `PM_VERDICT: approve risk=high gate=human_approval` である
+2. 人間が対象固定 closed question へ明示 `approve|deny` した（承認の源泉）
+3. 許可された記録主体が、上記 proposal に完全一致する `HUMAN_APPROVAL_RECORD: v2` を**新規 GitHub コメント**として
+   merge より先に記録する（record 投稿APIの success レスポンスを readback の代替にしない）
+4. merge 実行者は、GitHub から当該 record を readback する（投稿API success を代替にしない）
+5. readback 時点で、subject / scope / proposal_url / proposed_route / decision / approval_source / recorded_by /
+   supersedes と必要な復唱確認が、現在の判断対象（固定 HEAD・canonical proposal）へ完全一致する
+   （`field_match=passed`）
+6. `decision=approve` の active record が一意であり、HEAD 不変、proposal 不変である
+7. merge 後に投稿された record や事後 attestation を、当該 merge の事前承認として遡及利用しない
+   （`merged_at < approval_record.created_at` または `readback_at >= merged_at` の record は事前ゲートに使わない）
+
+**fail-closed（`merge_allowed=false`）**:
+
+- 人間 approve 観測のみ（active v2 record なし）→ `approval_record_missing`
+- record 投稿 success だが readback 未実施・取得不能 → `approval_record_unverified_before_effect`
+- 値不一致 / HEAD 変更 / proposal 変更 → `approval_record_mismatch`
+- 複数 active / approve-deny 競合 → `approval_record_ambiguous`
+- record 記録失敗時に、既存の人間回答を破棄して勝手に再承認を要求することは禁止。
+  既存回答を保持し、記録経路の復旧または PM 判断へ戻す
+
+監査用の readback 4field（`readback_evidence_url` / `readback_at` / `head_at_readback` / `field_match`）の定義は
+`docs/templates.md`「高リスク scope=merge 監査証跡テンプレ」を正本とする。
 
 #### 高リスク技術ゲートとCI判定（正本）
 

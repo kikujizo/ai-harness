@@ -235,3 +235,58 @@ P3（Issue #73）マージ後に新規作成・新規昇格する項目には帰
 - 所要時間（開始〜終了）:
 - 最終ステータス: 正常終了 / 自動停止 / 人間エスカレーション
 ```
+
+## 9. 高リスク scope=merge 監査証跡テンプレ
+
+起点 commit `08c6c7fb0a42b637bceea9edbe0aeb0b8e2816fc`（PR #135 merge 自身を含む）以降に merged された PR について、
+high-risk かつ `scope=merge` 発効点が成立した対象のみを監査する。通常リスクの自動マージは対象外。
+証跡不足を推測で `pass` にしない。`verdict` は `pass` / `incident` / `unknown` のみ。
+
+**G1 該当パス（漏れ防止の正本）**: 起点以降 merged の PR について `gh api pulls/{n}/files` で変更ファイルを確認し、
+次のいずれかを変更していれば監査候補とする — `AGENTS.md` / `CLAUDE.md` / `.agents/` / `.github/workflows/` /
+`.claude/` / `.codex/`。候補から外す場合は「対象外」節に理由と files URL を残す（表から消して忘れない）。
+Decision Log 単独 PR（`docs/decisions.md` のみ）は G1 非該当として対象外にできる。
+
+```markdown
+# 高リスク scope=merge 限定監査
+
+起点commit: 08c6c7fb0a42b637bceea9edbe0aeb0b8e2816fc
+検索条件: 起点以降に merged された PR のうち、risk=high かつ APPROVAL_SCOPE: merge 発効点が成立したもの
+
+## 対象PR: #{N}
+
+- canonical_proposal_url: {merge前 canonical proposal の exact GitHub comment URL}
+- canonical_proposal_created_at: {ISO-8601}
+- human_approval_source: {人間の明示 approve|deny の観測根拠 URL または「なし」}
+- approval_record_url: {merge前 active HUMAN_APPROVAL_RECORD: v2 の exact URL または「なし」}
+- v2_approval_record_created_at: {ISO-8601 または「なし」}
+- readback_evidence_url: {merge前 readback・完全一致照合結果を記録した GitHub exact comment URL または「なし」}
+- readback_at: {readback完了時刻 ISO-8601 または「なし」}
+- head_at_readback: {照合時 40-hex HEAD または「なし」}
+- field_match: passed|failed|なし
+- subject: {record subject または「なし」}
+- scope: merge
+- human_decision: approve|deny|なし
+- proposed_route: none
+- merge_allowed: true|false|なし
+- stop_reason: {approval_record_missing|approval_record_unverified_before_effect|approval_record_mismatch|approval_record_ambiguous|なし}
+- merge_created_at: {PR merge 時刻 ISO-8601}
+- verdict: pass|incident|unknown
+
+判定基準:
+- merge前に有効record + readback証跡 + HEAD一致 + field_match=passed → pass
+- recordがmerge後、または readback_at >= merged_at → incident
+- recordはmerge前だが readback証跡不足 / readback_at不明 / HEAD・field一致確認不能 → unknown
+- 対象特定不能 → unknown
+```
+
+**readback 4field 定義（本節が正本）**:
+
+- `readback_evidence_url`: merge 前に readback・完全一致照合結果を記録した GitHub exact comment URL
+- `readback_at`: readback 完了時刻（ISO-8601）
+- `head_at_readback`: 照合時の 40-hex HEAD
+- `field_match`: 必須field＋復唱確認の完全一致結果（`passed|failed`）
+
+`HUMAN_APPROVAL_RECORD: v2` の既存 field 定義（`subject` / `scope` / `proposal_url` / `proposed_route` /
+`decision` / `approval_source` / `recorded_by` / `supersedes` 等）はルート `AGENTS.md` 正本の意味を変更しない。
+本テンプレは監査追跡用の追加 field を定義するのみである。

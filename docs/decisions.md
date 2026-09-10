@@ -4,6 +4,151 @@
 
 ---
 
+# Decision: PR #151 順序逸脱の是正と high-risk scope=merge readback-before-effect 契約（Issue #169）
+
+Date: 2026-09-10
+Status: Accepted
+Related Issues: #169, #147
+Related PRs: #151
+
+## 決定事項
+
+1. 高リスク `scope=merge` では、人間の直接 approve 観測だけでは merge 実行条件を満たさない。canonical proposal に紐づく active `HUMAN_APPROVAL_RECORD: v2` を merge 前に GitHub から readback し、必須field＋復唱確認の完全一致を検証した場合だけ merge を許可する（`AGENTS.md` / `docs/harness/roles/chatgpt.md` / `docs/templates.md` へ同期）。
+2. PR #151（https://github.com/kikujizo/ai-harness/pull/151）の成果物は維持し、revert しない。
+3. Issue #147（https://github.com/kikujizo/ai-harness/issues/147）は本是正完了まで close しない。
+
+## 背景・課題
+
+PR #151（https://github.com/kikujizo/ai-harness/pull/151）はカテゴリ③ `risk=high` の `scope=merge` 案件である。
+2026-09-10T01:33:24Z に canonical merge proposal（https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611320167）が投稿された後、
+2026-09-10T01:36:15Z に merge が実行された。merge 前の active v2 record は canonical proposal を指しておらず
+（https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611220058 は `proposal_url` が `HIGH_RISK_TECH_GATE` を指す）、
+readback 証跡も存在しない。merge 後の逸脱記録（https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611344146）と
+事後 attestation（https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611345561）は merge より後に投稿された。
+
+Issue #169（https://github.com/kikujizo/ai-harness/issues/169）で、record-before-effect + readback-before-effect の
+fail-closed 契約を正本へ追記する。
+
+## 採用する方針
+
+- `scope=merge` 発効点は write → readback → validate → merge の順序を省略しない（同一AI連続実行でも同様）
+- record 投稿API success を readback の代替にしない
+- merge 後の record / 事後 attestation を事前承認として遡及利用しない
+- PR #151 の merge 成果物は維持（HEAD 取り違えではなく、契約逸脱の是正はドキュメント追記で行う）
+- Issue #147 は本是正完了まで open を維持
+
+## 採用しない方針 / 却下した代替案
+
+- **事後 attestation を遡及承認扱いする**: 監査時系列を破壊するため却下
+- **PR #151 を自動 revert する**: 成果物の HEAD 取り違えではなく、PM も revert 不要と判定したため却下
+- **人間 approve 観測のみで merge 許可を継続する**: record-before-effect + readback-before-effect を満たさず fail-closed を破るため却下
+
+## 判断理由
+
+- PR #151 は canonical proposal 投稿後に merge されたが、当該 proposal に紐づく merge 前 v2 record と readback 証跡が一次資料上確認できない
+- 事後 record は `merged_at < approval_record.created_at` で事前ゲートに使えない
+- 同型逸脱の再発防止には正本契約の明示と限定監査の記録が必要
+- revert は契約逸脱の是正手段ではなく、成果物維持＋契約追記が PM 判断
+
+## リスク（不可逆4カテゴリ、および包括規則の該当有無）
+
+- 本 Decision の差分は `AGENTS.md` / `docs/harness/roles/chatgpt.md` / `docs/templates.md` / `docs/decisions.md` の追記のみ（カテゴリ③該当）
+- 本エントリは merge / settings_apply / execution の承認を意味しない
+- 過去 incident の自動 revert は行わない（不可逆操作の追加を避ける）
+
+## 影響範囲
+
+- 正本4ファイル（`AGENTS.md` / `docs/harness/roles/chatgpt.md` / `docs/templates.md` / `docs/decisions.md`）
+- 高リスク `scope=merge` の全後続案件（readback 必須）
+- PR #151 成果物（維持、revert なし）
+- Issue #147（close 保留）
+
+## 取り消し手順
+
+- 本 Decision を採用した PR を `git revert` し、本エントリを `Superseded` とする
+- PR #151 の merge 自体を取り消す場合は別 Checkpoint とし、PM の明示判断と高リスクゲートを新規に成立させる（本 Decision では revert しない）
+
+## 見直す条件
+
+- GitHub readback の機械検証手段が別 Checkpoint で導入されたとき
+- `HUMAN_APPROVAL_RECORD: v2` の field 定義が変更されたとき
+- 限定監査で新たな incident が確認されたとき
+
+## 次アクション
+
+- [ ] 本 Decision 同期 PR のレビュー・高リスクゲート成立
+- [ ] Issue #147 の残是正項目の完了確認後に close 判断
+- [ ] 後続 high-risk `scope=merge` 案件で readback 4field 付き監査を実施
+
+### 限定監査（起点 commit 08c6c7fb 以降・high-risk scope=merge）
+
+起点commit: https://github.com/kikujizo/ai-harness/commit/08c6c7fb0a42b637bceea9edbe0aeb0b8e2816fc（2026-08-10T06:46:58Z、PR #135 merge 自身を含む）
+検索条件: 起点以降に merged された PR を `gh pr list --state merged` で全件 account する（path で候補から落とさない）。
+high-risk かどうかはルート `AGENTS.md`「リスク分類（正本）」および同ファイル「自動マージ条件」G1 に従う。
+path 列挙は非網羅的な例示/補助フィルタに限定し、path に一致しないことだけを理由に対象外にしない。
+`risk=high`・`APPROVAL_SCOPE: merge`・`HUMAN_APPROVAL_RECORD: v2` の一次資料で high-risk `scope=merge` 発効点を判定する。
+対象外にする場合は一次資料から `risk=normal` または high-risk `scope=merge` 不成立を説明し、下記「対象外」節に理由と URL を残す。証跡不足を `pass` にしない。
+
+監査対象: 8件（pass 0 / incident 2 / unknown 6）。対象外: 6件（#143 / #155 / #157 / #163 / #167 / #168）。
+
+再照合（2026-09-10、ルート AGENTS.md「リスク分類/G1」正本、path非フィルタ）: 起点以降 merged PR は14件で追加漏れ・欠落なし。
+high-risk かつ `scope=merge` 発効点が一次資料で成立した8件を監査対象とし、件数・verdict に変化なし
+（pass 0 / incident 2 = #152・#151 / unknown 6）。対象外6件は path非該当を理由にせず、一次資料で
+`risk=normal` または high-risk `scope=merge` 不成立を説明して維持する。証跡不足を pass にしていない。
+
+| PR | canonical_proposal_created_at | canonical_proposal_url | human_approval_source | v2_approval_record | readback 4field | merge_created_at | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| #135 | 2026-08-10T06:20:16Z | https://github.com/kikujizo/ai-harness/pull/135#issuecomment-5236600504 | なし | https://github.com/kikujizo/ai-harness/pull/135#issuecomment-5236713503 (2026-08-10T06:34:00Z, merge前, proposal一致) | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし（叙述read-back: https://github.com/kikujizo/ai-harness/pull/135#issuecomment-5236717105 2026-08-10T06:34:28Z） | 2026-08-10T06:46:58Z | unknown |
+| #136 | 2026-08-12T00:54:10Z | https://github.com/kikujizo/ai-harness/pull/136#issuecomment-5260798749 | なし | https://github.com/kikujizo/ai-harness/pull/136#issuecomment-5260821625 (2026-08-12T00:57:53Z, merge前, proposal一致) | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-08-12T01:02:06Z | unknown |
+| #141 | なし | なし | なし | なし（PR issue comments 0件、`gh api issues/141/comments`） | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-08-18T03:06:38Z | unknown |
+| #142 | 2026-08-18T04:52:05Z | https://github.com/kikujizo/ai-harness/pull/142#issuecomment-5323767815 | なし | https://github.com/kikujizo/ai-harness/pull/142#issuecomment-5323851137 (2026-08-18T05:04:40Z, merge前13秒, proposal一致) | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-08-18T05:04:53Z | unknown |
+| #152 | 2026-08-20T06:25:34Z | https://github.com/kikujizo/ai-harness/pull/152#issuecomment-5352234224 | なし | https://github.com/kikujizo/ai-harness/pull/152#issuecomment-5352353466 (2026-08-20T06:40:24Z, **merge後**, proposal一致) | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-08-20T06:40:12Z | incident |
+| #161 | 2026-09-07T07:41:40Z | https://github.com/kikujizo/ai-harness/pull/161#issuecomment-5567057714 | なし | scope=merge の v2 record なし（implementation_start record 参照のみ） | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-09-07T07:45:03Z | unknown |
+| #165 | 2026-09-08T06:40:27Z | https://github.com/kikujizo/ai-harness/pull/165#issuecomment-5580475298 | なし | https://github.com/kikujizo/ai-harness/pull/165#issuecomment-5580688673 (2026-09-08T06:58:31Z, merge前, proposal一致) | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-09-08T06:58:54Z | unknown |
+| #151 | 2026-09-10T01:33:24Z | https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611320167 | なし | merge前 v2 は proposal 不一致（https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611220058 → TECH_GATE URL）。merge後 record: https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611344146 / https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611345561 | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-09-10T01:36:15Z | incident |
+
+#### 対象外（全14件を account したうえで、一次資料により risk=normal または high-risk scope=merge 不成立）
+
+| PR | 理由 | 一次資料 |
+| --- | --- | --- |
+| #143 | PR本文が通常リスク（chatgpt.md 1ファイル、revert相当で復帰可能）と自己申告。G1の観測対象（secret/課金/CI/`AGENTS.md`/`CLAUDE.md`/`.agents/`/`.claude/`/`.codex`/schema/新規依存/hooks）に該当すると一次資料から説明できない。`APPROVAL_SCOPE: merge` 不成立。path非該当だけを理由にしない | https://github.com/kikujizo/ai-harness/pull/143 （PR本文「通常リスク」） / https://github.com/kikujizo/ai-harness/pull/143/files |
+| #168 | PR本文が `risk=normal`、`HIGH_RISK_TECH_GATE: 不要`。変更は導入・運用参照面4ファイル。G1観測対象の正本資産変更なし。`APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/168 （PR本文） / https://github.com/kikujizo/ai-harness/pull/168/files |
+| #155 | PR本文: Codex判定 `risk=normal`、親PR #152 の merge 承認ではない。変更は `docs/decisions.md` のみ。包括規則は Decision Log 書き込みを high-risk 例示するが、本監査は high-risk かつ `scope=merge` 発効点成立に限定。本PRは `APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/155 （PR本文） / https://github.com/kikujizo/ai-harness/pull/155/files |
+| #157 | PR本文: 不可逆4カテゴリ①②③④なし、本記録は PR #151 の merge 承認ではない。`APPROVAL_SCOPE: merge` 不成立。path非該当だけで除外しない | https://github.com/kikujizo/ai-harness/pull/157 （PR本文） / https://github.com/kikujizo/ai-harness/pull/157/files |
+| #163 | PR本文: `risk=normal`、親PR #161 の merge 承認ではない。`APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/163 （PR本文） / https://github.com/kikujizo/ai-harness/pull/163/files |
+| #167 | PR本文: 通常リスク、新しい merge/settings_apply/execution 承認ではない。`APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/167 （PR本文） / https://github.com/kikujizo/ai-harness/pull/167/files |
+
+各 PR 詳細（一次資料）:
+
+**PR #135**（起点 merge 自身）— G1: `AGENTS.md` 変更。HIGH_RISK_TECH_GATE 系: https://github.com/kikujizo/ai-harness/pull/135 。
+merge 前 v2（06:34:00Z）と叙述 read-back（06:34:28Z）は merge（06:46:58Z）より前だが、
+readback 4field（`readback_evidence_url` / `readback_at` / `head_at_readback` / `field_match=passed`）が
+一次資料コメント本文に機械的に揃わない → `unknown`（`incident` ではない）。
+
+**PR #136** — HIGH_RISK_TECH_GATE: https://github.com/kikujizo/ai-harness/pull/136#issuecomment-5238418730 。
+merge 前 v2 は canonical proposal と一致するが、approval record readback 4field なし → `unknown`。
+
+**PR #141** — G1: `.agents/skills/**` 削除 + `AGENTS.md` 変更（カテゴリ③）。PR issue comments 0件
+（`gh api repos/kikujizo/ai-harness/issues/141/comments` → `[]`）。canonical proposal / v2 / readback 証跡を
+特定不能 → `unknown`（`pass` 禁止）。
+
+**PR #142** — G1: `AGENTS.md` 変更。HIGH_RISK_TECH_GATE: https://github.com/kikujizo/ai-harness/pull/142#issuecomment-5323637202 。
+v2（05:04:40Z）は merge（05:04:53Z）13秒前・proposal 一致。readback 4field なし → `unknown`
+（merge 前 record のため `incident` ではない）。
+
+**PR #152** — HIGH_RISK_TECH_GATE: https://github.com/kikujizo/ai-harness/pull/152#issuecomment-5339855020 。
+v2 record が merge 12秒後（06:40:24Z > 06:40:12Z）→ `incident`（事後 record）。
+
+**PR #161** — HIGH_RISK_TECH_GATE 参照: https://github.com/kikujizo/ai-harness/pull/161#issuecomment-5406168900 。
+canonical merge proposal は v2 record を含まず、scope=merge の active v2 なし → `unknown`（`approval_record_missing` 相当）。
+
+**PR #165** — HIGH_RISK_TECH_GATE: https://github.com/kikujizo/ai-harness/pull/165#issuecomment-5580302520（HEAD readback は技術レビュー用。
+approval record readback 4field ではない）。merge 前 v2 あり、readback 4field なし → `unknown`。
+
+**PR #151** — HIGH_RISK_TECH_GATE: https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611159808 。
+canonical merge proposal 後に merge。merge 前 v2 は proposal 不一致。merge 後逸脱記録: https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611344146 。
+事後 attestation: https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611345561 。→ `incident`。
+
 # Decision: PR #161 の高リスク集合SSOT判断（各入口の独自定義禁止・ルート AGENTS.md「リスク分類」へ委譲）
 
 Date: 2026-08-25

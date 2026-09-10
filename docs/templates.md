@@ -235,3 +235,68 @@ P3（Issue #73）マージ後に新規作成・新規昇格する項目には帰
 - 所要時間（開始〜終了）:
 - 最終ステータス: 正常終了 / 自動停止 / 人間エスカレーション
 ```
+
+## 9. 高リスク scope=merge 監査証跡テンプレ
+
+起点 commit `08c6c7fb0a42b637bceea9edbe0aeb0b8e2816fc`（PR #135 merge 自身を含む）以降に merged された PR について、
+high-risk かつ `scope=merge` 発効点が成立した対象のみを監査する。通常リスクの自動マージは対象外。
+証跡不足を推測で `pass` にしない。`verdict` は `pass` / `incident` / `unknown` のみ。
+
+**監査候補抽出（high-risk集合の正本はルート AGENTS.md）**:
+1. 起点以降に merged された PR をまず全件 account する（`gh pr list --state merged`。path で候補から落とさない）。
+2. high-risk かどうかはルート `AGENTS.md`「リスク分類（正本）」および同ファイル「自動マージ条件」G1 に従う。本テンプレは high-risk 集合を独自に定義しない。
+3. path 列挙を使う場合は、候補発見を補助する**非網羅的な例示/補助フィルタ**に限定する。例（網羅ではない）: `AGENTS.md` / `CLAUDE.md` / `.agents/` / `.github/workflows/` / `.claude/` / `.codex/` / secret・`.env`・credential / 課金設定 / schema・migration / 新規依存 / lifecycle script / git hooks / diffだけでは判定できない権限・設定。path に一致しないことだけを理由に対象外にしない。
+4. 対象外にする場合は、一次資料から `risk=normal` または high-risk `scope=merge` 不成立を説明する。理由と files URL を「対象外」節に残す（表から消して忘れない）。
+5. 証拠不足は `unknown` へ倒し、推測で除外/passしない。
+Decision Log 単独 PR も、包括規則の「正本資産への書き込み」該当はルート `AGENTS.md` で判定する。path非該当だけで除外しない。
+
+```markdown
+# 高リスク scope=merge 限定監査
+
+起点commit: 08c6c7fb0a42b637bceea9edbe0aeb0b8e2816fc
+検索条件: 起点以降に merged された PR のうち、risk=high かつ APPROVAL_SCOPE: merge 発効点が成立したもの
+
+## 対象PR: #{N}
+
+- canonical_proposal_url: {merge前 canonical proposal の exact GitHub comment URL}
+- canonical_proposal_created_at: {ISO-8601}
+- human_approval_source: {人間の明示 approve|deny の観測根拠 URL または「なし」}
+- approval_record_url: {merge前 active HUMAN_APPROVAL_RECORD: v2 の exact URL または「なし」}
+- v2_approval_record_created_at: {ISO-8601 または「なし」}
+- readback_evidence_url: {merge前 readback・完全一致照合結果を記録した GitHub exact comment URL または「なし」}
+- readback_at: {readback完了時刻 ISO-8601 または「なし」}
+- head_at_readback: {照合時 40-hex HEAD または「なし」}
+- field_match: passed|failed|なし
+- subject: {record subject または「なし」}
+- scope: merge
+- human_decision: approve|deny|なし
+- proposed_route: none
+- merge_allowed: true|false|なし
+- stop_reason: {ルート AGENTS.md「verdict」節に定義された canonical fail-closed reason、または none}
+- merge_created_at: {PR merge 時刻 ISO-8601}
+- verdict: pass|incident|unknown
+
+判定基準:
+- merge前に有効record + readback証跡 + HEAD一致 + field_match=passed → pass
+- recordがmerge後、または readback_at >= merged_at → incident
+- recordはmerge前だが readback証跡不足 / readback_at不明 / HEAD・field一致確認不能 → unknown
+- 対象特定不能 → unknown
+```
+
+`stop_reason` は閉じた enum ではない。正本はルート `AGENTS.md` の fail-closed 停止理由。代表例（網羅集合ではない）:
+`approval_record_missing` / `approval_record_unverified_before_effect` / `approval_record_mismatch` /
+`approval_record_ambiguous` / `approval_record_invalid` / `approval_record_provenance_unverifiable` /
+`approval_record_no_confirmation_shown` / `approval_record_confirmation_mismatch` /
+`approval_record_executor_missing` / `approval_record_executor_mismatch`。
+将来正本へ追加される canonical reason も含む。監査テンプレ側で集合を固定しない。
+
+**readback 4field 定義（本節が正本）**:
+
+- `readback_evidence_url`: merge 前に readback・完全一致照合結果を記録した GitHub exact comment URL
+- `readback_at`: readback 完了時刻（ISO-8601）
+- `head_at_readback`: 照合時の 40-hex HEAD
+- `field_match`: 必須field＋復唱確認の完全一致結果（`passed|failed`）
+
+`HUMAN_APPROVAL_RECORD: v2` の既存 field 定義（`subject` / `scope` / `proposal_url` / `proposed_route` /
+`decision` / `approval_source` / `recorded_by` / `supersedes` 等）はルート `AGENTS.md` 正本の意味を変更しない。
+本テンプレは監査追跡用の追加 field を定義するのみである。

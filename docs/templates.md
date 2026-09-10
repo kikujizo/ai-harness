@@ -242,10 +242,13 @@ P3（Issue #73）マージ後に新規作成・新規昇格する項目には帰
 high-risk かつ `scope=merge` 発効点が成立した対象のみを監査する。通常リスクの自動マージは対象外。
 証跡不足を推測で `pass` にしない。`verdict` は `pass` / `incident` / `unknown` のみ。
 
-**G1 該当パス（漏れ防止の正本）**: 起点以降 merged の PR について `gh api pulls/{n}/files` で変更ファイルを確認し、
-次のいずれかを変更していれば監査候補とする — `AGENTS.md` / `CLAUDE.md` / `.agents/` / `.github/workflows/` /
-`.claude/` / `.codex/`。候補から外す場合は「対象外」節に理由と files URL を残す（表から消して忘れない）。
-Decision Log 単独 PR（`docs/decisions.md` のみ）は G1 非該当として対象外にできる。
+**監査候補抽出（high-risk集合の正本はルート AGENTS.md）**:
+1. 起点以降に merged された PR をまず全件 account する（`gh pr list --state merged`。path で候補から落とさない）。
+2. high-risk かどうかはルート `AGENTS.md`「リスク分類（正本）」および同ファイル「自動マージ条件」G1 に従う。本テンプレは high-risk 集合を独自に定義しない。
+3. path 列挙を使う場合は、候補発見を補助する**非網羅的な例示/補助フィルタ**に限定する。例（網羅ではない）: `AGENTS.md` / `CLAUDE.md` / `.agents/` / `.github/workflows/` / `.claude/` / `.codex/` / secret・`.env`・credential / 課金設定 / schema・migration / 新規依存 / lifecycle script / git hooks / diffだけでは判定できない権限・設定。path に一致しないことだけを理由に対象外にしない。
+4. 対象外にする場合は、一次資料から `risk=normal` または high-risk `scope=merge` 不成立を説明する。理由と files URL を「対象外」節に残す（表から消して忘れない）。
+5. 証拠不足は `unknown` へ倒し、推測で除外/passしない。
+Decision Log 単独 PR も、包括規則の「正本資産への書き込み」該当はルート `AGENTS.md` で判定する。path非該当だけで除外しない。
 
 ```markdown
 # 高リスク scope=merge 限定監査
@@ -269,7 +272,7 @@ Decision Log 単独 PR（`docs/decisions.md` のみ）は G1 非該当として�
 - human_decision: approve|deny|なし
 - proposed_route: none
 - merge_allowed: true|false|なし
-- stop_reason: {approval_record_missing|approval_record_unverified_before_effect|approval_record_mismatch|approval_record_ambiguous|なし}
+- stop_reason: {ルート AGENTS.md「verdict」節に定義された canonical fail-closed reason、または none}
 - merge_created_at: {PR merge 時刻 ISO-8601}
 - verdict: pass|incident|unknown
 
@@ -279,6 +282,13 @@ Decision Log 単独 PR（`docs/decisions.md` のみ）は G1 非該当として�
 - recordはmerge前だが readback証跡不足 / readback_at不明 / HEAD・field一致確認不能 → unknown
 - 対象特定不能 → unknown
 ```
+
+`stop_reason` は閉じた enum ではない。正本はルート `AGENTS.md` の fail-closed 停止理由。代表例（網羅集合ではない）:
+`approval_record_missing` / `approval_record_unverified_before_effect` / `approval_record_mismatch` /
+`approval_record_ambiguous` / `approval_record_invalid` / `approval_record_provenance_unverifiable` /
+`approval_record_no_confirmation_shown` / `approval_record_confirmation_mismatch` /
+`approval_record_executor_missing` / `approval_record_executor_mismatch`。
+将来正本へ追加される canonical reason も含む。監査テンプレ側で集合を固定しない。
 
 **readback 4field 定義（本節が正本）**:
 

@@ -83,13 +83,18 @@ fail-closed 契約を正本へ追記する。
 ### 限定監査（起点 commit 08c6c7fb 以降・high-risk scope=merge）
 
 起点commit: https://github.com/kikujizo/ai-harness/commit/08c6c7fb0a42b637bceea9edbe0aeb0b8e2816fc（2026-08-10T06:46:58Z、PR #135 merge 自身を含む）
-検索条件: 起点以降に merged された PR を `gh pr list --state merged` で列挙し、G1 該当パス変更の有無を
-`gh api pulls/{n}/files` で確認。G1 正本パス: `AGENTS.md` / `CLAUDE.md` / `.agents/` / `.github/workflows/` /
-`.claude/` / `.codex/`。これらを変更した PR は通常リスクと一次資料で否定できない限り監査候補とし、
-`risk=high`・`APPROVAL_SCOPE: merge`・`HUMAN_APPROVAL_RECORD: v2` の一次資料で high-risk `scope=merge` を判定する。
-候補から除外する場合は下記「対象外」節に理由と URL を残す。証跡不足を `pass` にしない。
+検索条件: 起点以降に merged された PR を `gh pr list --state merged` で全件 account する（path で候補から落とさない）。
+high-risk かどうかはルート `AGENTS.md`「リスク分類（正本）」および同ファイル「自動マージ条件」G1 に従う。
+path 列挙は非網羅的な例示/補助フィルタに限定し、path に一致しないことだけを理由に対象外にしない。
+`risk=high`・`APPROVAL_SCOPE: merge`・`HUMAN_APPROVAL_RECORD: v2` の一次資料で high-risk `scope=merge` 発効点を判定する。
+対象外にする場合は一次資料から `risk=normal` または high-risk `scope=merge` 不成立を説明し、下記「対象外」節に理由と URL を残す。証跡不足を `pass` にしない。
 
 監査対象: 8件（pass 0 / incident 2 / unknown 6）。対象外: 6件（#143 / #155 / #157 / #163 / #167 / #168）。
+
+再照合（2026-09-10、ルート AGENTS.md「リスク分類/G1」正本、path非フィルタ）: 起点以降 merged PR は14件で追加漏れ・欠落なし。
+high-risk かつ `scope=merge` 発効点が一次資料で成立した8件を監査対象とし、件数・verdict に変化なし
+（pass 0 / incident 2 = #152・#151 / unknown 6）。対象外6件は path非該当を理由にせず、一次資料で
+`risk=normal` または high-risk `scope=merge` 不成立を説明して維持する。証跡不足を pass にしていない。
 
 | PR | canonical_proposal_created_at | canonical_proposal_url | human_approval_source | v2_approval_record | readback 4field | merge_created_at | verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -102,16 +107,16 @@ fail-closed 契約を正本へ追記する。
 | #165 | 2026-09-08T06:40:27Z | https://github.com/kikujizo/ai-harness/pull/165#issuecomment-5580475298 | なし | https://github.com/kikujizo/ai-harness/pull/165#issuecomment-5580688673 (2026-09-08T06:58:31Z, merge前, proposal一致) | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-09-08T06:58:54Z | unknown |
 | #151 | 2026-09-10T01:33:24Z | https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611320167 | なし | merge前 v2 は proposal 不一致（https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611220058 → TECH_GATE URL）。merge後 record: https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611344146 / https://github.com/kikujizo/ai-harness/pull/151#issuecomment-5611345561 | readback_evidence_url=なし / readback_at=なし / head_at_readback=なし / field_match=なし | 2026-09-10T01:36:15Z | incident |
 
-#### 対象外（G1 変更 PR のうち high-risk scope=merge 不成立）
+#### 対象外（全14件を account したうえで、一次資料により risk=normal または high-risk scope=merge 不成立）
 
 | PR | 理由 | 一次資料 |
 | --- | --- | --- |
-| #143 | `AGENTS.md` 非変更（`docs/harness/roles/chatgpt.md` 等のみ）。`risk=high` / `APPROVAL_SCOPE: merge` マーカー 0件 | https://github.com/kikujizo/ai-harness/pull/143/files |
-| #168 | `AGENTS.md` 非変更（docs 参照面のみ）。high-risk `scope=merge` 発効点不成立 | https://github.com/kikujizo/ai-harness/pull/168/files |
-| #155 | Decision Log 単独（`docs/decisions.md` のみ）。G1 正本資産非変更 | https://github.com/kikujizo/ai-harness/pull/155/files |
-| #157 | Decision Log 単独（`docs/decisions.md` のみ） | https://github.com/kikujizo/ai-harness/pull/157/files |
-| #163 | Decision Log 単独（`docs/decisions.md` のみ） | https://github.com/kikujizo/ai-harness/pull/163/files |
-| #167 | Decision Log 単独（`docs/decisions.md` のみ） | https://github.com/kikujizo/ai-harness/pull/167/files |
+| #143 | PR本文が通常リスク（chatgpt.md 1ファイル、revert相当で復帰可能）と自己申告。G1の観測対象（secret/課金/CI/`AGENTS.md`/`CLAUDE.md`/`.agents/`/`.claude/`/`.codex`/schema/新規依存/hooks）に該当すると一次資料から説明できない。`APPROVAL_SCOPE: merge` 不成立。path非該当だけを理由にしない | https://github.com/kikujizo/ai-harness/pull/143 （PR本文「通常リスク」） / https://github.com/kikujizo/ai-harness/pull/143/files |
+| #168 | PR本文が `risk=normal`、`HIGH_RISK_TECH_GATE: 不要`。変更は導入・運用参照面4ファイル。G1観測対象の正本資産変更なし。`APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/168 （PR本文） / https://github.com/kikujizo/ai-harness/pull/168/files |
+| #155 | PR本文: Codex判定 `risk=normal`、親PR #152 の merge 承認ではない。変更は `docs/decisions.md` のみ。包括規則は Decision Log 書き込みを high-risk 例示するが、本監査は high-risk かつ `scope=merge` 発効点成立に限定。本PRは `APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/155 （PR本文） / https://github.com/kikujizo/ai-harness/pull/155/files |
+| #157 | PR本文: 不可逆4カテゴリ①②③④なし、本記録は PR #151 の merge 承認ではない。`APPROVAL_SCOPE: merge` 不成立。path非該当だけで除外しない | https://github.com/kikujizo/ai-harness/pull/157 （PR本文） / https://github.com/kikujizo/ai-harness/pull/157/files |
+| #163 | PR本文: `risk=normal`、親PR #161 の merge 承認ではない。`APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/163 （PR本文） / https://github.com/kikujizo/ai-harness/pull/163/files |
+| #167 | PR本文: 通常リスク、新しい merge/settings_apply/execution 承認ではない。`APPROVAL_SCOPE: merge` 不成立 | https://github.com/kikujizo/ai-harness/pull/167 （PR本文） / https://github.com/kikujizo/ai-harness/pull/167/files |
 
 各 PR 詳細（一次資料）:
 
